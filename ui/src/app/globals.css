@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background-color: #0a0f1e;
+  color: #c8d8f0;
+  font-family: var(--font-body);
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0a0f1e; }
+::-webkit-scrollbar-thumb { background: #1e2e4a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #00d4ff44; }
+
+/* React Flow overrides */
+.react-flow__background { background: transparent !important; }
+.react-flow__controls { background: #0f1628 !important; border: 1px solid #1e2e4a !important; border-radius: 8px !important; }
+.react-flow__controls-button { background: transparent !important; border: none !important; color: #4a5a7a !important; }
+.react-flow__controls-button:hover { background: #1c2744 !important; color: #00d4ff !important; }
+.react-flow__minimap { background: #0f1628 !important; border: 1px solid #1e2e4a !important; border-radius: 8px !important; }
+
+@layer utilities {
+  .font-display { font-family: var(--font-display); }
+  .font-mono { font-family: var(--font-mono); }
+
+  .card {
+    @apply bg-surface-1 border border-border rounded-xl p-5 shadow-card;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-surface hover:bg-accent/90 hover:shadow-glow;
+  }
+
+  .btn-ghost {
+    @apply btn text-muted hover:text-accent hover:bg-accent-glow border border-transparent hover:border-accent/20;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20;
+  }
+
+  .input {
+    @apply w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-white placeholder-muted
+           focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all;
+  }
+
+  .select {
+    @apply input appearance-none cursor-pointer;
+  }
+
+  .label {
+    @apply block text-xs font-mono text-muted mb-1.5 uppercase tracking-wider;
+  }
+
+  .tier-1 { @apply text-danger; }
+  .tier-2 { @apply text-warning; }
+  .tier-3 { @apply text-success; }
+  .tier-4 { @apply text-muted; }
+}

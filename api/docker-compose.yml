@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  appcloud-db:
+    image: neo4j:5.18-community
+    container_name: appcloud-db
+    ports:
+      - "7474:7474"   # Neo4j Browser
+      - "7687:7687"   # Bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/appcloudmvp
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_memory_pagecache_size=512M
+      - NEO4J_dbms_memory_heap_max__size=512M
+    volumes:
+      - ./data/neo4j/data:/data
+      - ./data/neo4j/logs:/logs
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "appcloudmvp", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  appcloud-api:
+    build: .
+    container_name: appcloud-api
+    ports:
+      - "3000:3000"
+    environment:
+      - NEO4J_URI=bolt://appcloud-db:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=appcloudmvp
+      - PORT=3000
+      - HOST=0.0.0.0
+    volumes:
+      - ./src:/app/src
+      - node_modules:/app/node_modules
+    depends_on:
+      appcloud-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  node_modules:
+  neo4j_data:
+  neo4j_logs:
