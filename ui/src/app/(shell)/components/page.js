@@ -1,117 +1,106 @@
-// routes/components.js
-export default async function componentRoutes(fastify) {
-  const { query, write } = fastify.neo4j
+'use client'
+import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
 
-  // GET /components
-  fastify.get('/', async (req, reply) => {
-    const { type } = req.query
-    const records = await query(`
-      MATCH (c:Component)
-      ${type ? 'WHERE c.type = $type' : ''}
-      OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
-      RETURN c, a.name AS application, a.id AS applicationId
-      ORDER BY c.name
-    `, { type })
-    return records.map(r => ({
-      ...r.get('c').properties,
-      application: r.get('application'),
-      applicationId: r.get('applicationId'),
-    }))
-  })
+const mono = { fontFamily: 'monospace' }
 
-  // GET /components/:id
-  fastify.get('/:id', async (req, reply) => {
-    const records = await query(`
-      MATCH (c:Component {id: $id})
-      OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
-      OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
-      OPTIONAL MATCH (c)-[out:CONNECTS_TO]->(target:Component)
-      OPTIONAL MATCH (source:Component)-[inc:CONNECTS_TO]->(c)
-      RETURN c,
-        a.name AS application,
-        collect(DISTINCT i) AS infra,
-        collect(DISTINCT {name: target.name, id: target.id, protocol: out.protocol, port: out.port}) AS outbound,
-        collect(DISTINCT {name: source.name, id: source.id, protocol: inc.protocol, port: inc.port}) AS inbound
-    `, { id: req.params.id })
+function Spinner() {
+  return (
+    <div style={{ padding: 24, display: 'flex', justifyContent: 'center' }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid #0f172a', borderTop: '2px solid #22c55e', animation: 'spin .8s linear infinite' }} />
+    </div>
+  )
+}
 
-    if (!records.length) return reply.notFound('Component not found')
-    const r = records[0]
-    return {
-      ...r.get('c').properties,
-      application: r.get('application'),
-      infra: r.get('infra').map(i => i.properties),
-      outbound: r.get('outbound').filter(o => o.name !== null),
-      inbound: r.get('inbound').filter(i => i.name !== null)
-    }
-  })
+export default function ComponentsPage() {
+  const [components, setComponents] = useState([])
+  const [apps, setApps] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
+  const [form, setForm] = useState({ name: '', type: 'API', runtime: '', applicationId: '' })
 
-  // POST /components
-  fastify.post('/', async (req, reply) => {
-    const { name, type, runtime, applicationId } = req.body
-    const records = await write(`
-      CREATE (c:Component {id: randomUUID(), name: $name, type: $type, runtime: $runtime})
-      WITH c
-      OPTIONAL MATCH (a:Application {id: $applicationId})
-      FOREACH (_ IN CASE WHEN a IS NOT NULL THEN [1] ELSE [] END |
-        CREATE (a)-[:CONTAINS]->(c)
-      )
-      RETURN c
-    `, { name, type, runtime, applicationId: applicationId || null })
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [comps, appsList] = await Promise.all([api.components.list(), api.applications.list()])
+      setComponents(comps)
+      setApps(appsList)
+    } catch (err) {
+      console.error(err)
+    } finally { setLoading(false) }
+  }
 
-    reply.code(201)
-    return records[0].get('c').properties
-  })
+  useEffect(() => { load() }, [])
 
-  // PATCH /components/:id
-  fastify.patch('/:id', async (req, reply) => {
-    const { name, type, runtime } = req.body
-    const records = await write(`
-      MATCH (c:Component {id: $id})
-      SET c += {
-        name: coalesce($name, c.name),
-        type: coalesce($type, c.type),
-        runtime: coalesce($runtime, c.runtime)
-      }
-      RETURN c
-    `, { id: req.params.id, name, type, runtime })
+  const create = async () => {
+    await api.components.create(form)
+    setShowCreate(false)
+    setForm({ name: '', type: 'API', runtime: '', applicationId: '' })
+    load()
+  }
 
-    if (!records.length) return reply.notFound('Component not found')
-    return records[0].get('c').properties
-  })
+  return (
+    <div style={{ padding: 18, fontFamily: 'monospace' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Components</div>
+          <div style={{ fontSize: 11, color: '#64748b' }}>List of registered components</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={load} style={{ padding: '6px 12px', borderRadius: 6 }}>Refresh</button>
+          <button onClick={() => setShowCreate(true)} style={{ padding: '6px 12px', borderRadius: 6, background: '#22c55e', border: 'none', color: '#000' }}>Create</button>
+        </div>
+      </div>
 
-  // DELETE /components/:id
-  fastify.delete('/:id', async (req, reply) => {
-    await write('MATCH (c:Component {id: $id}) DETACH DELETE c', { id: req.params.id })
-    reply.code(204).send()
-  })
+      {loading ? <Spinner /> : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {components.length === 0 && <div style={{ color: '#64748b' }}>No components found.</div>}
+          {components.map(c => (
+            <div key={c.id} style={{ padding: 12, borderRadius: 8, background: '#071026', border: '1px solid #0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{c.name}</div>
+                <div style={{ fontSize: 11, color: '#94a3b8' }}>{c.type} · {c.runtime || '—'} {c.application ? `· ${c.application}` : ''}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => navigator.clipboard?.writeText(c.id)} style={{ padding: '6px 10px', borderRadius: 6 }}>Copy ID</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
-  // POST /components/:id/connections — add CONNECTS_TO edge
-  fastify.post('/:id/connections', async (req, reply) => {
-    const { targetId, protocol, port } = req.body
-    await write(`
-      MATCH (src:Component {id: $id}), (dst:Component {id: $targetId})
-      MERGE (src)-[r:CONNECTS_TO {protocol: $protocol, port: $port}]->(dst)
-    `, { id: req.params.id, targetId, protocol, port: parseInt(port) })
-
-    reply.code(201).send({ message: 'Connection created' })
-  })
-
-  // DELETE /components/:id/connections/:targetId
-  fastify.delete('/:id/connections/:targetId', async (req, reply) => {
-    await write(`
-      MATCH (src:Component {id: $id})-[r:CONNECTS_TO]->(dst:Component {id: $targetId})
-      DELETE r
-    `, { id: req.params.id, targetId: req.params.targetId })
-    reply.code(204).send()
-  })
-
-  // POST /components/:id/deploy — link to Infra
-  fastify.post('/:id/deploy', async (req, reply) => {
-    const { infraId } = req.body
-    await write(`
-      MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})
-      MERGE (c)-[:DEPLOYED_ON]->(i)
-    `, { id: req.params.id, infraId })
-    reply.code(201).send({ message: 'Deployed' })
-  })
+      {showCreate && (
+        <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+          <div style={{ position: 'absolute', inset: 0, background: '#000000aa' }} onClick={() => setShowCreate(false)} />
+          <div style={{ position: 'relative', width: 520, background: '#071026', border: '1px solid #0f172a', borderRadius: 12, padding: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Create Component</div>
+              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 20 }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <input placeholder="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={{ padding: 10, borderRadius: 8, border: '1px solid #0f172a' }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} style={{ padding: 10, borderRadius: 8, border: '1px solid #0f172a', flex: 1 }}>
+                  <option>API</option>
+                  <option>DB</option>
+                  <option>Worker</option>
+                  <option>UI</option>
+                </select>
+                <input placeholder="Runtime" value={form.runtime} onChange={e => setForm(f => ({ ...f, runtime: e.target.value }))} style={{ padding: 10, borderRadius: 8, border: '1px solid #0f172a', width: 180 }} />
+              </div>
+              <select value={form.applicationId} onChange={e => setForm(f => ({ ...f, applicationId: e.target.value }))} style={{ padding: 10, borderRadius: 8, border: '1px solid #0f172a' }}>
+                <option value="">— no application —</option>
+                {apps.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button onClick={() => setShowCreate(false)} style={{ padding: '8px 12px', borderRadius: 8 }}>Cancel</button>
+                <button onClick={create} style={{ padding: '8px 12px', borderRadius: 8, background: '#22c55e', border: 'none', color: '#000' }}>Create</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

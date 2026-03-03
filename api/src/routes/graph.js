@@ -127,6 +127,77 @@ const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNum
     }
   })
 
+
+  // GET /graph/topology — complete graph in one query, pre-joined
+  // Returns nodes (apps, components, infra) and edges (contains, connects, deploys)
+  fastify.get('/topology', async (req, reply) => {
+    const [appRecords, compRecords, connRecords, deployRecords] = await Promise.all([
+      query(`
+        MATCH (a:Application)
+        OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
+        RETURN a, collect(DISTINCT {id: c.id, name: c.name, type: c.type, runtime: c.runtime}) AS components
+        ORDER BY a.tier ASC, a.name ASC
+      `),
+      query(`
+        MATCH (c:Component)
+        OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
+        RETURN c, a.id AS appId, a.name AS appName
+      `),
+      query(`
+        MATCH (c1:Component)-[r:CONNECTS_TO]->(c2:Component)
+        OPTIONAL MATCH (a1:Application)-[:CONTAINS]->(c1)
+        OPTIONAL MATCH (a2:Application)-[:CONTAINS]->(c2)
+        RETURN c1.id AS fromId, c1.name AS fromName, a1.id AS fromAppId,
+               c2.id AS toId,   c2.name AS toName,   a2.id AS toAppId,
+               r.protocol AS protocol, r.port AS port
+      `),
+      query(`
+        MATCH (c:Component)-[:DEPLOYED_ON]->(i:Infra)
+        OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
+        RETURN c.id AS compId, i.id AS infraId, i.name AS infraName,
+               i.provider AS provider, i.region AS region, i.resource_type AS resourceType
+      `)
+    ])
+
+    const apps = appRecords.map(r => ({
+      ...r.get('a').properties,
+      components: r.get('components').filter(c => c.id !== null)
+    }))
+
+    const components = compRecords.map(r => ({
+      ...r.get('c').properties,
+      appId: r.get('appId'),
+      appName: r.get('appName'),
+    }))
+
+    const connections = connRecords.map(r => ({
+      fromId:    r.get('fromId'),
+      fromName:  r.get('fromName'),
+      fromAppId: r.get('fromAppId'),
+      toId:      r.get('toId'),
+      toName:    r.get('toName'),
+      toAppId:   r.get('toAppId'),
+      protocol:  r.get('protocol') || 'HTTPS',
+      port:      toInt(r.get('port')),
+    }))
+
+    // Deduplicate infra nodes
+    const infraMap = {}
+    deployRecords.forEach(r => {
+      const id = r.get('infraId')
+      if (!infraMap[id]) infraMap[id] = {
+        id, name: r.get('infraName'),
+        provider: r.get('provider'), region: r.get('region'),
+        resourceType: r.get('resourceType'),
+      }
+    })
+    const deployments = deployRecords.map(r => ({
+      compId: r.get('compId'), infraId: r.get('infraId')
+    }))
+
+    return { apps, components, connections, deployments, infra: Object.values(infraMap) }
+  })
+
   // GET /graph/snapshots — list snapshots
   fastify.get('/snapshots', async (req, reply) => {
     const records = await query(`

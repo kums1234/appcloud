@@ -19,6 +19,7 @@ export const api = {
     summary: () => req('/graph/summary'),
     crossAppDeps: () => req('/graph/cross-app-dependencies'),
     allConnections: () => req('/graph/all-connections'),
+    topology: () => req('/graph/topology'),
     impact: (infraId) => req(`/graph/impact?infraId=${infraId}`),
     path: (from, to) => req(`/graph/path?from=${from}&to=${to}`),
     snapshots: () => req('/graph/snapshots'),
