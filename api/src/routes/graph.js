@@ -46,27 +46,64 @@ const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNum
   })
 
   // GET /graph/summary — high-level counts and stats
+  // Uses OPTIONAL MATCH so it never returns 0 rows even on empty DB
   fastify.get('/summary', async (req, reply) => {
-    const records = await query(`
-      MATCH (a:Application) WITH count(a) AS appCount
-      MATCH (c:Component) WITH appCount, count(c) AS componentCount
-      MATCH (i:Infra) WITH appCount, componentCount, count(i) AS infraCount
-      MATCH (ch:Change) WITH appCount, componentCount, infraCount, count(ch) AS changeCount
-      MATCH (u:User) WITH appCount, componentCount, infraCount, changeCount, count(u) AS userCount
-      MATCH (ch2:Change {status: "draft"}) WITH appCount, componentCount, infraCount, changeCount, userCount, count(ch2) AS pendingChanges
-      MATCH (i2:Infra {public: true}) WITH appCount, componentCount, infraCount, changeCount, userCount, pendingChanges, count(i2) AS publicInfra
-      RETURN appCount, componentCount, infraCount, changeCount, userCount, pendingChanges, publicInfra
-    `)
+    const [countRecords, compTypeRecords, infraProviderRecords, connRecords] = await Promise.all([
+      // Core counts — all OPTIONAL so empty DB still returns one row
+      query(`
+        OPTIONAL MATCH (a:Application)
+        OPTIONAL MATCH (c:Component)
+        OPTIONAL MATCH (i:Infra)
+        OPTIONAL MATCH (ch:Change)
+        OPTIONAL MATCH (u:User)
+        OPTIONAL MATCH (ch2:Change {status: "draft"})
+        OPTIONAL MATCH (i2:Infra {public: true})
+        RETURN
+          count(DISTINCT a)   AS appCount,
+          count(DISTINCT c)   AS componentCount,
+          count(DISTINCT i)   AS infraCount,
+          count(DISTINCT ch)  AS changeCount,
+          count(DISTINCT u)   AS userCount,
+          count(DISTINCT ch2) AS pendingChanges,
+          count(DISTINCT i2)  AS publicInfra
+      `),
+      // Component breakdown by type
+      query(`
+        MATCH (c:Component)
+        RETURN c.type AS type, count(c) AS cnt
+        ORDER BY cnt DESC
+      `),
+      // Infra breakdown by provider
+      query(`
+        MATCH (i:Infra)
+        RETURN i.provider AS provider, count(i) AS cnt
+        ORDER BY cnt DESC
+      `),
+      // Connection count
+      query(`
+        OPTIONAL MATCH ()-[r:CONNECTS_TO]->()
+        RETURN count(r) AS connCount
+      `),
+    ])
 
-    const r = records[0]
+    const r = countRecords[0]
     return {
-      applications: toInt(r.get('appCount')),
-      components: toInt(r.get('componentCount')),
-      infraResources: toInt(r.get('infraCount')),
-      changes: toInt(r.get('changeCount')),
-      users: toInt(r.get('userCount')),
-      pendingChanges: toInt(r.get('pendingChanges')),
-      publicInfraCount: toInt(r.get('publicInfra'))
+      applications:    toInt(r.get('appCount')),
+      components:      toInt(r.get('componentCount')),
+      infraResources:  toInt(r.get('infraCount')),
+      changes:         toInt(r.get('changeCount')),
+      users:           toInt(r.get('userCount')),
+      pendingChanges:  toInt(r.get('pendingChanges')),
+      publicInfraCount: toInt(r.get('publicInfra')),
+      connections:     toInt(connRecords[0].get('connCount')),
+      componentsByType: compTypeRecords.map(r => ({
+        type: r.get('type') || 'Unknown',
+        count: toInt(r.get('cnt')),
+      })),
+      infraByProvider: infraProviderRecords.map(r => ({
+        provider: r.get('provider') || 'unknown',
+        count: toInt(r.get('cnt')),
+      })),
     }
   })
 
