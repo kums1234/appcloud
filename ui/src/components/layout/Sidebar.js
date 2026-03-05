@@ -9,6 +9,8 @@ const nav = [
   { href: '/infra',        label: 'Infrastructure', icon: '◫' },
   { href: '/changes',      label: 'Changes',        icon: '⟳' },
   { href: '/users',        label: 'Users',          icon: '◎' },
+  { divider: true },
+  { href: '/integrations', label: 'Integrations',   icon: '⟁', accent: true },
 ]
 
 export default function Sidebar() {
@@ -35,22 +37,28 @@ export default function Sidebar() {
       </div>
 
       <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {nav.map(({ href, label, icon }) => {
+        {nav.map(({ href, label, icon, divider, accent }) => {
+          if (divider) return (
+            <div key="divider" style={{ height: 1, background: '#0f1f35', margin: '8px 4px' }} />
+          )
           const active = path === href || path.startsWith(href + '/')
+          const color  = active ? (accent ? '#2dd4bf' : '#22c55e') : accent ? '#334155' : '#334155'
+          const bg     = active ? (accent ? '#2dd4bf18' : '#22c55e18') : 'transparent'
+          const border = active ? (accent ? '#2dd4bf44' : '#22c55e44') : 'transparent'
           return (
             <Link key={href} href={href} style={{ textDecoration: 'none' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '9px 12px', borderRadius: 8,
-                border: active ? '1px solid #22c55e44' : '1px solid transparent',
-                background: active ? '#22c55e18' : 'transparent',
-                color: active ? '#22c55e' : '#334155',
+                border: `1px solid ${border}`,
+                background: bg,
+                color: color,
                 fontSize: 12, fontWeight: active ? 700 : 400,
                 cursor: 'pointer', transition: 'all 0.15s', letterSpacing: '0.01em',
               }}>
                 <span style={{ fontSize: 13, width: 16, textAlign: 'center', flexShrink: 0 }}>{icon}</span>
                 <span style={{ flex: 1 }}>{label}</span>
-                {active && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />}
+                {active && <div style={{ width: 5, height: 5, borderRadius: '50%', background: color, boxShadow: `0 0 8px ${color}` }} />}
               </div>
             </Link>
           )
