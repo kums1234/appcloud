@@ -67,6 +67,7 @@ export const api = {
     list: (status) => req(`/changes${status ? `?status=${status}` : ''}`),
     get: (id) => req(`/changes/${id}`),
     blastRadius: (id) => req(`/changes/${id}/blast-radius`),
+    impactPreview: (targetIds) => req('/changes/impact-preview', { method: 'POST', body: JSON.stringify({ targetIds }) }),
     create: (data) => req('/changes', { method: 'POST', body: JSON.stringify(data) }),
     approve: (id, userId) => req(`/changes/${id}/approve`, { method: 'POST', body: JSON.stringify({ userId }) }),
     reject: (id, userId, reason) => req(`/changes/${id}/reject`, { method: 'POST', body: JSON.stringify({ userId, reason }) }),

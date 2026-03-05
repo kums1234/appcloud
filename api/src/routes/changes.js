@@ -1,4 +1,6 @@
 // routes/changes.js
+const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNumber() : Number(v)
+
 export default async function changeRoutes(fastify) {
   const { query, write } = fastify.neo4j
 
@@ -114,6 +116,89 @@ export default async function changeRoutes(fastify) {
 
     if (!records.length) return reply.badRequest('Change not found or not in draft status')
     return records[0].get('ch').properties
+  })
+
+  // POST /changes/impact-preview — analyse impact BEFORE creating a change
+  // Body: { targetIds: [id, ...] }  (mix of Component and Infra IDs)
+  fastify.post('/impact-preview', async (req, reply) => {
+    const { targetIds = [] } = req.body
+    if (!targetIds.length) return { affectedComponents: [], affectedApplications: [], teams: [], riskScore: 0 }
+
+    // For each target (Component or Infra), walk outward through the graph
+    const [compRecords, infraRecords] = await Promise.all([
+      // Direct component targets + everything that CONNECTS_TO them (transitive)
+      query(`
+        UNWIND $ids AS tid
+        OPTIONAL MATCH (c:Component {id: tid})
+        OPTIONAL MATCH (c)<-[:CONTAINS]-(a:Application)
+        OPTIONAL MATCH (upstream:Component)-[:CONNECTS_TO*1..4]->(c)
+        OPTIONAL MATCH (upstream)<-[:CONTAINS]-(upApp:Application)
+        RETURN
+          collect(DISTINCT {id: c.id, name: c.name, type: c.type, appName: a.name, appId: a.id, appOwner: a.owner, appTier: a.tier}) AS directComps,
+          collect(DISTINCT {id: upstream.id, name: upstream.name, type: upstream.type, appName: upApp.name, appId: upApp.id, appOwner: upApp.owner, appTier: upApp.tier}) AS upstreamComps
+      `, { ids: targetIds }),
+
+      // Infra targets — find all components deployed on them + their upstream dependents
+      query(`
+        UNWIND $ids AS tid
+        OPTIONAL MATCH (i:Infra {id: tid})
+        OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+        OPTIONAL MATCH (c)<-[:CONTAINS]-(a:Application)
+        OPTIONAL MATCH (upstream:Component)-[:CONNECTS_TO*1..4]->(c)
+        OPTIONAL MATCH (upstream)<-[:CONTAINS]-(upApp:Application)
+        RETURN
+          collect(DISTINCT {id: i.id, name: i.name, provider: i.provider, resourceType: i.resource_type}) AS infraNodes,
+          collect(DISTINCT {id: c.id, name: c.name, type: c.type, appName: a.name, appId: a.id, appOwner: a.owner, appTier: a.tier}) AS deployedComps,
+          collect(DISTINCT {id: upstream.id, name: upstream.name, type: upstream.type, appName: upApp.name, appId: upApp.id, appOwner: upApp.owner, appTier: upApp.tier}) AS upstreamComps
+      `, { ids: targetIds }),
+    ])
+
+    const cr = compRecords[0], ir = infraRecords[0]
+
+    // Merge and deduplicate all affected components
+    const allComps = [
+      ...(cr?.get('directComps')   || []),
+      ...(cr?.get('upstreamComps') || []),
+      ...(ir?.get('deployedComps') || []),
+      ...(ir?.get('upstreamComps') || []),
+    ].filter(c => c.id)
+
+    const seenComps = new Set()
+    const affectedComponents = allComps.filter(c => {
+      if (seenComps.has(c.id)) return false
+      seenComps.add(c.id); return true
+    })
+
+    // Unique affected applications with owner info
+    const appMap = {}
+    affectedComponents.forEach(c => {
+      if (c.appId && !appMap[c.appId]) {
+        appMap[c.appId] = { id: c.appId, name: c.appName, owner: c.appOwner, tier: toInt(c.appTier) }
+      }
+    })
+    const affectedApplications = Object.values(appMap)
+
+    // Teams = unique owners of affected apps + infra owners (via app owners for now)
+    const teamSet = new Set(affectedApplications.map(a => a.owner).filter(Boolean))
+    const teams = [...teamSet].map(t => ({ name: t }))
+
+    // Risk score heuristic:
+    // Base: 2 per Tier-1 app, 1.5 per Tier-2, 1 per Tier-3+
+    // +1 per 3 affected components, max 10
+    const tierScore = affectedApplications.reduce((s, a) => {
+      return s + (a.tier === 1 ? 2 : a.tier === 2 ? 1.5 : 1)
+    }, 0)
+    const compScore = affectedComponents.length / 3
+    const infraNodes = ir?.get('infraNodes')?.filter(i => i.id) || []
+    const riskScore  = Math.min(10, parseFloat((tierScore + compScore + (infraNodes.length > 0 ? 1 : 0)).toFixed(1)))
+
+    return {
+      affectedComponents,
+      affectedApplications,
+      teams,
+      infraNodes,
+      riskScore,
+    }
   })
 
   // GET /changes/:id/blast-radius — everything a change touches
