@@ -1,13 +1,13 @@
 version: '3.8'
 
 services:
+  # ── Neo4j — graph topology & relationships ──────────────────────────────────
   db:
     image: neo4j:latest
     container_name: appcloud-db
     ports:
-      - "7474:7474"   # Neo4j Browser
-      - "7687:7687"   # Bolt protocol
-    # Custom entrypoint reads secret files and sets NEO4J_AUTH before Neo4j starts.
+      - "7474:7474"
+      - "7687:7687"
     entrypoint: ["/entrypoint/neo4j-entrypoint.sh"]
     environment:
       - NEO4J_PLUGINS=["apoc"]
@@ -32,6 +32,31 @@ services:
       - db_password
     restart: unless-stopped
 
+  # ── PostgreSQL — users, audit logs, sync history, reporting ─────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: appcloud-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=appcloud
+      - POSTGRES_USER_FILE=/run/secrets/pg_username
+      - POSTGRES_PASSWORD_FILE=/run/secrets/pg_password
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $(cat /run/secrets/pg_username) -d appcloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    secrets:
+      - pg_username
+      - pg_password
+    restart: unless-stopped
+
+  # ── Fastify API ──────────────────────────────────────────────────────────────
   api:
     build: ./api
     container_name: appcloud-api
@@ -39,13 +64,19 @@ services:
       - "3000:3000"
     environment:
       - NEO4J_URI=bolt://db:7687
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=appcloud
       - PORT=3000
       - HOST=0.0.0.0
       - DB_USERNAME_FILE=/run/secrets/db_username
       - DB_PASSWORD_FILE=/run/secrets/db_password
+      - PG_USERNAME_FILE=/run/secrets/pg_username
+      - PG_PASSWORD_FILE=/run/secrets/pg_password
     secrets:
       - db_username
       - db_password
+      - pg_username
+      - pg_password
     volumes:
       - ./api/src:/app/src
       - ./api/node_modules:/app/node_modules
@@ -54,6 +85,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Next.js UI ───────────────────────────────────────────────────────────────
   ui:
     build: ./ui
     container_name: appcloud-ui
@@ -70,3 +102,7 @@ secrets:
     file: ./secrets/db_username.txt
   db_password:
     file: ./secrets/db_password.txt
+  pg_username:
+    file: ./secrets/pg_username.txt
+  pg_password:
+    file: ./secrets/pg_password.txt

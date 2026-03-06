@@ -3,14 +3,15 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const nav = [
-  { href: '/dashboard',    label: 'Dashboard',      icon: '▦' },
-  { href: '/graph',        label: 'Graph View',     icon: '⬡' },
-  { href: '/applications', label: 'Applications',   icon: '◈' },
-  { href: '/infra',        label: 'Infrastructure', icon: '◫' },
-  { href: '/changes',      label: 'Changes',        icon: '⟳' },
-  { href: '/users',        label: 'Users',          icon: '◎' },
+  { href: '/dashboard',     label: 'Dashboard',      icon: '▦' },
+  { href: '/graph',         label: 'Graph View',     icon: '⬡' },
+  { href: '/applications',  label: 'Applications',   icon: '◈' },
+  { href: '/components',    label: 'Components',     icon: '⬟' },
+  { href: '/infra',         label: 'Infrastructure', icon: '◫' },
+  { href: '/changes',       label: 'Changes',        icon: '⟳' },
   { divider: true },
-  { href: '/integrations', label: 'Integrations',   icon: '⟁', accent: true },
+  { href: '/integrations',  label: 'Integrations',   icon: '⟁', accent: '#2dd4bf' },
+  { href: '/users',         label: 'Users',          icon: '◎', accent: '#a78bfa' },
 ]
 
 export default function Sidebar() {
@@ -36,29 +37,31 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {nav.map(({ href, label, icon, divider, accent }) => {
-          if (divider) return (
-            <div key="divider" style={{ height: 1, background: '#0f1f35', margin: '8px 4px' }} />
+      <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto',
+        display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {nav.map((item, i) => {
+          if (item.divider) return (
+            <div key={`div-${i}`} style={{ height: 1, background: '#0f1f35', margin: '8px 4px' }} />
           )
+          const { href, label, icon, accent } = item
           const active = path === href || path.startsWith(href + '/')
-          const color  = active ? (accent ? '#2dd4bf' : '#22c55e') : accent ? '#334155' : '#334155'
-          const bg     = active ? (accent ? '#2dd4bf18' : '#22c55e18') : 'transparent'
-          const border = active ? (accent ? '#2dd4bf44' : '#22c55e44') : 'transparent'
+          const color  = active ? (accent || '#22c55e') : '#334155'
+          const bg     = active ? (accent ? accent + '18' : '#22c55e18') : 'transparent'
+          const border = active ? (accent ? accent + '44' : '#22c55e44') : 'transparent'
           return (
             <Link key={href} href={href} style={{ textDecoration: 'none' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '9px 12px', borderRadius: 8,
                 border: `1px solid ${border}`,
-                background: bg,
-                color: color,
+                background: bg, color,
                 fontSize: 12, fontWeight: active ? 700 : 400,
                 cursor: 'pointer', transition: 'all 0.15s', letterSpacing: '0.01em',
               }}>
                 <span style={{ fontSize: 13, width: 16, textAlign: 'center', flexShrink: 0 }}>{icon}</span>
                 <span style={{ flex: 1 }}>{label}</span>
-                {active && <div style={{ width: 5, height: 5, borderRadius: '50%', background: color, boxShadow: `0 0 8px ${color}` }} />}
+                {active && <div style={{ width: 5, height: 5, borderRadius: '50%',
+                  background: color, boxShadow: `0 0 8px ${color}` }} />}
               </div>
             </Link>
           )
@@ -67,7 +70,8 @@ export default function Sidebar() {
 
       <div style={{ padding: '14px 20px', borderTop: '1px solid #0f1f35' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
+          <div style={{ width: 5, height: 5, borderRadius: '50%',
+            background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
           <span style={{ fontSize: 9, color: '#1e3a5f', letterSpacing: '0.1em' }}>SYSTEM ONLINE · v1.0.0</span>
         </div>
       </div>

@@ -1,4 +1,5 @@
-// routes/components.js
+import { props, serialize } from '../utils/serialize.js'
+
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
 
@@ -9,12 +10,13 @@ export default async function componentRoutes(fastify) {
       MATCH (c:Component)
       ${type ? 'WHERE c.type = $type' : ''}
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
-      RETURN c, a.name AS application
-      ORDER BY c.name
+      RETURN c, a.id AS appId, a.name AS appName
+      ORDER BY c.name ASC
     `, { type })
     return records.map(r => ({
-      ...r.get('c').properties,
-      application: r.get('application')
+      ...props(r.get('c')),
+      appId:   r.get('appId'),
+      appName: r.get('appName'),
     }))
   })
 
@@ -24,41 +26,31 @@ export default async function componentRoutes(fastify) {
       MATCH (c:Component {id: $id})
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
       OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
-      OPTIONAL MATCH (c)-[out:CONNECTS_TO]->(target:Component)
-      OPTIONAL MATCH (source:Component)-[inc:CONNECTS_TO]->(c)
-      RETURN c,
-        a.name AS application,
-        collect(DISTINCT i) AS infra,
-        collect(DISTINCT {name: target.name, id: target.id, protocol: out.protocol, port: out.port}) AS outbound,
-        collect(DISTINCT {name: source.name, id: source.id, protocol: inc.protocol, port: inc.port}) AS inbound
+      RETURN c, a, collect(DISTINCT i) AS infra
     `, { id: req.params.id })
-
     if (!records.length) return reply.notFound('Component not found')
     const r = records[0]
     return {
-      ...r.get('c').properties,
-      application: r.get('application'),
-      infra: r.get('infra').map(i => i.properties),
-      outbound: r.get('outbound').filter(o => o.name !== null),
-      inbound: r.get('inbound').filter(i => i.name !== null)
+      ...props(r.get('c')),
+      application: props(r.get('a')),
+      infra: r.get('infra').map(props),
     }
   })
 
   // POST /components
   fastify.post('/', async (req, reply) => {
-    const { name, type, runtime, applicationId } = req.body
+    const { name, type, runtime, appId } = req.body
     const records = await write(`
-      CREATE (c:Component {id: randomUUID(), name: $name, type: $type, runtime: $runtime})
+      CREATE (c:Component { id: randomUUID(), name: $name, type: $type, runtime: $runtime })
       WITH c
-      OPTIONAL MATCH (a:Application {id: $applicationId})
+      OPTIONAL MATCH (a:Application {id: $appId})
       FOREACH (_ IN CASE WHEN a IS NOT NULL THEN [1] ELSE [] END |
         CREATE (a)-[:CONTAINS]->(c)
       )
       RETURN c
-    `, { name, type, runtime, applicationId: applicationId || null })
-
+    `, { name, type, runtime: runtime || null, appId: appId || null })
     reply.code(201)
-    return records[0].get('c').properties
+    return props(records[0].get('c'))
   })
 
   // PATCH /components/:id
@@ -66,51 +58,41 @@ export default async function componentRoutes(fastify) {
     const { name, type, runtime } = req.body
     const records = await write(`
       MATCH (c:Component {id: $id})
-      SET c += {
-        name: coalesce($name, c.name),
-        type: coalesce($type, c.type),
-        runtime: coalesce($runtime, c.runtime)
-      }
+      SET c.name    = coalesce($name, c.name),
+          c.type    = coalesce($type, c.type),
+          c.runtime = coalesce($runtime, c.runtime)
       RETURN c
     `, { id: req.params.id, name, type, runtime })
-
     if (!records.length) return reply.notFound('Component not found')
-    return records[0].get('c').properties
+    return props(records[0].get('c'))
   })
 
   // DELETE /components/:id
   fastify.delete('/:id', async (req, reply) => {
-    await write('MATCH (c:Component {id: $id}) DETACH DELETE c', { id: req.params.id })
-    reply.code(204).send()
+    await write(`MATCH (c:Component {id: $id}) DETACH DELETE c`, { id: req.params.id })
+    reply.code(204)
   })
 
-  // POST /components/:id/connections — add CONNECTS_TO edge
+  // POST /components/:id/connections
   fastify.post('/:id/connections', async (req, reply) => {
     const { targetId, protocol, port } = req.body
     await write(`
-      MATCH (src:Component {id: $id}), (dst:Component {id: $targetId})
-      MERGE (src)-[r:CONNECTS_TO {protocol: $protocol, port: $port}]->(dst)
-    `, { id: req.params.id, targetId, protocol, port: parseInt(port) })
-
-    reply.code(201).send({ message: 'Connection created' })
+      MATCH (c1:Component {id: $id}), (c2:Component {id: $targetId})
+      MERGE (c1)-[r:CONNECTS_TO]->(c2)
+      SET r.protocol = $protocol, r.port = $port
+    `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null })
+    reply.code(201)
+    return { connected: true }
   })
 
-  // DELETE /components/:id/connections/:targetId
-  fastify.delete('/:id/connections/:targetId', async (req, reply) => {
-    await write(`
-      MATCH (src:Component {id: $id})-[r:CONNECTS_TO]->(dst:Component {id: $targetId})
-      DELETE r
-    `, { id: req.params.id, targetId: req.params.targetId })
-    reply.code(204).send()
-  })
-
-  // POST /components/:id/deploy — link to Infra
+  // POST /components/:id/deploy
   fastify.post('/:id/deploy', async (req, reply) => {
     const { infraId } = req.body
     await write(`
       MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})
       MERGE (c)-[:DEPLOYED_ON]->(i)
     `, { id: req.params.id, infraId })
-    reply.code(201).send({ message: 'Deployed' })
+    reply.code(201)
+    return { deployed: true }
   })
 }

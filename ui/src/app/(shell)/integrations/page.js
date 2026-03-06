@@ -199,6 +199,179 @@ function useSavedConnections() {
   return { connections, save, remove }
 }
 
+// ── Terraform upload panel ───────────────────────────────────────────────────
+function TerraformUploadPanel() {
+  const [file,       setFile]       = useState(null)
+  const [dragging,   setDragging]   = useState(false)
+  const [status,     setStatus]     = useState(null) // null | 'uploading' | 'done' | 'error'
+  const [result,     setResult]     = useState(null)
+  const [history,    setHistory]    = useState([])
+  const [loadingHist,setLoadingHist]= useState(true)
+  const BASE = '/api'
+
+  // Load import history
+  const loadHistory = () => {
+    fetch(`${BASE}/integrations/terraform/history`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setHistory).catch(()=>{})
+      .finally(()=>setLoadingHist(false))
+  }
+  useEffect(()=>{ loadHistory() }, [])
+
+  const handleUpload = async (f) => {
+    if (!f) return
+    setStatus('uploading'); setResult(null)
+    const fd = new FormData()
+    fd.append('statefile', f)
+    try {
+      const res = await fetch(`${BASE}/integrations/terraform/import`, {
+        method: 'POST', body: fd,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Import failed')
+      setResult({ ok: true, ...data })
+      setStatus('done')
+      loadHistory()
+    } catch(err) {
+      setResult({ ok: false, error: err.message })
+      setStatus('error')
+    }
+  }
+
+  const onDrop = (e) => {
+    e.preventDefault(); setDragging(false)
+    const f = e.dataTransfer.files[0]
+    if (f) { setFile(f); handleUpload(f) }
+  }
+
+  const STATUS_COLOR = { success:T.green, done:T.green, error:T.red, running:T.amber, pending:T.muted, partial:T.amber }
+
+  return (
+    <div>
+      {/* Drop zone */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDragging(true)}}
+        onDragLeave={()=>setDragging(false)}
+        onDrop={onDrop}
+        style={{
+          border:`2px dashed ${dragging?'#7B42BC':'#1e293b'}`,
+          borderRadius:12, padding:'28px 20px',
+          textAlign:'center', marginBottom:16,
+          background:dragging?'#7B42BC0a':'#080f1a',
+          transition:'all .15s', cursor:'pointer',
+        }}
+        onClick={()=>document.getElementById('tf-file-input').click()}
+      >
+        <input id="tf-file-input" type="file" accept=".json,.tfstate"
+          style={{ display:'none' }}
+          onChange={e=>{ const f=e.target.files[0]; if(f){setFile(f);handleUpload(f)} }} />
+        <div style={{ fontSize:28, marginBottom:10, opacity:.5 }}>⬡</div>
+        <div style={{ ...mono, fontSize:12, fontWeight:700, color:'#f1f5f9', marginBottom:5 }}>
+          {status==='uploading' ? 'Importing…' : 'Drop terraform.tfstate here'}
+        </div>
+        <div style={{ ...mono, fontSize:10, color:T.dim }}>
+          {status==='uploading'
+            ? `Parsing ${file?.name}…`
+            : 'or click to browse · .tfstate or .json · up to 50 MB'}
+        </div>
+        {status==='uploading'&&(
+          <div style={{ marginTop:14,display:'flex',justifyContent:'center' }}>
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            <div style={{ width:20,height:20,borderRadius:'50%',
+              border:'2px solid #1e293b',borderTop:'2px solid #7B42BC',
+              animation:'spin .7s linear infinite' }} />
+          </div>
+        )}
+      </div>
+
+      {/* Result card */}
+      {result&&(
+        <div style={{ padding:'14px 16px',borderRadius:10,marginBottom:16,
+          background:result.ok?T.green+'0a':T.red+'0a',
+          border:`1px solid ${result.ok?T.green+'44':T.red+'44'}` }}>
+          {result.ok ? (
+            <div>
+              <div style={{ ...mono,fontSize:12,fontWeight:700,color:T.green,marginBottom:10 }}>
+                ✓ Import complete — {result.filename}
+              </div>
+              <div style={{ display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:10 }}>
+                {[
+                  ['Found',   result.resourcesFound,   T.muted],
+                  ['Created', result.resourcesCreated, T.green],
+                  ['Updated', result.resourcesUpdated, T.blue],
+                  ['Skipped', result.resourcesSkipped, T.amber],
+                ].map(([label,val,color])=>(
+                  <div key={label} style={{ textAlign:'center',padding:'8px',
+                    background:T.surface3,borderRadius:7,border:`1px solid ${T.border}` }}>
+                    <div style={{ ...mono,fontSize:18,fontWeight:800,color }}>{val}</div>
+                    <div style={{ ...mono,fontSize:8,color:T.muted,marginTop:2,
+                      letterSpacing:'0.1em' }}>{label.toUpperCase()}</div>
+                  </div>
+                ))}
+              </div>
+              {result.summary?.sampleNames?.length>0&&(
+                <div style={{ ...mono,fontSize:9,color:T.dim }}>
+                  Imported: {result.summary.sampleNames.join(', ')}
+                  {result.resourcesFound > 10 ? ` + ${result.resourcesFound-10} more` : ''}
+                </div>
+              )}
+              {result.parseErrors?.length>0&&(
+                <div style={{ ...mono,fontSize:9,color:T.amber,marginTop:6 }}>
+                  ⚠ {result.parseErrors.join(' · ')}
+                </div>
+              )}
+            </div>
+          ):(
+            <div style={{ ...mono,fontSize:11,color:T.red }}>
+              ✗ {result.error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Import history */}
+      <div style={{ ...mono,fontSize:8,color:T.muted,letterSpacing:'0.12em',
+        fontWeight:700,marginBottom:8 }}>IMPORT HISTORY</div>
+      {loadingHist ? (
+        <div style={{ ...mono,fontSize:10,color:T.muted,padding:'10px 0' }}>Loading…</div>
+      ) : history.length===0 ? (
+        <div style={{ ...mono,fontSize:10,color:T.muted,padding:'8px 0' }}>No imports yet</div>
+      ) : (
+        <div style={{ display:'flex',flexDirection:'column',gap:5,maxHeight:200,overflowY:'auto' }}>
+          {history.map((job,i)=>{
+            const sc = STATUS_COLOR[job.status]||T.muted
+            const dur = job.duration_ms ? `${(job.duration_ms/1000).toFixed(1)}s` : null
+            return (
+              <div key={job.id||i} style={{ display:'flex',alignItems:'center',gap:10,
+                padding:'8px 12px',background:T.surface2,borderRadius:7,
+                border:`1px solid ${T.border}` }}>
+                <div style={{ width:5,height:5,borderRadius:'50%',
+                  background:sc,boxShadow:`0 0 4px ${sc}`,flexShrink:0 }} />
+                <span style={{ ...mono,fontSize:11,color:T.text,
+                  flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
+                  {job.filename}
+                </span>
+                <span style={{ ...mono,fontSize:9,color:T.dim }}>
+                  {job.resources_imported||0} imported
+                </span>
+                {dur&&<span style={{ ...mono,fontSize:9,color:T.muted }}>{dur}</span>}
+                <span style={{ ...mono,fontSize:8,fontWeight:700,color:sc,
+                  background:sc+'18',border:`1px solid ${sc}33`,
+                  borderRadius:3,padding:'1px 6px',letterSpacing:'0.06em' }}>
+                  {job.status?.toUpperCase()}
+                </span>
+                <span style={{ ...mono,fontSize:9,color:T.muted,flexShrink:0 }}>
+                  {job.created_at ? new Date(job.created_at).toLocaleDateString('en-GB') : ''}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Config modal ──────────────────────────────────────────────────────────────
 function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClose }) {
   const [form,    setForm]    = useState(
@@ -284,6 +457,15 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
 
         {/* Scrollable form body */}
         <div className="cfg-scroll" style={{ overflowY:'auto',padding:'18px 22px',flex:1 }}>
+          {/* Terraform gets the upload panel above the config fields */}
+          {intg.id==='terraform'&&(
+            <div style={{ marginBottom:20,paddingBottom:20,
+              borderBottom:`1px solid ${T.border}` }}>
+              <div style={{ ...mono,fontSize:8,color:T.muted,letterSpacing:'0.12em',
+                fontWeight:700,marginBottom:10 }}>IMPORT STATE FILE</div>
+              <TerraformUploadPanel/>
+            </div>
+          )}
           {intg.fields.map(field => (
             <div key={field.key} style={{ marginBottom:14 }}>
               <div style={{ ...mono,fontSize:8,color:T.muted,letterSpacing:'0.12em',
