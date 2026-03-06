@@ -1,5 +1,6 @@
 api/data
 api/data/db
 data/db
+data/postgres
 api/src/node_modules
 secrets/
