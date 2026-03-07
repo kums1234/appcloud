@@ -36,28 +36,37 @@ export default async function applicationRoutes(fastify) {
 
   // POST /applications
   fastify.post('/', async (req, reply) => {
-    const { name, tier, owner, environment } = req.body
+    const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       CREATE (a:Application {
         id: randomUUID(), name: $name, tier: $tier,
-        owner: $owner, environment: $environment
+        owner: $owner, environment: $environment,
+        availability: $availability, confidentiality: $confidentiality,
+        domain: $domain
       }) RETURN a
-    `, { name, tier: parseInt(tier), owner, environment })
+    `, { name, tier: parseInt(tier), owner, environment,
+         availability: availability || '99.9',
+         confidentiality: confidentiality || 'internal',
+         domain: domain || '' })
     reply.code(201)
     return props(records[0].get('a'))
   })
 
   // PATCH /applications/:id
   fastify.patch('/:id', async (req, reply) => {
-    const { name, tier, owner, environment } = req.body
+    const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       MATCH (a:Application {id: $id})
-      SET a.name        = coalesce($name, a.name),
-          a.tier        = coalesce($tier, a.tier),
-          a.owner       = coalesce($owner, a.owner),
-          a.environment = coalesce($environment, a.environment)
+      SET a.name             = coalesce($name, a.name),
+          a.tier             = coalesce($tier, a.tier),
+          a.owner            = coalesce($owner, a.owner),
+          a.environment      = coalesce($environment, a.environment),
+          a.availability     = coalesce($availability, a.availability),
+          a.confidentiality  = coalesce($confidentiality, a.confidentiality),
+          a.domain           = coalesce($domain, a.domain)
       RETURN a
-    `, { id: req.params.id, name, tier: tier ? parseInt(tier) : null, owner, environment })
+    `, { id: req.params.id, name, tier: tier ? parseInt(tier) : null,
+         owner, environment, availability, confidentiality, domain })
     if (!records.length) return reply.notFound('Application not found')
     return props(records[0].get('a'))
   })

@@ -68,6 +68,27 @@ export const api = {
     reject:        (id, userId, reason) => req(`/changes/${id}/reject`, { method:'POST', body:JSON.stringify({ userId, reason }) }),
   },
 
+  workflows: {
+    summary:           () => req('/workflows/summary'),
+    definitions:       () => req('/workflows/definitions'),
+    changes:           () => req('/workflows/changes'),
+    change:            (id) => req(`/workflows/changes/${id}`),
+    advanceChange:     (id, data) => req(`/workflows/changes/${id}/advance`, { method:'POST', body:JSON.stringify(data) }),
+    onboarding:        () => req('/workflows/onboarding'),
+    onboardingDetail:  (id) => req(`/workflows/onboarding/${id}`),
+    completeStep:      (id, step) => req(`/workflows/onboarding/${id}/complete-step`, { method:'POST', body:JSON.stringify({ step }) }),
+    drift:             () => req('/workflows/drift'),
+    driftAnalysis:     () => req('/workflows/drift/analysis'),
+    createDriftChanges:(data) => req('/workflows/drift/create-changes', { method:'POST', body:JSON.stringify(data) }),
+  },
+
+  governance: {
+    summary:    () => req('/governance/summary'),
+    violations: () => req('/governance/policy-violations'),
+    audit:      () => req('/governance/change-audit'),
+    heatmap:    () => req('/governance/risk-heatmap'),
+  },
+
   integrations: {
     terraformHistory: () => req('/integrations/terraform/history'),
   },

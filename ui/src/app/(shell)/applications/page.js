@@ -43,6 +43,29 @@ function TypeBadge({ type }) {
   return <span style={{ ...mono, fontSize: 9, fontWeight: 700, color: m.color, background: m.color + '18', border: `1px solid ${m.color}33`, padding: '2px 7px', borderRadius: 4, letterSpacing: '0.06em' }}>{type}</span>
 }
 
+const AVAIL_META = {
+  '99.999': { label:'99.999%', color:'#22c55e' },
+  '99.99':  { label:'99.99%',  color:'#38bdf8' },
+  '99.9':   { label:'99.9%',   color:'#f59e0b' },
+  '99':     { label:'99%',     color:'#f43f5e' },
+}
+const CONF_META = {
+  public:       { label:'Public',        color:'#64748b' },
+  internal:     { label:'Internal',      color:'#38bdf8' },
+  confidential: { label:'Confidential',  color:'#f59e0b' },
+  restricted:   { label:'Restricted',    color:'#f43f5e' },
+}
+
+function AvailBadge({ availability }) {
+  const m = AVAIL_META[availability] || { label: availability || '—', color: T.muted }
+  return <span style={{ ...mono, fontSize: 9, fontWeight: 700, color: m.color, background: m.color + '18', border: `1px solid ${m.color}33`, padding: '2px 7px', borderRadius: 4, letterSpacing: '0.04em' }}>⬆ {m.label}</span>
+}
+
+function ConfBadge({ confidentiality }) {
+  const m = CONF_META[confidentiality] || { label: confidentiality || '—', color: T.muted }
+  return <span style={{ ...mono, fontSize: 9, fontWeight: 700, color: m.color, background: m.color + '18', border: `1px solid ${m.color}33`, padding: '2px 7px', borderRadius: 4, letterSpacing: '0.04em' }}>⬡ {m.label}</span>
+}
+
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
@@ -73,7 +96,7 @@ function Modal({ open, onClose, title, accent = T.green, children }) {
 }
 
 function AppForm({ onSave, onClose }) {
-  const [form, setForm] = useState({ name: '', tier: 2, owner: '', environment: 'production' })
+  const [form, setForm] = useState({ name: '', tier: 2, owner: '', environment: 'production', availability: '99.9', confidentiality: 'internal', domain: '' })
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   return (
     <div>
@@ -94,6 +117,27 @@ function AppForm({ onSave, onClose }) {
       </div>
       <Field label="OWNER / TEAM">
         <input style={inputStyle} value={form.owner} onChange={e => set('owner', e.target.value)} placeholder="e.g. platform-team" />
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="AVAILABILITY SLA ✱">
+          <select style={selectStyle} value={form.availability} onChange={e => set('availability', e.target.value)}>
+            <option value="99.999">99.999% — Five nines</option>
+            <option value="99.99">99.99% — Four nines</option>
+            <option value="99.9">99.9% — Three nines</option>
+            <option value="99">99% — Two nines</option>
+          </select>
+        </Field>
+        <Field label="CONFIDENTIALITY ✱">
+          <select style={selectStyle} value={form.confidentiality} onChange={e => set('confidentiality', e.target.value)}>
+            <option value="public">Public</option>
+            <option value="internal">Internal</option>
+            <option value="confidential">Confidential</option>
+            <option value="restricted">Restricted</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="DOMAIN (optional)">
+        <input style={inputStyle} value={form.domain} onChange={e => set('domain', e.target.value)} placeholder="e.g. payments, identity, data-platform" />
       </Field>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
         <button onClick={onClose} style={{ ...mono, fontSize: 11, padding: '8px 16px', background: 'none', border: `1px solid ${T.border2}`, borderRadius: 8, color: T.muted, cursor: 'pointer' }}>Cancel</button>
@@ -332,8 +376,12 @@ function AppPanel({ app, onClose, allComponents, allInfra, onRefresh }) {
                 <span style={{ ...mono, fontSize: 16, fontWeight: 800, color: T.text }}>{app.name}</span>
                 <TierBadge tier={app.tier} />
                 <EnvBadge env={app.environment} />
+                <AvailBadge availability={app.availability} />
+                <ConfBadge confidentiality={app.confidentiality} />
               </div>
-              <div style={{ ...mono, fontSize: 10, color: T.muted, paddingLeft: 18 }}>{app.owner} · {app.id.slice(0,8)}…</div>
+              <div style={{ ...mono, fontSize: 10, color: T.muted, paddingLeft: 18 }}>
+                {app.owner}{app.domain ? ` · ${app.domain}` : ''} · {app.id.slice(0,8)}…
+              </div>
             </div>
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 22, lineHeight: 1 }}>×</button>
           </div>
@@ -501,16 +549,16 @@ export default function ApplicationsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-              {['Application', 'Tier', 'Owner', 'Environment', 'Components', ''].map(h => (
+              {['Application', 'Tier', 'Availability', 'Confidentiality', 'Owner', 'Environment', ''].map(h => (
                 <th key={h} style={{ ...mono, fontSize: 9, color: T.muted, textAlign: 'left', padding: '12px 16px', letterSpacing: '0.1em', fontWeight: 700 }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6}><Spinner /></td></tr>
+              <tr><td colSpan={7}><Spinner /></td></tr>
             ) : apps.length === 0 ? (
-              <tr><td colSpan={6} style={{ ...mono, fontSize: 12, color: T.muted, textAlign: 'center', padding: 48 }}>No applications yet</td></tr>
+              <tr><td colSpan={7} style={{ ...mono, fontSize: 12, color: T.muted, textAlign: 'center', padding: 48 }}>No applications yet</td></tr>
             ) : apps.map(a => {
               const tierColor = TIER_COLORS[a.tier] || T.muted
               const appComps = allComponents.filter(c => c.applicationId === a.id || c.application === a.name)
@@ -526,6 +574,8 @@ export default function ApplicationsPage() {
                     <div style={{ ...mono, fontSize: 9, color: T.muted, marginTop: 3, paddingLeft: 17 }}>{a.id.slice(0,8)}…</div>
                   </td>
                   <td style={{ padding: '13px 16px' }}><TierBadge tier={a.tier} /></td>
+                  <td style={{ padding: '13px 16px' }}><AvailBadge availability={a.availability} /></td>
+                  <td style={{ padding: '13px 16px' }}><ConfBadge confidentiality={a.confidentiality} /></td>
                   <td style={{ padding: '13px 16px', ...mono, fontSize: 11, color: T.dim }}>{a.owner}</td>
                   <td style={{ padding: '13px 16px' }}><EnvBadge env={a.environment} /></td>
                   <td style={{ padding: '13px 16px' }}>
