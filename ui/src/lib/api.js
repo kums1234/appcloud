@@ -68,6 +68,20 @@ export const api = {
     reject:        (id, userId, reason) => req(`/changes/${id}/reject`, { method:'POST', body:JSON.stringify({ userId, reason }) }),
   },
 
+  discovery: {
+    summary:    () => req('/discovery/summary'),
+    resources:  (params = {}) => { const q = new URLSearchParams(params).toString(); return req(`/discovery/resources${q ? `?${q}` : ''}`) },
+    accounts:   () => req('/discovery/accounts'),
+    addAccount: (data) => req('/discovery/accounts', { method:'POST', body:JSON.stringify(data) }),
+    delAccount: (id)  => req(`/discovery/accounts/${id}`, { method:'DELETE' }),
+    scanAWS:    (data) => req('/discovery/scan/aws',   { method:'POST', body:JSON.stringify(data) }),
+    scanAzure:  (data) => req('/discovery/scan/azure', { method:'POST', body:JSON.stringify(data) }),
+    scanGCP:    (data) => req('/discovery/scan/gcp',   { method:'POST', body:JSON.stringify(data) }),
+    scanAll:    (data) => req('/discovery/scan/all',   { method:'POST', body:JSON.stringify(data) }),
+    link:       (infraId, componentId) => req('/discovery/link', { method:'POST', body:JSON.stringify({ infraId, componentId }) }),
+    deleteResource: (id) => req(`/discovery/resources/${id}`, { method:'DELETE' }),
+  },
+
   workflows: {
     summary:           () => req('/workflows/summary'),
     definitions:       () => req('/workflows/definitions'),

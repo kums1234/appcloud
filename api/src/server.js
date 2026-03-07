@@ -13,6 +13,7 @@ import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
 import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
+import discoveryRoutes from './routes/discovery.js'
 
 const fastify = Fastify({ logger: true })
 
@@ -44,6 +45,7 @@ await fastify.register(graphRoutes,        { prefix: '/graph' })
 await fastify.register(integrationRoutes,  { prefix: '/integrations' })
 await fastify.register(governanceRoutes,    { prefix: '/governance' })
 await fastify.register(workflowRoutes,      { prefix: '/workflows' })
+await fastify.register(discoveryRoutes,     { prefix: '/discovery' })
 
 fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 fastify.get('/', async () => ({ name: 'AppCloud API', version: '1.1.0' }))

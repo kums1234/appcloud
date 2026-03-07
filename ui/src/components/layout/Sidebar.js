@@ -8,6 +8,7 @@ const nav = [
   { href: '/applications',  label: 'Applications',   icon: '◈' },
   { href: '/infra',         label: 'Infrastructure', icon: '◫' },
   { href: '/changes',       label: 'Changes',        icon: '⟳' },
+  { href: '/discovery',  label: 'Discovery',    icon: '◎', accent: '#a78bfa' },
   { href: '/workflows',  label: 'Workflows',    icon: '⧖', accent: '#38bdf8' },
   { href: '/governance', label: 'Governance',    icon: '⚖', accent: '#a78bfa' },
   { divider: true },
