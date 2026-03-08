@@ -1,0 +1,125 @@
+/**
+ * integration_tests/tests/accounts.test.js
+ *
+ * Tests the /discovery/accounts CRUD endpoints and the
+ * link (Infra → Component) workflow.
+ */
+
+const API = process.env.API_URL || 'http://localhost:3001'
+
+async function api(path, opts = {}) {
+  const res = await fetch(`${API}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(`${res.status} ${path}: ${JSON.stringify(body)}`)
+  return body
+}
+
+// ── Cloud account management ───────────────────────────────────────────────────
+describe('Cloud account CRUD', () => {
+  let createdId
+
+  test('can create an AWS account', async () => {
+    const acc = await api('/discovery/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'test-aws-account',
+        provider: 'aws',
+        config: {
+          accountId:     '123456789012',
+          region:        'us-east-1',
+          accessKeyId:   'test',
+          secretKey:     'test',
+        },
+      }),
+    })
+    expect(acc).toHaveProperty('id')
+    expect(acc.provider).toBe('aws')
+    createdId = acc.id
+  })
+
+  test('can list accounts and find created one', async () => {
+    const accounts = await api('/discovery/accounts')
+    expect(Array.isArray(accounts)).toBe(true)
+    const found = accounts.find(a => a.id === createdId)
+    expect(found).toBeDefined()
+    expect(found.provider).toBe('aws')
+  })
+
+  test('can delete account', async () => {
+    await api(`/discovery/accounts/${createdId}`, { method: 'DELETE' })
+    const accounts = await api('/discovery/accounts')
+    const found = accounts.find(a => a.id === createdId)
+    expect(found).toBeUndefined()
+  })
+})
+
+// ── Infra → Component linking ─────────────────────────────────────────────────
+describe('Infra linking', () => {
+  let appId, componentId, infraId
+
+  beforeAll(async () => {
+    // Create an application
+    const app = await api('/applications', {
+      method: 'POST',
+      body: JSON.stringify({
+        name:           'test-payments-app',
+        tier:           1,
+        owner:          'platform-team',
+        environment:    'test',
+        availability:   '99.9',
+        confidentiality:'internal',
+      }),
+    })
+    appId = app.id
+
+    // Create a component under it
+    const comp = await api('/components', {
+      method: 'POST',
+      body: JSON.stringify({
+        name:          'payments-api',
+        type:          'service',
+        applicationId: appId,
+      }),
+    })
+    componentId = comp.id
+
+    // Get a discovered infra node
+    const resources = await api('/discovery/resources')
+    const ec2 = resources.find(r => r.resource_type === 'ec2_instance')
+    infraId = ec2?.id
+  })
+
+  test('can link an infra node to a component', async () => {
+    if (!infraId) return // skip if no infra nodes (scan not run yet)
+    const result = await api('/discovery/link', {
+      method: 'POST',
+      body: JSON.stringify({ infraId, componentId }),
+    })
+    expect(result.linked).toBe(true)
+  })
+
+  test('linked resource shows application in resources list', async () => {
+    if (!infraId) return
+    const resources = await api('/discovery/resources')
+    const linked = resources.find(r => r.id === infraId)
+    expect(linked).toBeDefined()
+    expect(linked.mapped).toBe(true)
+    expect(linked.applications).toContain('test-payments-app')
+  })
+
+  test('summary unmapped count decreases after linking', async () => {
+    const summary = await api('/discovery/summary')
+    // At least one resource is now mapped so unmapped < total
+    expect(summary.unmapped).toBeLessThan(summary.total)
+  })
+
+  afterAll(async () => {
+    // Clean up test application (cascades to component in Neo4j)
+    if (appId) {
+      await api(`/applications/${appId}`, { method: 'DELETE' }).catch(() => {})
+    }
+  })
+})

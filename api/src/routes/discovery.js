@@ -107,8 +107,16 @@ async function scanAWS({ credentials, regions, write, log }) {
     sessionToken:    credentials.sessionToken,
   } : undefined  // falls back to env / instance profile / ~/.aws
 
+  // endpoint override — used for LocalStack and other AWS-compatible APIs
+  const endpointOverride = process.env.AWS_ENDPOINT_URL || undefined
+
   for (const region of regions) {
-    const cfg = { region, ...(creds ? { credentials: creds } : {}) }
+    const cfg = {
+      region,
+      ...(creds          ? { credentials: creds }              : {}),
+      ...(endpointOverride ? { endpoint: endpointOverride,
+                               forcePathStyle: true }           : {}),
+    }
     log.info(`[AWS] scanning region ${region}`)
 
     // ── EC2 instances ─────────────────────────────────────────────────────

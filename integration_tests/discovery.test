@@ -1,0 +1,151 @@
+/**
+ * integration_tests/tests/discovery.test.js
+ *
+ * Tests the full AWS discovery pipeline against LocalStack.
+ * Expects:
+ *   - LocalStack running at AWS_ENDPOINT_URL (http://localstack:4566)
+ *   - Seed script already run (seed.sh)
+ *   - Test API running at API_URL (http://api-test:3000)
+ */
+
+const API = process.env.API_URL || 'http://localhost:3001'
+
+async function api(path, opts = {}) {
+  const res = await fetch(`${API}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(`${res.status} ${path}: ${JSON.stringify(body)}`)
+  return body
+}
+
+// ── Health ─────────────────────────────────────────────────────────────────────
+describe('API health', () => {
+  test('health endpoint returns ok', async () => {
+    const data = await api('/health')
+    expect(data.status).toBe('ok')
+    expect(data.neo4j).toBe('connected')
+  })
+})
+
+// ── AWS Discovery scan ─────────────────────────────────────────────────────────
+describe('AWS discovery scan', () => {
+  let scanResult
+
+  beforeAll(async () => {
+    scanResult = await api('/discovery/scan/aws', {
+      method: 'POST',
+      body: JSON.stringify({
+        regions: ['us-east-1'],
+        credentials: {
+          accessKeyId:     process.env.AWS_ACCESS_KEY_ID     || 'test',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
+        },
+      }),
+    })
+  }, 60_000) // scan can take a moment
+
+  test('scan returns success', () => {
+    expect(scanResult.provider).toBe('aws')
+    expect(scanResult.total).toBeGreaterThan(0)
+    expect(typeof scanResult.duration).toBe('number')
+  })
+
+  test('scan finds EC2 instances', () => {
+    expect(scanResult.breakdown.ec2_instance ?? 0).toBeGreaterThanOrEqual(3)
+  })
+
+  test('scan finds RDS instances', () => {
+    expect(scanResult.breakdown.rds_instance ?? 0).toBeGreaterThanOrEqual(2)
+  })
+
+  test('scan finds Lambda functions', () => {
+    expect(scanResult.breakdown.function ?? 0).toBeGreaterThanOrEqual(3)
+  })
+
+  test('scan finds ECS clusters', () => {
+    expect(scanResult.breakdown.ecs_cluster ?? 0).toBeGreaterThanOrEqual(2)
+  })
+
+  test('scan finds load balancers', () => {
+    expect(scanResult.breakdown.load_balancer ?? 0).toBeGreaterThanOrEqual(2)
+  })
+
+  test('scan finds ElastiCache clusters', () => {
+    expect(scanResult.breakdown.elasticache ?? 0).toBeGreaterThanOrEqual(2)
+  })
+
+  test('breakdown does not contain errors', () => {
+    const errors = scanResult.breakdown?.errors ?? []
+    expect(errors.length).toBe(0)
+  })
+})
+
+// ── Graph population ───────────────────────────────────────────────────────────
+describe('Graph population after scan', () => {
+  test('resources endpoint returns discovered nodes', async () => {
+    const resources = await api('/discovery/resources')
+    expect(Array.isArray(resources)).toBe(true)
+    expect(resources.length).toBeGreaterThan(0)
+  })
+
+  test('each resource has required fields', async () => {
+    const resources = await api('/discovery/resources')
+    for (const r of resources) {
+      expect(r).toHaveProperty('id')
+      expect(r).toHaveProperty('name')
+      expect(r).toHaveProperty('provider')
+      expect(r).toHaveProperty('resource_type')
+      expect(r.provider).toBe('aws')
+    }
+  })
+
+  test('summary reflects discovered resources', async () => {
+    const summary = await api('/discovery/summary')
+    expect(summary.total).toBeGreaterThan(0)
+    expect(summary.byProvider?.aws?.total ?? 0).toBeGreaterThan(0)
+  })
+
+  test('graph topology includes infra nodes', async () => {
+    const summary = await api('/graph/summary')
+    expect(summary.infra ?? 0).toBeGreaterThan(0)
+  })
+
+  test('internet-facing load balancer is marked public', async () => {
+    const resources = await api('/discovery/resources')
+    const albs = resources.filter(r => r.resource_type === 'load_balancer')
+    const publicAlb = albs.find(r => r.name === 'payments-alb')
+    expect(publicAlb).toBeDefined()
+    expect(publicAlb.public).toBe(true)
+  })
+
+  test('internal load balancer is not marked public', async () => {
+    const resources = await api('/discovery/resources')
+    const nlb = resources.find(r => r.name === 'internal-api-nlb')
+    expect(nlb).toBeDefined()
+    expect(nlb.public).toBe(false)
+  })
+})
+
+// ── Second scan idempotency ────────────────────────────────────────────────────
+describe('Scan idempotency', () => {
+  test('running scan twice does not duplicate nodes', async () => {
+    const before = await api('/discovery/resources')
+
+    await api('/discovery/scan/aws', {
+      method: 'POST',
+      body: JSON.stringify({
+        regions: ['us-east-1'],
+        credentials: {
+          accessKeyId:     process.env.AWS_ACCESS_KEY_ID     || 'test',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
+        },
+      }),
+    })
+
+    const after = await api('/discovery/resources')
+    // Node count should be the same — MERGE prevents duplicates
+    expect(after.length).toBe(before.length)
+  }, 60_000)
+})

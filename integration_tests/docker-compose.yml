@@ -1,0 +1,135 @@
+version: '3.8'
+
+# ── AppCloud Integration Test Stack ────────────────────────────────────────────
+# Completely isolated from the production stack.
+# All services run on distinct ports so both stacks can run simultaneously.
+#
+#   LocalStack  : http://localhost:4566   (AWS-compatible APIs)
+#   Neo4j test  : http://localhost:7475   (browser) / bolt://localhost:7688
+#   API test    : http://localhost:3001
+#
+# Usage:
+#   docker compose -f integration_tests/docker-compose.yml up -d
+#   docker compose -f integration_tests/docker-compose.yml run --rm seed
+#   docker compose -f integration_tests/docker-compose.yml run --rm test
+#   docker compose -f integration_tests/docker-compose.yml down -v
+
+services:
+
+  # ── LocalStack — AWS API emulation ─────────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: appcloud-test-localstack
+    ports:
+      - "4566:4566"       # unified gateway — all AWS services on one port
+    environment:
+      - SERVICES=ec2,rds,lambda,eks,ecs,elbv2,elasticache,s3,iam,sts
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}  # optional — community edition works without
+      - DEBUG=0
+      - PERSISTENCE=0     # no persistence between restarts — clean state every run
+      - LAMBDA_EXECUTOR=local
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"ec2\": \"available\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # ── Neo4j — isolated test graph ────────────────────────────────────────────
+  neo4j-test:
+    image: neo4j:5.18
+    container_name: appcloud-test-neo4j
+    ports:
+      - "7475:7474"       # browser on 7475 to avoid conflict with prod 7474
+      - "7688:7687"       # bolt on 7688
+    environment:
+      - NEO4J_AUTH=neo4j/testpassword
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_memory_pagecache_size=256M
+      - NEO4J_dbms_memory_heap_max__size=256M
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p testpassword 'RETURN 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  # ── Seed — creates AWS resources in LocalStack ─────────────────────────────
+  # Run once after LocalStack is healthy:
+  #   docker compose -f integration_tests/docker-compose.yml run --rm seed
+  seed:
+    image: amazon/aws-cli:2.15.30
+    container_name: appcloud-test-seed
+    profiles: ["tools"]   # not started by default — run explicitly
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    volumes:
+      - ./seed.sh:/seed.sh:ro
+    entrypoint: ["/bin/bash", "/seed.sh"]
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  # ── Test API — real Fastify API pointed at LocalStack + test Neo4j ─────────
+  api-test:
+    build:
+      context: ../neo4j-fastify-api
+      dockerfile: Dockerfile
+    container_name: appcloud-test-api
+    ports:
+      - "3001:3000"       # test API on 3001
+    environment:
+      - NEO4J_URI=bolt://neo4j-test:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=testpassword
+      - PORT=3000
+      - HOST=0.0.0.0
+      # Point all AWS SDK calls at LocalStack
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      # No PostgreSQL in test stack — graceful degradation tested implicitly
+    depends_on:
+      neo4j-test:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  # ── Test runner — Jest test suite ─────────────────────────────────────────
+  # docker compose -f integration_tests/docker-compose.yml run --rm test
+  test:
+    image: node:20-alpine
+    container_name: appcloud-test-runner
+    profiles: ["tools"]
+    working_dir: /tests
+    volumes:
+      - ./tests:/tests:ro
+      - test-node-modules:/tests/node_modules
+    environment:
+      - API_URL=http://api-test:3000
+      - NEO4J_URI=bolt://neo4j-test:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=testpassword
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint: ["/bin/sh", "-c", "npm install --silent && npm test"]
+    depends_on:
+      api-test:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+
+volumes:
+  localstack-data:
+  test-node-modules:

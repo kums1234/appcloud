@@ -1,0 +1,22 @@
+{
+  "name": "appcloud-integration-tests",
+  "version": "1.0.0",
+  "description": "Integration tests for AppCloud API against LocalStack and test Neo4j",
+  "private": true,
+  "scripts": {
+    "test":        "jest --runInBand --forceExit --verbose",
+    "test:discovery": "jest --runInBand --forceExit --verbose tests/discovery.test.js",
+    "test:accounts":  "jest --runInBand --forceExit --verbose tests/accounts.test.js",
+    "test:workflows": "jest --runInBand --forceExit --verbose tests/workflows.test.js",
+    "test:governance":"jest --runInBand --forceExit --verbose tests/governance.test.js"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout":     90000,
+    "testPathPattern": "tests/.*\\.test\\.js$",
+    "verbose":         true
+  },
+  "dependencies": {
+    "jest": "^29.7.0"
+  }
+}
