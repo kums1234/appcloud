@@ -340,7 +340,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
   const { SqlManagementClient }          = await import('@azure/arm-sql')
   const { WebSiteManagementClient }      = await import('@azure/arm-appservice')
   const { NetworkManagementClient }      = await import('@azure/arm-network')
-  const { RedisManagementClient }        = await import('@azure/arm-redis')
+  const { RedisManagementClient }        = await import('@azure/arm-rediscache')
 
   const cred = credentials?.clientId
     ? new ClientSecretCredential(

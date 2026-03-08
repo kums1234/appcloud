@@ -31,10 +31,10 @@
     "@azure/arm-containerservice": "^20.0.0",
     "@azure/arm-appservice": "^14.1.0",
     "@azure/arm-resources": "^5.2.0",
-    "@azure/arm-redis": "^8.0.0",
     "@google-cloud/compute": "^6.8.0",
     "@google-cloud/container": "^5.11.0",
     "@google-cloud/resource-manager": "^5.2.0",
-    "googleapis": "^140.0.0"
+    "googleapis": "^140.0.0",
+    "@azure/arm-rediscache": "^8.2.0"
   }
 }

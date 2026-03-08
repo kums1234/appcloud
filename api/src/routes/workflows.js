@@ -285,28 +285,40 @@ export default async function workflowRoutes(fastify) {
 
   // GET /workflows/drift — drift detection runs (from terraform_imports table)
   fastify.get('/drift', async (req, reply) => {
-    // Get recent imports from PG + their drift analysis from Neo4j
-    const imports = fastify.pg?.pool
-      ? await fastify.pg.query(
+    // Recent imports from PostgreSQL — gracefully degrade if table missing or PG unavailable
+    let imports = []
+    if (fastify.pg?.pool) {
+      try {
+        imports = await fastify.pg.query(
           `SELECT id, filename, status, resources_imported, resources_created,
                   resources_updated, terraform_version, created_at, finished_at,
                   raw_summary
-           FROM terraform_imports ORDER BY created_at DESC LIMIT 20`)
-      : []
+           FROM terraform_imports ORDER BY created_at DESC LIMIT 20`
+        )
+      } catch (err) {
+        fastify.log.warn(`[drift] terraform_imports query failed: ${err.message}`)
+        imports = []
+      }
+    }
 
-    // For each import, compute drift against current graph
-    const drifted = await query(`
-      MATCH (i:Infra)
-      WHERE i.source = 'terraform'
-      RETURN count(i) AS tfCount,
-             count(CASE WHEN i.updated_at IS NULL THEN 1 END) AS stale
-    `)
-    const graphTfCount = serialize(drifted[0]?.get('tfCount')) || 0
-    const staleCount   = serialize(drifted[0]?.get('stale'))   || 0
+    // Drift counts from Neo4j — unmapped = terraform-sourced infra with no component link
+    let graphTfCount = 0, unmappedCount = 0
+    try {
+      const drifted = await query(`
+        MATCH (i:Infra)
+        WHERE i.source = 'terraform' OR i.source = 'discovery'
+        RETURN count(i) AS tfCount,
+               count(CASE WHEN NOT exists((i)<-[:DEPLOYED_ON]-(:Component)) THEN 1 END) AS unmapped
+      `)
+      graphTfCount  = serialize(drifted[0]?.get('tfCount'))  || 0
+      unmappedCount = serialize(drifted[0]?.get('unmapped')) || 0
+    } catch (err) {
+      fastify.log.warn(`[drift] Neo4j drift query failed: ${err.message}`)
+    }
 
     return {
       graphTerraformResources: graphTfCount,
-      staleResources: staleCount,
+      staleResources: unmappedCount,
       recentImports: imports.map(imp => ({
         ...imp,
         rawSummary: imp.raw_summary,
@@ -421,27 +433,32 @@ export default async function workflowRoutes(fastify) {
                                AND compCount > 0 THEN 1 END) AS complete
       `),
       query(`
-        MATCH (i:Infra) WHERE i.source='terraform'
+        OPTIONAL MATCH (i:Infra)
+        WHERE i.source IN ['terraform','discovery']
+        OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+        WITH i, count(c) AS linked
         RETURN count(i) AS total,
-               count(CASE WHEN NOT ((:Component)-[:DEPLOYED_ON]->(i)) THEN 1 END) AS unmapped
+               count(CASE WHEN linked = 0 AND i IS NOT NULL THEN 1 END) AS unmapped
       `),
     ])
-    const c = changeRecs[0], a = appRecs[0], d = infraRecs[0]
+    const g = (rec, key) => rec?.[0] ? (serialize(rec[0].get(key)) || 0) : 0
+    const onboardTotal    = g(appRecs,   'total')
+    const onboardComplete = g(appRecs,   'complete')
     return {
       changeLcm: {
-        total:    serialize(c.get('total')),
-        draft:    serialize(c.get('draft')),
-        approved: serialize(c.get('approved')),
-        blocked:  serialize(c.get('blocked')),
+        total:    g(changeRecs, 'total'),
+        draft:    g(changeRecs, 'draft'),
+        approved: g(changeRecs, 'approved'),
+        blocked:  g(changeRecs, 'blocked'),
       },
       onboarding: {
-        total:    serialize(a.get('total')),
-        complete: serialize(a.get('complete')),
-        pending:  serialize(a.get('total')) - serialize(a.get('complete')),
+        total:    onboardTotal,
+        complete: onboardComplete,
+        pending:  onboardTotal - onboardComplete,
       },
       drift: {
-        total:    serialize(d.get('total')),
-        unmapped: serialize(d.get('unmapped')),
+        total:    g(infraRecs, 'total'),
+        unmapped: g(infraRecs, 'unmapped'),
       },
     }
   })

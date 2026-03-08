@@ -177,25 +177,63 @@ const BADGE_COLOR = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+const CLOUD_IDS = ['aws', 'azure', 'gcp']
+
 function useSavedConnections() {
   const [connections, setConnections] = useState({})
+
+  // Load: cloud accounts from API, everything else from localStorage
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('appcloud_integrations') || '{}')
-      setConnections(saved)
-    } catch {}
+    let base = {}
+    try { base = JSON.parse(localStorage.getItem('appcloud_integrations') || '{}') } catch {}
+
+    fetch('/api/discovery/accounts')
+      .then(r => r.ok ? r.json() : [])
+      .then(accounts => {
+        const merged = { ...base }
+        for (const acc of accounts) {
+          try {
+            const cfg = JSON.parse(acc.config || '{}')
+            merged[acc.provider] = { ...cfg, _saved: true, _accountId: acc.id }
+          } catch {}
+        }
+        setConnections(merged)
+      })
+      .catch(() => setConnections(base))
   }, [])
-  const save = (id, data) => {
-    const next = { ...connections, [id]: data }
+
+  const save = async (id, data) => {
+    const next = { ...connections, [id]: { ...data, _saved: true } }
     setConnections(next)
-    try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
+
+    if (CLOUD_IDS.includes(id)) {
+      // Persist cloud credentials to Neo4j via discovery API
+      try {
+        await fetch('/api/discovery/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: id, provider: id, config: data }),
+        })
+      } catch (e) { console.error('Failed to save cloud account:', e) }
+    } else {
+      try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
+    }
   }
-  const remove = (id) => {
+
+  const remove = async (id) => {
+    const existing = connections[id]
     const next = { ...connections }
     delete next[id]
     setConnections(next)
+
+    if (CLOUD_IDS.includes(id) && existing?._accountId) {
+      try {
+        await fetch(`/api/discovery/accounts/${existing._accountId}`, { method: 'DELETE' })
+      } catch {}
+    }
     try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
   }
+
   return { connections, save, remove }
 }
 
@@ -396,13 +434,47 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
     setTesting(false)
   }
 
+  const [scanning, setScanning] = useState(false)
+  const [scanResult, setScanResult] = useState(null)
+
   const handleSave = async () => {
     setSaving(true)
-    await new Promise(r => setTimeout(r, 800))
-    onSave(form)
+    await onSave(form)   // now async
     setSaved(true)
     setTimeout(() => { setSaved(false); onClose() }, 900)
     setSaving(false)
+  }
+
+  const handleScanNow = async () => {
+    setScanning(true); setScanResult(null)
+    try {
+      const endpoint = `/api/discovery/scan/${intg.id}`
+      const body = {}
+      if (intg.id === 'aws') {
+        body.regions = form.region ? [form.region] : ['us-east-1']
+        if (form.accessKeyId && form.secretKey)
+          body.credentials = { accessKeyId: form.accessKeyId, secretAccessKey: form.secretKey }
+      } else if (intg.id === 'azure') {
+        body.subscriptionId = form.subscriptionId
+        if (form.tenantId && form.clientId && form.clientSecret)
+          body.credentials = { tenantId: form.tenantId, clientId: form.clientId, clientSecret: form.clientSecret }
+      } else if (intg.id === 'gcp') {
+        body.projectId = form.projectId
+        if (form.serviceAccount) {
+          try { body.credentials = JSON.parse(form.serviceAccount) } catch {}
+        }
+      }
+      const res = await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      setScanResult(res.ok
+        ? { ok: true, total: data.total, duration: data.duration, breakdown: data.breakdown }
+        : { ok: false, error: data.message || 'Scan failed' }
+      )
+    } catch (e) { setScanResult({ ok: false, error: e.message }) }
+    finally { setScanning(false) }
   }
 
   const isConnected = !!existing
@@ -516,6 +588,34 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
         </div>
 
         {/* Footer */}
+        {/* Scan result (cloud providers only) */}
+        {scanResult && (
+          <div style={{ padding:'8px 22px', borderTop:`1px solid ${T.border}` }}>
+            <div style={{ padding:'8px 12px', borderRadius:7,
+              background: scanResult.ok ? T.green+'0a' : T.red+'0a',
+              border:`1px solid ${scanResult.ok ? T.green+'44' : T.red+'44'}` }}>
+              {scanResult.ok ? (
+                <div>
+                  <div style={{ ...mono, fontSize:10, fontWeight:700, color:T.green, marginBottom:4 }}>
+                    ✓ Discovery complete — {scanResult.total} resources in {(scanResult.duration/1000).toFixed(1)}s
+                  </div>
+                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                    {Object.entries(scanResult.breakdown || {})
+                      .filter(([k]) => k !== 'errors')
+                      .map(([k, v]) => (
+                        <span key={k} style={{ ...mono, fontSize:8, color:T.dim,
+                          background:T.surface2, border:`1px solid ${T.border}`,
+                          borderRadius:3, padding:'1px 6px' }}>{k}: {v}</span>
+                      ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ ...mono, fontSize:10, color:T.red }}>✗ {scanResult.error}</div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div style={{ padding:'14px 22px',borderTop:`1px solid ${T.border}`,
           display:'flex',gap:8,flexShrink:0 }}>
           {isConnected&&(
@@ -524,6 +624,21 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
                 background:T.red+'12',border:`1px solid ${T.red}33`,
                 borderRadius:8,color:T.red,cursor:'pointer' }}>
               Disconnect
+            </button>
+          )}
+          {/* Run discovery button — cloud providers only */}
+          {['aws','azure','gcp'].includes(intg.id) && (
+            <button onClick={handleScanNow} disabled={scanning}
+              style={{ ...mono, fontSize:11, padding:'9px 14px',
+                background: T.teal+'18', border:`1px solid ${T.teal}44`,
+                borderRadius:8, color:T.teal, cursor:'pointer',
+                display:'flex', alignItems:'center', gap:6,
+                opacity: scanning ? .6 : 1 }}>
+              {scanning ? (
+                <><div style={{ width:10, height:10, borderRadius:'50%',
+                  border:`1.5px solid ${T.teal}33`, borderTop:`1.5px solid ${T.teal}`,
+                  animation:'spin .7s linear infinite' }}/> Scanning…</>
+              ) : '▶ Scan Now'}
             </button>
           )}
           <button onClick={handleTest} disabled={testing}
