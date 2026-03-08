@@ -97,10 +97,13 @@ export const api = {
   },
 
   governance: {
-    summary:    () => req('/governance/summary'),
-    violations: () => req('/governance/policy-violations'),
-    audit:      () => req('/governance/change-audit'),
-    heatmap:    () => req('/governance/risk-heatmap'),
+    summary:          () => req('/governance/summary'),
+    violations:       () => req('/governance/policy-violations'),
+    audit:            () => req('/governance/change-audit'),
+    heatmap:          () => req('/governance/risk-heatmap'),
+    complianceReport: () => req('/governance/compliance-report'),
+    csvUrl:           () => `${BASE}/governance/compliance-report/csv`,
+    pdfUrl:           () => `${BASE}/governance/compliance-report/pdf`,
   },
 
   integrations: {

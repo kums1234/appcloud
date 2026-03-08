@@ -339,9 +339,27 @@ export default function GovernancePage() {
             Governance &amp; Compliance
           </h1>
         </div>
-        <p style={{ margin:0, fontSize:11, color:T.dim }}>
-          Policy enforcement, audit trail and risk posture across your infrastructure portfolio.
-        </p>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <p style={{ margin:0, fontSize:11, color:T.dim }}>
+            Policy enforcement, audit trail and risk posture across your infrastructure portfolio.
+          </p>
+          <div style={{ display:'flex', gap:8 }}>
+            <a href="/api/governance/compliance-report/csv" download
+              style={{ ...mono, fontSize:10, fontWeight:700,
+                color:T.teal, background:T.teal+'18', border:`1px solid ${T.teal}44`,
+                borderRadius:7, padding:'7px 14px', textDecoration:'none',
+                display:'flex', alignItems:'center', gap:5 }}>
+              ↓ CSV
+            </a>
+            <a href="/api/governance/compliance-report/pdf" target="_blank" rel="noreferrer"
+              style={{ ...mono, fontSize:10, fontWeight:700,
+                color:T.purple, background:T.purple+'18', border:`1px solid ${T.purple}44`,
+                borderRadius:7, padding:'7px 14px', textDecoration:'none',
+                display:'flex', alignItems:'center', gap:5 }}>
+              ↗ PDF
+            </a>
+          </div>
+        </div>
       </div>
 
       {!summaryLoading && summary && (

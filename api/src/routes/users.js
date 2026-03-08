@@ -1,12 +1,13 @@
 // routes/users.js
+import { serialize, props } from '../utils/serialize.js'
+
 export default async function userRoutes(fastify) {
-const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNumber() : Number(v)
   const { query, write } = fastify.neo4j
 
   // GET /users
   fastify.get('/', async (req, reply) => {
     const records = await query('MATCH (u:User) RETURN u ORDER BY u.name')
-    return records.map(r => r.get('u').properties)
+    return records.map(r => props(r.get('u')))
   })
 
   // GET /users/:id
@@ -25,12 +26,12 @@ const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNum
     if (!records.length) return reply.notFound('User not found')
     const r = records[0]
     return {
-      ...r.get('u').properties,
+      ...props(r.get('u')),
       activity: {
-        submitted: toInt(r.get('submittedCount')),
-        approved: toInt(r.get('approvedCount')),
-        rejected: toInt(r.get('rejectedCount'))
-      }
+        submitted: serialize(r.get('submittedCount')),
+        approved:  serialize(r.get('approvedCount')),
+        rejected:  serialize(r.get('rejectedCount')),
+      },
     }
   })
 
@@ -43,7 +44,7 @@ const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNum
     `, { name, role, email })
 
     reply.code(201)
-    return records[0].get('u').properties
+    return props(records[0].get('u'))
   })
 
   // PATCH /users/:id
@@ -60,7 +61,7 @@ const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNum
     `, { id: req.params.id, name, role, email })
 
     if (!records.length) return reply.notFound('User not found')
-    return records[0].get('u').properties
+    return props(records[0].get('u'))
   })
 
   // GET /users/:id/changes — all changes a user has interacted with
@@ -79,7 +80,9 @@ const toInt = v => v == null ? null : typeof v.toNumber === 'function' ? v.toNum
     if (!records.length) return reply.notFound('User not found')
     const r = records[0]
     const flatten = (list, action) =>
-      list.filter(i => i.change !== null).map(i => ({ ...i.change.properties, action }))
+      list
+        .filter(i => i.change !== null)
+        .map(i => ({ ...props(i.change), action }))
 
     return [
       ...flatten(r.get('submitted'), 'submitted'),
