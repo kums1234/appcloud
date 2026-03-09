@@ -3,11 +3,30 @@
 // so the browser never needs a direct connection to the API.
 const BASE = '/api'
 
+function getToken() {
+  try {
+    const stored = sessionStorage.getItem('appcloud_token')
+    if (stored) return JSON.parse(stored)?.token
+  } catch {}
+  return null
+}
+
 async function req(path, options = {}) {
+  const token = getToken()
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
     ...options,
   })
+  // Token expired / revoked — redirect to login
+  if (res.status === 401) {
+    try { sessionStorage.removeItem('appcloud_token') } catch {}
+    if (typeof window !== 'undefined') window.location.href = '/login'
+    throw new Error('Session expired — please log in again')
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }))
     throw new Error(err.message || 'Request failed')

@@ -2,6 +2,8 @@ import { props, serialize } from '../utils/serialize.js'
 
 export default async function infraRoutes(fastify) {
   const { query, write } = fastify.neo4j
+  const auth  = { preHandler: fastify.authenticate }
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
 
   // GET /infra
   fastify.get('/', async (req, reply) => {
@@ -35,7 +37,7 @@ export default async function infraRoutes(fastify) {
   })
 
   // POST /infra
-  fastify.post('/', async (req, reply) => {
+  fastify.post('/', { ...auth }, async (req, reply) => {
     const { name, provider, resource_type, region, public: isPublic } = req.body
     const records = await write(`
       CREATE (i:Infra {
@@ -43,12 +45,15 @@ export default async function infraRoutes(fastify) {
         resource_type: $resource_type, region: $region, public: $public
       }) RETURN i
     `, { name, provider, resource_type, region: region || '', public: !!isPublic })
+    const result = props(records[0].get('i'))
+    fastify.pg.audit(actor(req), 'create', 'Infra', result.id, result.name,
+      { provider, resource_type }).catch(() => {})
     reply.code(201)
-    return props(records[0].get('i'))
+    return result
   })
 
   // PATCH /infra/:id
-  fastify.patch('/:id', async (req, reply) => {
+  fastify.patch('/:id', { ...auth }, async (req, reply) => {
     const { name, region, public: isPublic } = req.body
     const records = await write(`
       MATCH (i:Infra {id: $id})
@@ -58,12 +63,19 @@ export default async function infraRoutes(fastify) {
       RETURN i
     `, { id: req.params.id, name, region, public: isPublic })
     if (!records.length) return reply.notFound('Infra not found')
-    return props(records[0].get('i'))
+    const result = props(records[0].get('i'))
+    fastify.pg.audit(actor(req), 'update', 'Infra', result.id, result.name,
+      { changes: req.body }).catch(() => {})
+    return result
   })
 
   // DELETE /infra/:id
-  fastify.delete('/:id', async (req, reply) => {
+  fastify.delete('/:id', { ...auth }, async (req, reply) => {
+    const pre = await query('MATCH (i:Infra {id: $id}) RETURN i.name AS name',
+      { id: req.params.id })
+    const name = pre[0]?.get('name') || req.params.id
     await write(`MATCH (i:Infra {id: $id}) DETACH DELETE i`, { id: req.params.id })
+    fastify.pg.audit(actor(req), 'delete', 'Infra', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 

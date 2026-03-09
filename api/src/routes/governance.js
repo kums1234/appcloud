@@ -166,8 +166,9 @@ export default async function governanceRoutes(fastify) {
       .sort((a,b) => (SEVERITY_ORDER[a.severity]||9) - (SEVERITY_ORDER[b.severity]||9))
   })
 
-  // GET /governance/change-audit — full audit trail of all changes with actors
+  // GET /governance/change-audit — change trail from Neo4j + full audit_log from PostgreSQL
   fastify.get('/change-audit', async (req, reply) => {
+    // Always fetch from Neo4j — the authoritative change graph
     const records = await query(`
       MATCH (ch:Change)
       OPTIONAL MATCH (submitter:User)-[:SUBMITTED]->(ch)
@@ -182,13 +183,53 @@ export default async function governanceRoutes(fastify) {
       ORDER BY ch.createdAt DESC
       LIMIT 100
     `)
-    return records.map(r => ({
+    const changes = records.map(r => ({
       ...props(r.get('ch')),
       submittedBy:  r.get('submittedBy'),
       approvedBy:   r.get('approvedBy'),
       rejectedBy:   r.get('rejectedBy'),
       affectedApps: r.get('affectedApps'),
+      source:       'graph',
     }))
+
+    // Enrich with PostgreSQL audit_log if available — appends non-Change events
+    // (application creates/deletes, infra changes, logins) that aren't in Neo4j
+    let pgAuditRows = []
+    if (fastify.pg?.pool) {
+      try {
+        pgAuditRows = await fastify.pg.query(`
+          SELECT id, actor, action, resource_type, resource_id,
+                 resource_name, metadata, created_at
+          FROM audit_log
+          ORDER BY created_at DESC
+          LIMIT 200
+        `)
+      } catch (err) {
+        fastify.log.warn(`[change-audit] audit_log query failed: ${err.message}`)
+      }
+    }
+
+    // Merge: pg rows that are for 'Change' resource_type are already in the graph result;
+    // keep all other resource types as supplementary audit entries
+    const pgEntries = pgAuditRows
+      .filter(row => row.resource_type !== 'Change')
+      .map(row => ({
+        id:           row.id,
+        title:        `${row.action} ${row.resource_type}: ${row.resource_name || row.resource_id}`,
+        action:       row.action,
+        resourceType: row.resource_type,
+        resourceId:   row.resource_id,
+        resourceName: row.resource_name,
+        submittedBy:  row.actor,
+        metadata:     row.metadata,
+        createdAt:    row.created_at,
+        source:       'audit_log',
+      }))
+
+    // Return combined list, newest first
+    return [...changes, ...pgEntries].sort((a, b) =>
+      (a.createdAt < b.createdAt ? 1 : -1)
+    )
   })
 
   // GET /governance/risk-heatmap — risk by application and tier

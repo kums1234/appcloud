@@ -35,6 +35,8 @@
     "@google-cloud/container": "^5.11.0",
     "@google-cloud/resource-manager": "^5.2.0",
     "googleapis": "^140.0.0",
-    "@azure/arm-rediscache": "^8.2.0"
+    "@azure/arm-rediscache": "^8.2.0",
+    "@fastify/jwt": "^9.0.0",
+    "bcrypt": "^5.1.1"
   }
 }

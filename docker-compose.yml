@@ -72,11 +72,14 @@ services:
       - DB_PASSWORD_FILE=/run/secrets/db_password
       - PG_USERNAME_FILE=/run/secrets/pg_username
       - PG_PASSWORD_FILE=/run/secrets/pg_password
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - JWT_EXPIRES_IN=8h
     secrets:
       - db_username
       - db_password
       - pg_username
       - pg_password
+      - jwt_secret
     volumes:
       - ./api/src:/app/src
     depends_on:
@@ -105,3 +108,5 @@ secrets:
     file: ./secrets/pg_username.txt
   pg_password:
     file: ./secrets/pg_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt

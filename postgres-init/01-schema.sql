@@ -84,3 +84,21 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER integrations_updated_at
   BEFORE UPDATE ON integrations
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ── Users — credentials and profile (moved from Neo4j) ───────────────────────
+CREATE TABLE IF NOT EXISTS users (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          TEXT NOT NULL,
+  email         TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user' | 'viewer'
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_login_at TIMESTAMPTZ,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TRIGGER users_updated_at
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

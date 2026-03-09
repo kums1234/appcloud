@@ -379,7 +379,9 @@ export default async function workflowRoutes(fastify) {
     const { infraIds, submittedBy } = req.body
     if (!infraIds?.length) return reply.badRequest('infraIds required')
 
-    const userRecords = await query(`MATCH (u:User {id:$id}) RETURN u`, { id: submittedBy })
+    const userRecords = await fastify.pg.query(
+      'SELECT id FROM users WHERE id = $1 LIMIT 1', [submittedBy]
+    )
     if (!userRecords.length) return reply.badRequest('submittedBy user not found')
 
     const created = []

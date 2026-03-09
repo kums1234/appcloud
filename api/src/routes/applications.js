@@ -2,6 +2,10 @@ import { props, serialize } from '../utils/serialize.js'
 
 export default async function applicationRoutes(fastify) {
   const { query, write } = fastify.neo4j
+  const auth = { preHandler: fastify.authenticate }
+
+  // ── actor helper — name from JWT or fallback ────────────────────────────────
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
 
   // GET /applications
   fastify.get('/', async (req, reply) => {
@@ -35,7 +39,7 @@ export default async function applicationRoutes(fastify) {
   })
 
   // POST /applications
-  fastify.post('/', async (req, reply) => {
+  fastify.post('/', { ...auth }, async (req, reply) => {
     const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       CREATE (a:Application {
@@ -48,12 +52,15 @@ export default async function applicationRoutes(fastify) {
          availability: availability || '99.9',
          confidentiality: confidentiality || 'internal',
          domain: domain || '' })
+    const result = props(records[0].get('a'))
+    fastify.pg.audit(actor(req), 'create', 'Application', result.id, result.name,
+      { tier: result.tier, environment: result.environment }).catch(() => {})
     reply.code(201)
-    return props(records[0].get('a'))
+    return result
   })
 
   // PATCH /applications/:id
-  fastify.patch('/:id', async (req, reply) => {
+  fastify.patch('/:id', { ...auth }, async (req, reply) => {
     const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       MATCH (a:Application {id: $id})
@@ -68,12 +75,19 @@ export default async function applicationRoutes(fastify) {
     `, { id: req.params.id, name, tier: tier ? parseInt(tier) : null,
          owner, environment, availability, confidentiality, domain })
     if (!records.length) return reply.notFound('Application not found')
-    return props(records[0].get('a'))
+    const result = props(records[0].get('a'))
+    fastify.pg.audit(actor(req), 'update', 'Application', result.id, result.name,
+      { changes: req.body }).catch(() => {})
+    return result
   })
 
   // DELETE /applications/:id
-  fastify.delete('/:id', async (req, reply) => {
+  fastify.delete('/:id', { ...auth }, async (req, reply) => {
+    const pre = await query('MATCH (a:Application {id: $id}) RETURN a.name AS name',
+      { id: req.params.id })
+    const name = pre[0]?.get('name') || req.params.id
     await write(`MATCH (a:Application {id: $id}) DETACH DELETE a`, { id: req.params.id })
+    fastify.pg.audit(actor(req), 'delete', 'Application', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 

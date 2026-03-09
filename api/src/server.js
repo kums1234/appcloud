@@ -4,6 +4,8 @@ import cors from '@fastify/cors'
 import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
+import { authPlugin } from './plugins/auth.js'
+import authRoutes from './routes/auth.js'
 import applicationRoutes from './routes/applications.js'
 import componentRoutes from './routes/components.js'
 import infraRoutes from './routes/infra.js'
@@ -35,7 +37,15 @@ try {
 await neo4jPlugin(fastify)
 await postgresPlugin(fastify)
 
-// Routes
+// Auth plugin — must come after DB plugins (uses User nodes) and before routes
+await authPlugin(fastify)
+
+// Public routes (no auth required)
+await fastify.register(authRoutes, { prefix: '/auth' })
+
+// Protected routes — mutations require a valid JWT when JWT_SECRET is set.
+// The fastify.authenticate decorator is a no-op when auth is disabled so
+// the same preHandler works in both modes.
 await fastify.register(applicationRoutes,  { prefix: '/applications' })
 await fastify.register(componentRoutes,    { prefix: '/components' })
 await fastify.register(infraRoutes,        { prefix: '/infra' })

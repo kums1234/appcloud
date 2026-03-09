@@ -1,9 +1,9 @@
 import { props, serialize } from '../utils/serialize.js'
 
-const toInt = v => v == null ? null : typeof v?.toNumber === 'function' ? v.toNumber() : Number(v)
-
 export default async function changeRoutes(fastify) {
   const { query, write } = fastify.neo4j
+  const auth  = { preHandler: fastify.authenticate }
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
 
   // GET /changes
   fastify.get('/', async (req, reply) => {
@@ -47,15 +47,18 @@ export default async function changeRoutes(fastify) {
   })
 
   // POST /changes
-  fastify.post('/', async (req, reply) => {
-    const { description, riskScore, submittedBy, modifiesIds, affectsIds } = req.body
+  fastify.post('/', { ...auth }, async (req, reply) => {
+    const { title, description, type, riskScore, submittedBy, applicationId,
+            modifiesIds, affectsIds } = req.body
     const records = await write(`
       MATCH (u:User {id: $submittedBy})
       CREATE (ch:Change {
         id: randomUUID(), status: "draft",
         createdAt: datetime(),
         riskScore: $riskScore,
-        description: $description
+        title: $title,
+        description: $description,
+        type: $type
       })
       CREATE (u)-[:SUBMITTED]->(ch)
       WITH ch
@@ -68,18 +71,23 @@ export default async function changeRoutes(fastify) {
         MERGE (ch)-[:AFFECTS]->(a)
       RETURN ch
     `, {
-      description,
-      riskScore: parseFloat(riskScore),
+      title:       title || description || 'Untitled change',
+      description: description || '',
+      type:        type || 'general',
+      riskScore:   parseFloat(riskScore) || 0,
       submittedBy,
-      modifiesIds: modifiesIds || [],
-      affectsIds:  affectsIds  || [],
+      modifiesIds: modifiesIds || (applicationId ? [applicationId] : []),
+      affectsIds:  affectsIds  || (applicationId ? [applicationId] : []),
     })
+    const result = props(records[0].get('ch'))
+    fastify.pg.audit(actor(req), 'create', 'Change', result.id, result.title || result.id,
+      { riskScore: result.riskScore, status: 'draft' }).catch(() => {})
     reply.code(201)
-    return props(records[0].get('ch'))
+    return result
   })
 
   // POST /changes/:id/approve
-  fastify.post('/:id/approve', async (req, reply) => {
+  fastify.post('/:id/approve', { ...auth }, async (req, reply) => {
     const { userId } = req.body
     const records = await write(`
       MATCH (ch:Change {id: $id}), (u:User {id: $userId})
@@ -88,11 +96,14 @@ export default async function changeRoutes(fastify) {
       RETURN ch
     `, { id: req.params.id, userId })
     if (!records.length) return reply.notFound('Change not found')
-    return props(records[0].get('ch'))
+    const result = props(records[0].get('ch'))
+    fastify.pg.audit(actor(req), 'approve', 'Change', result.id, result.title || result.id,
+      { approvedBy: userId }).catch(() => {})
+    return result
   })
 
   // POST /changes/:id/reject
-  fastify.post('/:id/reject', async (req, reply) => {
+  fastify.post('/:id/reject', { ...auth }, async (req, reply) => {
     const { userId, reason } = req.body
     const records = await write(`
       MATCH (ch:Change {id: $id}), (u:User {id: $userId})
@@ -102,7 +113,10 @@ export default async function changeRoutes(fastify) {
       RETURN ch
     `, { id: req.params.id, userId, reason })
     if (!records.length) return reply.notFound('Change not found')
-    return props(records[0].get('ch'))
+    const result = props(records[0].get('ch'))
+    fastify.pg.audit(actor(req), 'reject', 'Change', result.id, result.title || result.id,
+      { rejectedBy: userId, reason }).catch(() => {})
+    return result
   })
 
   // GET /changes/:id/blast-radius
