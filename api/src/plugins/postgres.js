@@ -47,12 +47,13 @@ export async function postgresPlugin(fastify) {
   fastify.decorate('pg', {
     pool,
     query: async (sql, params = []) => (await pool.query(sql, params)).rows,
-    audit: async (actor, action, resourceType, resourceId, resourceName, metadata = {}) => {
+    audit: async (actor, action, resourceType, resourceId, resourceName, metadata = {}, diff = null) => {
       try {
         await pool.query(
-          `INSERT INTO audit_log(actor,action,resource_type,resource_id,resource_name,metadata)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
-          [actor, action, resourceType, resourceId, resourceName, JSON.stringify(metadata)]
+          `INSERT INTO audit_log(actor,action,resource_type,resource_id,resource_name,metadata,diff)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [actor, action, resourceType, resourceId, resourceName,
+           JSON.stringify(metadata), diff ? JSON.stringify(diff) : null]
         )
       } catch {}
     }

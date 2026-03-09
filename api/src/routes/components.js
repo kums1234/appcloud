@@ -1,10 +1,12 @@
-import { props, serialize } from '../utils/serialize.js'
+import { props } from '../utils/serialize.js'
 
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
+  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
 
   // GET /components
-  fastify.get('/', async (req, reply) => {
+  fastify.get('/', async (req) => {
     const { type } = req.query
     const records = await query(`
       MATCH (c:Component)
@@ -49,8 +51,11 @@ export default async function componentRoutes(fastify) {
       )
       RETURN c
     `, { name, type, runtime: runtime || null, appId: appId || null })
+    const result = props(records[0].get('c'))
+    audit(actor(req), 'create', 'Component', result.id, result.name,
+      { type: result.type, runtime: result.runtime, appId })
     reply.code(201)
-    return props(records[0].get('c'))
+    return result
   })
 
   // PATCH /components/:id
@@ -64,12 +69,20 @@ export default async function componentRoutes(fastify) {
       RETURN c
     `, { id: req.params.id, name, type, runtime })
     if (!records.length) return reply.notFound('Component not found')
-    return props(records[0].get('c'))
+    const result = props(records[0].get('c'))
+    audit(actor(req), 'update', 'Component', result.id, result.name,
+      { changes: req.body })
+    return result
   })
 
   // DELETE /components/:id
   fastify.delete('/:id', async (req, reply) => {
+    const pre = await query(
+      `MATCH (c:Component {id:$id}) RETURN c.name AS name`, { id: req.params.id }
+    )
+    const name = pre[0]?.get('name') || req.params.id
     await write(`MATCH (c:Component {id: $id}) DETACH DELETE c`, { id: req.params.id })
+    audit(actor(req), 'delete', 'Component', req.params.id, name)
     reply.code(204)
   })
 
@@ -81,6 +94,8 @@ export default async function componentRoutes(fastify) {
       MERGE (c1)-[r:CONNECTS_TO]->(c2)
       SET r.protocol = $protocol, r.port = $port
     `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null })
+    audit(actor(req), 'connect', 'Component', req.params.id, req.params.id,
+      { targetId, protocol, port })
     reply.code(201)
     return { connected: true }
   })
@@ -92,6 +107,8 @@ export default async function componentRoutes(fastify) {
       MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})
       MERGE (c)-[:DEPLOYED_ON]->(i)
     `, { id: req.params.id, infraId })
+    audit(actor(req), 'deploy', 'Component', req.params.id, req.params.id,
+      { infraId })
     reply.code(201)
     return { deployed: true }
   })

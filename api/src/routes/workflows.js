@@ -109,6 +109,8 @@ async function checkOnboarding(appId, query) {
 // ─── Route definitions ────────────────────────────────────────────────────────
 export default async function workflowRoutes(fastify) {
   const { query, write } = fastify.neo4j
+  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
 
   // ── WORKFLOW DEFINITIONS ──────────────────────────────────────────────────
 
@@ -219,6 +221,9 @@ export default async function workflowRoutes(fastify) {
          wfStatus: nextStatus.wfStatus, userId: userId || 'system',
          note: note || '', scheduledFor: scheduledFor || null })
 
+    audit(actor(req), 'advance', 'Change', req.params.id, req.params.id,
+      { action, previousStep: current.currentStep,
+        newStatus: nextStatus.changeStatus, newWorkflowStatus: nextStatus.wfStatus, note })
     return { advanced: true, previousStep: current.currentStep,
              newStatus: nextStatus.changeStatus, newWorkflowStatus: nextStatus.wfStatus }
   })
@@ -278,6 +283,8 @@ export default async function workflowRoutes(fastify) {
     }
     const result = await checkOnboarding(req.params.id, query)
     if (!result) return reply.notFound('Application not found')
+    audit(actor(req), 'onboarding_step', 'Application', req.params.id, req.params.id,
+      { step })
     return { step, refreshed: result }
   })
 
@@ -412,6 +419,10 @@ export default async function workflowRoutes(fastify) {
       if (changeRecs.length) created.push(props(changeRecs[0].get('ch')))
     }
 
+    if (created.length) {
+      audit(actor(req), 'drift_create_changes', 'Change', 'drift', 'Drift Changes',
+        { count: created.length, infraIds, submittedBy })
+    }
     return { created: created.length, changes: created }
   })
 

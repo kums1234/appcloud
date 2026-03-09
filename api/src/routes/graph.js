@@ -1,6 +1,8 @@
 import { props, serialize } from '../utils/serialize.js'
 
 export default async function graphRoutes(fastify) {
+  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
   const { query } = fastify.neo4j
 
   // GET /graph/summary
@@ -176,7 +178,10 @@ export default async function graphRoutes(fastify) {
         nodeCount: appCount + componentCount + infraCount
       }) RETURN s
     `, { label })
+    const snap = props(records[0].get('s'))
+    audit(actor(req), 'create', 'Snapshot', snap.id, label || snap.id,
+      { nodeCount: snap.nodeCount })
     reply.code(201)
-    return props(records[0].get('s'))
+    return snap
   })
 }

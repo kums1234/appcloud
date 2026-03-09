@@ -690,6 +690,8 @@ async function scanGCP({ credentials, projectId, write, log }) {
 
 export default async function discoveryRoutes(fastify) {
   const { write, query } = fastify.neo4j
+  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  const actor = (req) => req.user?.name || req.user?.id || 'system'
 
   // ── GET /discovery/accounts — list saved cloud accounts ───────────────
   fastify.get('/accounts', async () => {
@@ -726,13 +728,21 @@ export default async function discoveryRoutes(fastify) {
       provider,
       config:   JSON.stringify(safeConfig),
     })
+    const acct = props(records[0].get('a'))
+    audit(actor(req), 'create', 'CloudAccount', acct.id, acct.name, { provider: acct.provider })
     reply.code(201)
-    return props(records[0].get('a'))
+    return acct
   })
 
   // ── DELETE /discovery/accounts/:id ────────────────────────────────────
   fastify.delete('/accounts/:id', async (req, reply) => {
+    const pre = await query(
+      `MATCH (a:CloudAccount {id:$id}) RETURN a.name AS name, a.provider AS provider`,
+      { id: req.params.id }
+    )
     await write(`MATCH (a:CloudAccount {id:$id}) DELETE a`, { id: req.params.id })
+    audit(actor(req), 'delete', 'CloudAccount', req.params.id,
+      pre[0]?.get('name') || req.params.id, { provider: pre[0]?.get('provider') })
     reply.code(204)
   })
 
@@ -760,6 +770,8 @@ export default async function discoveryRoutes(fastify) {
       .reduce((s, [, v]) => s + v, 0)
 
     fastify.log.info(`[Discovery] AWS scan complete: ${total} resources in ${duration}ms`)
+    audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS',
+      { regions, total, duration, breakdown: stats })
     return { provider: 'aws', regions, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
   })
 
@@ -786,6 +798,8 @@ export default async function discoveryRoutes(fastify) {
       .filter(([k]) => k !== 'errors')
       .reduce((s, [, v]) => s + v, 0)
 
+    audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure',
+      { subscriptionId, total, duration, breakdown: stats })
     return { provider: 'azure', subscriptionId, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
   })
 
@@ -812,6 +826,8 @@ export default async function discoveryRoutes(fastify) {
       .filter(([k]) => k !== 'errors')
       .reduce((s, [, v]) => s + v, 0)
 
+    audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP',
+      { projectId, total, duration, breakdown: stats })
     return { provider: 'gcp', projectId, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
   })
 
@@ -830,6 +846,9 @@ export default async function discoveryRoutes(fastify) {
         .then(s => { results.gcp = s }).catch(e => { errors.gcp = e.message }),
     ])
 
+    const providers = Object.keys(results)
+    audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
+      { providers, results, errors })
     return { results, errors, completedAt: new Date().toISOString() }
   })
 
@@ -892,15 +911,23 @@ export default async function discoveryRoutes(fastify) {
       MATCH (i:Infra {id: $infraId}), (c:Component {id: $componentId})
       MERGE (c)-[:DEPLOYED_ON]->(i)
     `, { infraId, componentId })
+    audit(actor(req), 'link', 'Infra', infraId, infraId, { componentId })
     return { linked: true, infraId, componentId }
   })
 
   // ── DELETE /discovery/resources/:id — remove a discovered resource ────
   fastify.delete('/resources/:id', async (req, reply) => {
+    const pre = await query(
+      `MATCH (i:Infra {id:$id}) WHERE i.source = 'discovery' RETURN i.name AS name, i.provider AS provider`,
+      { id: req.params.id }
+    )
     await write(`
       MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery'
       DETACH DELETE i
     `, { id: req.params.id })
+    audit(actor(req), 'delete', 'Infra', req.params.id,
+      pre[0]?.get('name') || req.params.id,
+      { source: 'discovery', provider: pre[0]?.get('provider') })
     reply.code(204)
   })
 }

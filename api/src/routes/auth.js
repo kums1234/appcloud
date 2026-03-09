@@ -109,5 +109,12 @@ export default async function authRoutes(fastify) {
   })
 
   // ── POST /auth/logout ─────────────────────────────────────────────────────
-  fastify.post('/logout', async (req, reply) => { reply.code(204).send() })
+  fastify.post('/logout', async (req, reply) => {
+    // Log the logout event if the request carries a valid token
+    try {
+      const user = await req.jwtVerify()
+      pg.audit(user.name, 'logout', 'User', user.id, user.name).catch(() => {})
+    } catch {}
+    reply.code(204).send()
+  })
 }
