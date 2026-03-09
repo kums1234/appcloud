@@ -1,4 +1,6 @@
 'use client'
+
+export const dynamic = 'force-dynamic'
 import { useEffect, useState, useCallback } from 'react'
 import ReactFlow, {
   Background, Controls, Panel,
@@ -9,17 +11,26 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { api } from '@/lib/api'
+import { useTheme, getT } from '@/lib/theme'
+
+const T = getT('dark')  // module-level fallback for SSR
 
 // ── Colours ───────────────────────────────────────────────────────────────────
-const C = {
-  Application: { bg:'#061a0a', border:'#22c55e', glow:'#22c55e', text:'#22c55e' },
-  API:         { bg:'#061018', border:'#38bdf8', glow:'#38bdf8', text:'#38bdf8' },
-  DB:          { bg:'#180e02', border:'#f59e0b', glow:'#f59e0b', text:'#f59e0b' },
-  Worker:      { bg:'#0e0618', border:'#a78bfa', glow:'#a78bfa', text:'#a78bfa' },
-  UI:          { bg:'#180608', border:'#f43f5e', glow:'#f43f5e', text:'#f43f5e' },
+// Node palettes — bg shifts lighter in light mode
+function makeC(isDark) {
+  return {
+    Application: { bg: isDark?'#061a0a':'#f0fff4', border:'#22c55e', glow:'#22c55e', text:'#16a34a' },
+    API:         { bg: isDark?'#061018':'#eff6ff', border:'#38bdf8', glow:'#38bdf8', text:'#0284c7' },
+    DB:          { bg: isDark?'#180e02':'#fffbeb', border:'#f59e0b', glow:'#f59e0b', text:'#d97706' },
+    Worker:      { bg: isDark?'#0e0618':'#faf5ff', border:'#a78bfa', glow:'#a78bfa', text:'#7c3aed' },
+    UI:          { bg: isDark?'#180608':'#fff1f2', border:'#f43f5e', glow:'#f43f5e', text:'#dc2626' },
+  }
 }
 const EC = { sameApp:'#38bdf8', crossApp:'#a78bfa' }
 const PROV_COLOR = { aws:'#f59e0b', azure:'#38bdf8', gcp:'#22c55e', onprem:'#a78bfa' }
+
+// Module-level fallback — dark palette; GraphPage re-derives from useTheme()
+const C = makeC(true)
 
 function nColor(subtype) { return C[subtype] || C.API }
 
@@ -42,7 +53,7 @@ function AppGroupNode({ data }) {
   return (
     <div style={{
       width:'100%', height:'100%',
-      background:`radial-gradient(ellipse at 50% 0%,${c.glow}07 0%,#020810 60%)`,
+      background:`radial-gradient(ellipse at 50% 0%,${c.glow}07 0%,${c.bg} 60%)`,
       border:`1.5px solid ${c.border}50`,
       boxShadow:`0 0 36px ${c.glow}0c,inset 0 0 40px ${c.glow}04`,
       borderRadius:20, position:'relative', pointerEvents:'none',
@@ -177,7 +188,7 @@ function AnimEdge({ id,sourceX,sourceY,targetX,targetY,
             transform:`translate(-50%,-50%) translate(${lx}px,${ly}px)` }}>
             <span style={{
               display:'inline-block',
-              background:isCross?'#0b0718':'#030608',
+              background:isCross?T.surface2:T.surface,
               border:`1px solid ${color}${isCross?'99':'44'}`,
               borderRadius:5,padding:isCross?'3px 9px':'2px 6px',
               fontSize:isCross?10:9,fontFamily:'monospace',fontWeight:700,
@@ -310,7 +321,7 @@ function buildGraph({ apps, components, connections, deployments, infra }) {
 // ── Legend ────────────────────────────────────────────────────────────────────
 function Legend() {
   return (
-    <div style={{ background:'#04080fee',border:'1px solid #0a1a2e',
+    <div style={{ background:`${T.surface}ee`,border:`1px solid ${T.border}`,
       borderRadius:12,padding:'12px 14px',backdropFilter:'blur(10px)' }}>
       <div style={{ fontSize:8,color:'#1e3a5f',fontFamily:'monospace',
         letterSpacing:'0.12em',marginBottom:10,fontWeight:700 }}>LEGEND</div>
@@ -326,7 +337,7 @@ function Legend() {
           <span style={{ fontSize:10,color:'#475569',fontFamily:'monospace' }}>{label}</span>
         </div>
       ))}
-      <div style={{ height:1,background:'#0a1a2e',margin:'8px 0' }} />
+      <div style={{ height:1,background:T.border,margin:"8px 0" }} />
       {[[EC.sameApp,'Internal connection'],[EC.crossApp,'Cross-app connection']].map(([color,label])=>(
         <div key={label} style={{ display:'flex',alignItems:'center',gap:8,marginBottom:5 }}>
           <div style={{ width:22,height:0,borderTop:`2px solid ${color}`,opacity:.9 }} />
@@ -352,7 +363,7 @@ function NodePanel({ node, allEdges, allNodes, onClose }) {
 
   return (
     <div style={{ position:'absolute',right:16,top:58,width:292,zIndex:20,
-      background:'#03060dee',border:`1px solid ${c.border}44`,
+      background:`${T.surface}ee`,border:`1px solid ${c.border}44`,
       borderRadius:14,overflow:'hidden',
       maxHeight:'calc(100vh - 80px)',display:'flex',flexDirection:'column',
       boxShadow:`0 0 40px ${c.glow}18,0 20px 60px #00000099`,
@@ -477,6 +488,9 @@ function NodePanel({ node, allEdges, allNodes, onClose }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function GraphPage() {
+  const { theme }            = useTheme()
+  const T                    = getT(theme)
+  const C                    = makeC(theme === 'dark')
   const [nodes,setNodes,onNodesChange] = useNodesState([])
   const [edges,setEdges,onEdgesChange] = useEdgesState([])
   const [allNodes, setAllNodes] = useState([])
@@ -530,7 +544,7 @@ export default function GraphPage() {
 
   return (
     <div style={{ width:'100%',height:'100vh',
-      background:'radial-gradient(ellipse at 15% 40%,#05101e 0%,#020810 65%)',
+      background:`radial-gradient(ellipse at 15% 40%,${T.surface} 0%,${T.bg} 65%)`,
       display:'flex',flexDirection:'column',fontFamily:'monospace' }}>
       <style>{`
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -538,15 +552,15 @@ export default function GraphPage() {
         .react-flow__attribution{display:none!important}
         .react-flow__handle{opacity:0!important;pointer-events:none!important;
           width:4px!important;height:4px!important}
-        .react-flow__controls button{background:#04080f!important;
+        .react-flow__controls button{background:"${T.surface}"!important;
           border-color:#081428!important;color:#475569!important}
-        .react-flow__controls button:hover{background:#080f1a!important}
+        .react-flow__controls button:hover{background:"${T.surface2}"!important}
       `}</style>
 
       {/* Top bar */}
       <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',
         padding:'9px 18px',borderBottom:'1px solid #081428',
-        background:'#02060eee',zIndex:5,flexShrink:0,gap:16 }}>
+        background:`${T.surface}ee`,border:`1px solid ${T.border}`,zIndex:5,flexShrink:0,gap:16 }}>
         <div style={{ display:'flex',alignItems:'center',gap:10 }}>
           <div style={{ width:7,height:7,borderRadius:'50%',background:'#22c55e',
             boxShadow:'0 0 10px #22c55e',animation:'pulse 2s infinite' }} />
@@ -560,7 +574,7 @@ export default function GraphPage() {
           {[['APPS',counts.apps,'#22c55e'],['COMPONENTS',counts.comps,'#38bdf8'],
             ['INFRA',counts.infra,'#6b7280'],['EDGES',counts.edges,'#a78bfa']]
             .map(([l,v,color],i,arr)=>(
-              <div key={l} style={{ padding:'5px 14px',background:'#080f1a',
+              <div key={l} style={{ padding:'5px 14px',background:T.surface2,
                 border:'1px solid #081428',borderLeft:i>0?'none':undefined,
                 borderRadius:i===0?'8px 0 0 8px':i===arr.length-1?'0 8px 8px 0':0,
                 display:'flex',flexDirection:'column',alignItems:'center',gap:1 }}>
@@ -582,7 +596,7 @@ export default function GraphPage() {
                 color:filter===key?'#22c55e':'#334155',transition:'all .15s',
               }}>{label}</button>
             ))}
-          <button onClick={loadGraph} style={{ padding:'5px 11px',background:'#080f1a',
+          <button onClick={loadGraph} style={{ padding:'5px 11px',background:T.surface2,
             border:'1px solid #081428',borderRadius:6,color:'#475569',
             fontSize:14,cursor:'pointer' }}>↺</button>
         </div>

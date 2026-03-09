@@ -1,13 +1,16 @@
 'use client'
+
+export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { useTheme, getT } from '@/lib/theme'
 
-const T = {
-  bg: '#04080f', surface: '#080f1a', surface2: '#0d1626', surface3: '#111d2e',
-  border: '#0f1f35', border2: '#1e293b',
-  text: '#f1f5f9', muted: '#334155', dim: '#64748b',
-  green: '#22c55e', blue: '#38bdf8', amber: '#f59e0b', red: '#f43f5e', purple: '#a78bfa',
-}
+// Module-level fallback — satisfies sub-component defaults and constants.
+// The default export re-derives T from useTheme() for live theme switching.
+const T = getT('dark')
+
+
+
 const TIER_COLORS = { 1: T.red, 2: T.amber, 3: T.green, 4: T.muted }
 const TYPE_META = {
   API:    { color: T.blue,   icon: '⬡' },
@@ -513,6 +516,9 @@ function AppPanel({ app, onClose, allComponents, allInfra, onRefresh }) {
 }
 
 export default function ApplicationsPage() {
+  const { theme } = useTheme()
+  const T = getT(theme)
+
   const [apps, setApps] = useState([])
   const [allComponents, setAllComponents] = useState([])
   const [allInfra, setAllInfra] = useState([])

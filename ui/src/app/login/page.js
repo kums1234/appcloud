@@ -1,19 +1,16 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../lib/auth-context'
+import { useTheme, getT } from '../../lib/theme'
 
-export const dynamic = 'force-dynamic'
-
-const T = {
-  bg:'#04080f', surface:'#080f1a', surface2:'#0d1626',
-  border:'#0f1f35', border2:'#1e293b',
-  text:'#f1f5f9', muted:'#334155', dim:'#64748b',
-  green:'#22c55e', blue:'#38bdf8', red:'#f43f5e', teal:'#2dd4bf',
-}
 const mono = { fontFamily:'monospace' }
 
-export default function LoginPage() {
+import { ThemeProvider } from '../../lib/theme'
+
+function LoginInner() {
   const { login, register, user, loading } = useAuth()
+  const { theme } = useTheme()
+  const T = getT(theme)
   const [mode,     setMode]     = useState('login')   // 'login' | 'register'
   const [name,     setName]     = useState('')
   const [email,    setEmail]    = useState('')
@@ -53,6 +50,7 @@ export default function LoginPage() {
 
   if (loading) return null
 
+  const isLight = theme === 'light'
   return (
     <div style={{ minHeight:'100vh', background:T.bg, display:'flex',
       alignItems:'center', justifyContent:'center', fontFamily:'monospace' }}>
@@ -170,5 +168,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <ThemeProvider>
+      <LoginInner />
+    </ThemeProvider>
   )
 }
