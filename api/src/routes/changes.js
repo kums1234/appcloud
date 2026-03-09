@@ -194,7 +194,7 @@ export default async function changeRoutes(fastify) {
     const appMap = {}
     affectedComponents.forEach(c => {
       if (c.appId && !appMap[c.appId])
-        appMap[c.appId] = { id:c.appId, name:c.appName, owner:c.appOwner, tier:toInt(c.appTier) }
+        appMap[c.appId] = { id:c.appId, name:c.appName, owner:c.appOwner, tier:serialize(c.appTier) }
     })
     const affectedApplications = Object.values(appMap)
     const teams = [...new Set(affectedApplications.map(a => a.owner).filter(Boolean))].map(t => ({ name: t }))
