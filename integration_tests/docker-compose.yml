@@ -18,12 +18,12 @@ services:
 
   # ── LocalStack — AWS API emulation ─────────────────────────────────────────
   localstack:
-    image: localstack/localstack:3.4
+    image: localstack/localstack:3.4  # pin — v3.4 is pre-paywall community edition
     container_name: appcloud-test-localstack
     ports:
       - "4566:4566"       # unified gateway — all AWS services on one port
     environment:
-      - SERVICES=ec2,rds,lambda,eks,ecs,elbv2,elasticache,s3,iam,sts
+      - SERVICES=s3,sqs,sns,dynamodb,kinesis,lambda,ec2,iam,ssm,logs,sts,cloudwatch
       - DEFAULT_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}  # optional — community edition works without
@@ -63,7 +63,9 @@ services:
   # Run once after LocalStack is healthy:
   #   docker compose -f integration_tests/docker-compose.yml run --rm seed
   seed:
-    image: amazon/aws-cli:2.15.30
+    # python:3.11-alpine includes Python + pip + apk package manager.
+    # We install awscli and zip via apk so the seed script has everything it needs.
+    image: python:3.11-alpine
     container_name: appcloud-test-seed
     profiles: ["tools"]   # not started by default — run explicitly
     environment:
@@ -73,7 +75,8 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566
     volumes:
       - ./seed.sh:/seed.sh:ro
-    entrypoint: ["/bin/bash", "/seed.sh"]
+    # Install aws cli + zip then run the seed script
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache aws-cli zip curl > /dev/null 2>&1 && sh /seed.sh"]
     depends_on:
       localstack:
         condition: service_healthy
@@ -81,7 +84,7 @@ services:
   # ── Test API — real Fastify API pointed at LocalStack + test Neo4j ─────────
   api-test:
     build:
-      context: ../neo4j-fastify-api
+      context: ../api
       dockerfile: Dockerfile
     container_name: appcloud-test-api
     ports:

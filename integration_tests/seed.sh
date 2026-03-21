@@ -1,268 +1,248 @@
 #!/bin/bash
 # integration_tests/seed.sh
-# Creates representative AWS resources in LocalStack so the AppCloud
-# discovery scanner has something real to find.
+# Creates AWS resources in LocalStack Community Edition (free tier).
 #
-# Runs inside the `seed` service container (amazon/aws-cli image).
-# All calls go to http://localstack:4566 via AWS_ENDPOINT_URL env var.
+# Confirmed free services:
+#   S3, SQS, SNS, DynamoDB, Lambda, EC2 (metadata/mock only),
+#   IAM, SSM, CloudWatch, Kinesis
+#
+# Pro only (skipped):
+#   ECS, EKS, RDS, ElastiCache, ELBv2/ALB, MSK, OpenSearch
 
 set -euo pipefail
 
-BASE="--endpoint-url $AWS_ENDPOINT_URL --region us-east-1 --output json"
+EP="--endpoint-url $AWS_ENDPOINT_URL"
+R="--region us-east-1"
+OUT="--output text"
+
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║     AppCloud LocalStack Seed                         ║"
+echo "║  AppCloud LocalStack Seed (Community Free Tier)      ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Disable chunked transfer encoding — LocalStack community doesn't support
+# the x-amz-trailer header that AWS CLI v2 sends with chunked uploads
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+
 log()  { echo "  ▶  $*"; }
 ok()   { echo "  ✓  $*"; }
-skip() { echo "  –  $* (skipped)"; }
-
-# ── VPC + Subnet (needed by EC2, RDS, EKS, ECS) ──────────────────────────────
-log "Creating VPC..."
-VPC_ID=$(aws ec2 create-vpc $BASE \
-  --cidr-block 10.0.0.0/16 \
-  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=appcloud-test-vpc}]' \
-  | jq -r '.Vpc.VpcId')
-ok "VPC: $VPC_ID"
-
-log "Creating subnets..."
-SUBNET_A=$(aws ec2 create-subnet $BASE \
-  --vpc-id "$VPC_ID" --cidr-block 10.0.1.0/24 \
-  --availability-zone us-east-1a \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=appcloud-test-subnet-a}]' \
-  | jq -r '.Subnet.SubnetId')
-
-SUBNET_B=$(aws ec2 create-subnet $BASE \
-  --vpc-id "$VPC_ID" --cidr-block 10.0.2.0/24 \
-  --availability-zone us-east-1b \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=appcloud-test-subnet-b}]' \
-  | jq -r '.Subnet.SubnetId')
-ok "Subnets: $SUBNET_A, $SUBNET_B"
-
-log "Creating security group..."
-SG_ID=$(aws ec2 create-security-group $BASE \
-  --group-name appcloud-test-sg \
-  --description "AppCloud test security group" \
-  --vpc-id "$VPC_ID" \
-  | jq -r '.GroupId')
-ok "Security group: $SG_ID"
-
-# ── EC2 instances ─────────────────────────────────────────────────────────────
-log "Creating EC2 instances..."
-
-# Get an AMI ID (LocalStack provides a default)
-AMI_ID=$(aws ec2 describe-images $BASE \
-  --filters "Name=name,Values=amzn2-ami-hvm*" \
-  | jq -r '.Images[0].ImageId // "ami-00000000"')
-
-aws ec2 run-instances $BASE \
-  --image-id "$AMI_ID" \
-  --instance-type t2.micro \
-  --min-count 1 --max-count 1 \
-  --subnet-id "$SUBNET_A" \
-  --tag-specifications \
-    'ResourceType=instance,Tags=[{Key=Name,Value=payments-api-server},{Key=app,Value=payments},{Key=env,Value=production}]' \
-  > /dev/null
-
-aws ec2 run-instances $BASE \
-  --image-id "$AMI_ID" \
-  --instance-type t3.medium \
-  --min-count 1 --max-count 1 \
-  --subnet-id "$SUBNET_B" \
-  --associate-public-ip-address \
-  --tag-specifications \
-    'ResourceType=instance,Tags=[{Key=Name,Value=identity-service-server},{Key=app,Value=identity},{Key=env,Value=production}]' \
-  > /dev/null
-
-aws ec2 run-instances $BASE \
-  --image-id "$AMI_ID" \
-  --instance-type t2.micro \
-  --min-count 1 --max-count 1 \
-  --subnet-id "$SUBNET_A" \
-  --tag-specifications \
-    'ResourceType=instance,Tags=[{Key=Name,Value=data-pipeline-worker},{Key=app,Value=data-platform},{Key=env,Value=staging}]' \
-  > /dev/null
-
-ok "3 EC2 instances created"
-
-# ── RDS instances ─────────────────────────────────────────────────────────────
-log "Creating RDS subnet group..."
-aws rds create-db-subnet-group $BASE \
-  --db-subnet-group-name appcloud-test-subnet-group \
-  --db-subnet-group-description "AppCloud test" \
-  --subnet-ids "$SUBNET_A" "$SUBNET_B" \
-  > /dev/null
-
-log "Creating RDS instances..."
-aws rds create-db-instance $BASE \
-  --db-instance-identifier payments-db \
-  --db-instance-class db.t3.micro \
-  --engine mysql \
-  --engine-version "8.0" \
-  --master-username admin \
-  --master-user-password testpassword123 \
-  --allocated-storage 20 \
-  --db-subnet-group-name appcloud-test-subnet-group \
-  --no-publicly-accessible \
-  --tags Key=app,Value=payments Key=env,Value=production \
-  > /dev/null
-
-aws rds create-db-instance $BASE \
-  --db-instance-identifier analytics-db \
-  --db-instance-class db.t3.micro \
-  --engine postgres \
-  --engine-version "15.3" \
-  --master-username admin \
-  --master-user-password testpassword123 \
-  --allocated-storage 50 \
-  --db-subnet-group-name appcloud-test-subnet-group \
-  --publicly-accessible \
-  --tags Key=app,Value=analytics Key=env,Value=production \
-  > /dev/null
-
-ok "2 RDS instances created"
-
-# ── Lambda functions ──────────────────────────────────────────────────────────
-log "Creating IAM role for Lambda..."
-ROLE_ARN=$(aws iam create-role $BASE \
-  --role-name appcloud-test-lambda-role \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
-  | jq -r '.Role.Arn')
-ok "IAM role: $ROLE_ARN"
-
-log "Creating Lambda functions..."
-
-# Create minimal zip for LocalStack (it doesn't execute, just needs to exist)
-echo 'exports.handler = async () => ({ statusCode: 200 })' > /tmp/index.js
-cd /tmp && zip -q function.zip index.js && cd -
-
-aws lambda create-function $BASE \
-  --function-name process-payment \
-  --runtime nodejs20.x \
-  --role "$ROLE_ARN" \
-  --handler index.handler \
-  --zip-file fileb:///tmp/function.zip \
-  --description "Payment processing handler" \
-  --memory-size 256 \
-  --timeout 30 \
-  --environment Variables='{ENV=production,APP=payments}' \
-  > /dev/null
-
-aws lambda create-function $BASE \
-  --function-name send-notification \
-  --runtime python3.11 \
-  --role "$ROLE_ARN" \
-  --handler index.handler \
-  --zip-file fileb:///tmp/function.zip \
-  --description "Notification dispatch function" \
-  --memory-size 128 \
-  --timeout 15 \
-  > /dev/null
-
-aws lambda create-function $BASE \
-  --function-name ingest-events \
-  --runtime nodejs20.x \
-  --role "$ROLE_ARN" \
-  --handler index.handler \
-  --zip-file fileb:///tmp/function.zip \
-  --description "Event ingestion from Kinesis" \
-  --memory-size 512 \
-  --timeout 60 \
-  > /dev/null
-
-ok "3 Lambda functions created"
-
-# ── ECS clusters ──────────────────────────────────────────────────────────────
-log "Creating ECS clusters..."
-aws ecs create-cluster $BASE \
-  --cluster-name payments-cluster \
-  --tags key=app,value=payments key=env,value=production \
-  > /dev/null
-
-aws ecs create-cluster $BASE \
-  --cluster-name data-platform-cluster \
-  --tags key=app,value=data-platform key=env,value=production \
-  > /dev/null
-ok "2 ECS clusters created"
-
-# ── EKS clusters ──────────────────────────────────────────────────────────────
-# LocalStack community supports EKS cluster creation (control plane only)
-log "Creating EKS cluster..."
-aws eks create-cluster $BASE \
-  --name appcloud-test-eks \
-  --role-arn "$ROLE_ARN" \
-  --resources-vpc-config \
-    subnetIds="$SUBNET_A","$SUBNET_B",securityGroupIds="$SG_ID",endpointPublicAccess=true,endpointPrivateAccess=false \
-  --kubernetes-version "1.29" \
-  > /dev/null || skip "EKS (may not be available in LocalStack community)"
-ok "EKS cluster created (or skipped)"
-
-# ── Application Load Balancer ─────────────────────────────────────────────────
-log "Creating Application Load Balancer..."
-aws elbv2 create-load-balancer $BASE \
-  --name payments-alb \
-  --subnets "$SUBNET_A" "$SUBNET_B" \
-  --security-groups "$SG_ID" \
-  --scheme internet-facing \
-  --type application \
-  --tags Key=app,Value=payments Key=env,Value=production \
-  > /dev/null
-
-aws elbv2 create-load-balancer $BASE \
-  --name internal-api-nlb \
-  --subnets "$SUBNET_A" "$SUBNET_B" \
-  --scheme internal \
-  --type network \
-  --tags Key=app,Value=internal-api Key=env,Value=production \
-  > /dev/null
-ok "2 load balancers created"
-
-# ── ElastiCache clusters ──────────────────────────────────────────────────────
-log "Creating ElastiCache clusters..."
-aws elasticache create-cache-cluster $BASE \
-  --cache-cluster-id payments-cache \
-  --cache-node-type cache.t3.micro \
-  --engine redis \
-  --engine-version "7.0" \
-  --num-cache-nodes 1 \
-  > /dev/null
-
-aws elasticache create-cache-cluster $BASE \
-  --cache-cluster-id session-store \
-  --cache-node-type cache.t3.micro \
-  --engine memcached \
-  --engine-version "1.6" \
-  --num-cache-nodes 1 \
-  > /dev/null
-ok "2 ElastiCache clusters created"
+skip() { echo "  –  $* (Pro only — skipped)"; }
 
 # ── S3 buckets ────────────────────────────────────────────────────────────────
 log "Creating S3 buckets..."
-aws s3 mb $BASE s3://appcloud-test-assets > /dev/null
-aws s3 mb $BASE s3://appcloud-test-backups > /dev/null
-aws s3 mb $BASE s3://appcloud-test-logs > /dev/null
-ok "3 S3 buckets created"
+for bucket in appcloud-test-assets appcloud-test-backups appcloud-test-logs; do
+  aws s3 mb $EP "s3://$bucket" > /dev/null
+  ok "S3: $bucket"
+done
+
+# Put a test object so the bucket isn't empty
+echo '{"service":"payments","version":"1.0"}' > /tmp/manifest.json
+aws s3api put-object $EP $R $OUT \
+  --bucket appcloud-test-assets \
+  --key manifest.json \
+  --body /tmp/manifest.json \
+  --no-cli-pager > /dev/null
+ok "S3: uploaded test object to appcloud-test-assets"
+
+# ── SQS queues ────────────────────────────────────────────────────────────────
+log "Creating SQS queues..."
+aws sqs create-queue $EP $R $OUT \
+  --queue-name payments-events \
+  --query 'QueueUrl' > /dev/null
+ok "SQS: payments-events"
+
+aws sqs create-queue $EP $R $OUT \
+  --queue-name notification-queue \
+  --query 'QueueUrl' > /dev/null
+ok "SQS: notification-queue"
+
+aws sqs create-queue $EP $R $OUT \
+  --queue-name data-ingestion-dlq \
+  --attributes '{"MessageRetentionPeriod":"1209600"}' \
+  --query 'QueueUrl' > /dev/null
+ok "SQS: data-ingestion-dlq (dead letter, 14-day retention)"
+
+# ── SNS topics ────────────────────────────────────────────────────────────────
+log "Creating SNS topics..."
+aws sns create-topic $EP $R $OUT \
+  --name payment-alerts \
+  --query 'TopicArn' > /dev/null
+ok "SNS: payment-alerts"
+
+aws sns create-topic $EP $R $OUT \
+  --name system-notifications \
+  --query 'TopicArn' > /dev/null
+ok "SNS: system-notifications"
+
+aws sns create-topic $EP $R $OUT \
+  --name infra-drift-alerts \
+  --query 'TopicArn' > /dev/null
+ok "SNS: infra-drift-alerts"
+
+# ── DynamoDB tables ───────────────────────────────────────────────────────────
+log "Creating DynamoDB tables..."
+aws dynamodb create-table $EP $R $OUT \
+  --table-name sessions \
+  --attribute-definitions AttributeName=sessionId,AttributeType=S \
+  --key-schema AttributeName=sessionId,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --query 'TableDescription.TableName' > /dev/null
+ok "DynamoDB: sessions"
+
+aws dynamodb create-table $EP $R $OUT \
+  --table-name audit-events \
+  --attribute-definitions \
+    AttributeName=eventId,AttributeType=S \
+    AttributeName=ts,AttributeType=N \
+  --key-schema \
+    AttributeName=eventId,KeyType=HASH \
+    AttributeName=ts,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST \
+  --query 'TableDescription.TableName' > /dev/null
+ok "DynamoDB: audit-events"
+
+aws dynamodb create-table $EP $R $OUT \
+  --table-name feature-flags \
+  --attribute-definitions AttributeName=flagName,AttributeType=S \
+  --key-schema AttributeName=flagName,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --query 'TableDescription.TableName' > /dev/null
+ok "DynamoDB: feature-flags"
+
+# Seed a test item
+aws dynamodb put-item $EP $R $OUT \
+  --table-name feature-flags \
+  --item '{"flagName":{"S":"payments-v2"},"enabled":{"BOOL":true},"rollout":{"N":"100"}}' \
+  > /dev/null
+ok "DynamoDB: seeded feature-flags with test item"
+
+# ── Kinesis streams ───────────────────────────────────────────────────────────
+log "Creating Kinesis streams..."
+aws kinesis create-stream $EP $R $OUT \
+  --stream-name payment-events \
+  --shard-count 2 > /dev/null
+ok "Kinesis: payment-events (2 shards)"
+
+aws kinesis create-stream $EP $R $OUT \
+  --stream-name audit-stream \
+  --shard-count 1 > /dev/null
+ok "Kinesis: audit-stream (1 shard)"
+
+# ── IAM roles ─────────────────────────────────────────────────────────────────
+log "Creating IAM roles..."
+LAMBDA_ROLE=$(aws iam create-role $EP $R $OUT \
+  --role-name appcloud-lambda-role \
+  --assume-role-policy-document \
+    '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+  --query 'Role.Arn')
+ok "IAM: appcloud-lambda-role ($LAMBDA_ROLE)"
+
+APP_ROLE=$(aws iam create-role $EP $R $OUT \
+  --role-name appcloud-app-role \
+  --assume-role-policy-document \
+    '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+  --query 'Role.Arn')
+ok "IAM: appcloud-app-role ($APP_ROLE)"
+
+# ── Lambda functions ──────────────────────────────────────────────────────────
+log "Creating Lambda functions..."
+echo 'exports.handler = async () => ({ statusCode: 200 })' > /tmp/index.js
+zip -q /tmp/function.zip /tmp/index.js
+ok "Lambda zip ready"
+
+for fn_name in process-payment send-notification ingest-events; do
+  aws lambda create-function $EP $R $OUT \
+    --function-name "$fn_name" \
+    --runtime nodejs20.x \
+    --role "$LAMBDA_ROLE" \
+    --handler index.handler \
+    --zip-file fileb:///tmp/function.zip \
+    --query 'FunctionName' > /dev/null
+  ok "Lambda: $fn_name"
+done
+
+# ── EC2 (mock metadata only in community) ────────────────────────────────────
+log "Creating EC2 instances (mock metadata)..."
+AMI_ID=$(aws ec2 describe-images $EP $R $OUT \
+  --filters "Name=name,Values=amzn2-ami-hvm*" \
+  --query 'Images[0].ImageId' 2>/dev/null || true)
+[ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ] && AMI_ID="ami-00000000"
+
+INST_1=$(aws ec2 run-instances $EP $R $OUT \
+  --image-id "$AMI_ID" --instance-type t2.micro --count 1 \
+  --query 'Instances[0].InstanceId')
+aws ec2 create-tags $EP $R $OUT --resources "$INST_1" \
+  --tags Key=Name,Value=payments-api-server \
+         Key=app,Value=payments Key=env,Value=production > /dev/null
+ok "EC2: $INST_1 (payments-api-server)"
+
+INST_2=$(aws ec2 run-instances $EP $R $OUT \
+  --image-id "$AMI_ID" --instance-type t3.medium --count 1 \
+  --query 'Instances[0].InstanceId')
+aws ec2 create-tags $EP $R $OUT --resources "$INST_2" \
+  --tags Key=Name,Value=identity-service-server \
+         Key=app,Value=identity Key=env,Value=production > /dev/null
+ok "EC2: $INST_2 (identity-service-server)"
+
+# ── SSM parameters ────────────────────────────────────────────────────────────
+log "Creating SSM parameters..."
+aws ssm put-parameter $EP $R $OUT \
+  --name "/appcloud/payments/db-url" \
+  --value "jdbc:mysql://payments-db.internal:3306/payments" \
+  --type SecureString > /dev/null
+ok "SSM: /appcloud/payments/db-url"
+
+aws ssm put-parameter $EP $R $OUT \
+  --name "/appcloud/payments/api-key" \
+  --value "test-api-key-12345" \
+  --type SecureString > /dev/null
+ok "SSM: /appcloud/payments/api-key"
+
+aws ssm put-parameter $EP $R $OUT \
+  --name "/appcloud/shared/jwt-secret" \
+  --value "test-jwt-secret-localstack" \
+  --type SecureString > /dev/null
+ok "SSM: /appcloud/shared/jwt-secret"
+
+# ── CloudWatch log groups ─────────────────────────────────────────────────────
+log "Creating CloudWatch log groups..."
+aws logs create-log-group $EP $R $OUT \
+  --log-group-name "/appcloud/api" > /dev/null
+ok "CloudWatch Logs: /appcloud/api"
+
+aws logs create-log-group $EP $R $OUT \
+  --log-group-name "/appcloud/payments" > /dev/null
+ok "CloudWatch Logs: /appcloud/payments"
+
+# ── Pro-only (skipped) ────────────────────────────────────────────────────────
+echo ""
+skip "ECS     (Pro)"
+skip "EKS     (Pro)"
+skip "RDS     (Pro)"
+skip "ELBv2   (Pro)"
+skip "ElastiCache (Pro)"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║  Seed complete. Resources created in LocalStack:     ║"
+echo "║  Seed complete. Resources in LocalStack:             ║"
 echo "║                                                      ║"
-echo "║   EC2          3 instances                           ║"
-echo "║   RDS          2 instances                           ║"
-echo "║   Lambda       3 functions                           ║"
-echo "║   ECS          2 clusters                            ║"
-echo "║   EKS          1 cluster                             ║"
-echo "║   ALB/NLB      2 load balancers                      ║"
-echo "║   ElastiCache  2 clusters                            ║"
 echo "║   S3           3 buckets                             ║"
+echo "║   SQS          3 queues                              ║"
+echo "║   SNS          3 topics                              ║"
+echo "║   DynamoDB     3 tables                              ║"
+echo "║   Kinesis      2 streams                             ║"
+echo "║   Lambda       3 functions                           ║"
+echo "║   EC2          2 instances (mock metadata)           ║"
+echo "║   IAM          2 roles                               ║"
+echo "║   SSM          3 parameters                          ║"
+echo "║   CloudWatch   2 log groups                          ║"
 echo "║                                                      ║"
-echo "║  Run discovery scan:                                 ║"
+echo "║  Trigger AppCloud discovery scan:                    ║"
 echo "║  curl -X POST http://localhost:3001/discovery/scan/aws║"
 echo "║    -H 'Content-Type: application/json'               ║"
-echo "║    -d '{"regions":["us-east-1"]}'                    ║"
+echo "║    -d '{\"regions\":[\"us-east-1\"]}'                    ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""

@@ -99,7 +99,20 @@ async function scanAWS({ credentials, regions, write, log }) {
 
   const stats = {
     ec2: 0, rds: 0, lambda: 0, eks: 0,
-    ecs: 0, alb: 0, elasticache: 0, errors: [],
+    ecs: 0, alb: 0, elasticache: 0, errors: [], skipped: [],
+  }
+
+  // Classify LocalStack Pro-gate errors as skipped rather than errors
+  const isProError = (e) =>
+    e.message?.includes('not yet implemented or pro feature') ||
+    e.message?.includes('InternalFailure') && e.message?.includes('pro feature')
+
+  const handleScanError = (label, e) => {
+    if (isProError(e)) {
+      stats.skipped.push(`${label}: not available (LocalStack Pro required)`)
+    } else {
+      stats.errors.push(`${label}: ${e.message}`)
+    }
   }
   const creds = credentials ? {
     accessKeyId:     credentials.accessKeyId,
@@ -154,7 +167,7 @@ async function scanAWS({ credentials, regions, write, log }) {
           }
         }
       }
-    } catch (e) { stats.errors.push(`EC2/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("EC2/${region}", e) }
 
     // ── RDS instances ─────────────────────────────────────────────────────
     try {
@@ -186,7 +199,7 @@ async function scanAWS({ credentials, regions, write, log }) {
           stats.rds++
         }
       }
-    } catch (e) { stats.errors.push(`RDS/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("RDS/${region}", e) }
 
     // ── Lambda functions ──────────────────────────────────────────────────
     try {
@@ -216,7 +229,7 @@ async function scanAWS({ credentials, regions, write, log }) {
           stats.lambda++
         }
       }
-    } catch (e) { stats.errors.push(`Lambda/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("Lambda/${region}", e) }
 
     // ── EKS clusters ─────────────────────────────────────────────────────
     try {
@@ -247,7 +260,7 @@ async function scanAWS({ credentials, regions, write, log }) {
         })
         stats.eks++
       }
-    } catch (e) { stats.errors.push(`EKS/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("EKS/${region}", e) }
 
     // ── ECS clusters ─────────────────────────────────────────────────────
     try {
@@ -277,7 +290,7 @@ async function scanAWS({ credentials, regions, write, log }) {
           stats.ecs++
         }
       }
-    } catch (e) { stats.errors.push(`ECS/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("ECS/${region}", e) }
 
     // ── ALB / NLB ─────────────────────────────────────────────────────────
     try {
@@ -305,7 +318,7 @@ async function scanAWS({ credentials, regions, write, log }) {
           stats.alb++
         }
       }
-    } catch (e) { stats.errors.push(`ALB/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("ALB/${region}", e) }
 
     // ── ElastiCache clusters ──────────────────────────────────────────────
     try {
@@ -333,7 +346,7 @@ async function scanAWS({ credentials, regions, write, log }) {
           stats.elasticache++
         }
       }
-    } catch (e) { stats.errors.push(`ElastiCache/${region}: ${e.message}`) }
+    } catch (e) { handleScanError("ElastiCache/${region}", e) }
   }
 
   return stats
@@ -361,7 +374,19 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
   const subId = subscriptionId || process.env.AZURE_SUBSCRIPTION_ID
   if (!subId) throw new Error('AZURE_SUBSCRIPTION_ID is required for Azure discovery')
 
-  const stats = { vms: 0, aks: 0, sql: 0, appService: 0, redis: 0, vnet: 0, errors: [] }
+  const stats = { vms: 0, aks: 0, sql: 0, appService: 0, redis: 0, vnet: 0, errors: [], skipped: [] }
+
+  const isProError = (e) =>
+    e.message?.includes('not yet implemented or pro feature') ||
+    e.code === 'AuthorizationFailed'
+
+  const handleScanError = (label, e) => {
+    if (isProError(e)) {
+      stats.skipped.push(`${label}: insufficient permissions or not available`)
+    } else {
+      stats.errors.push(`${label}: ${e.message}`)
+    }
+  }
 
   // ── Virtual Machines ──────────────────────────────────────────────────
   try {
@@ -391,7 +416,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       })
       stats.vms++
     }
-  } catch (e) { stats.errors.push(`AzureVMs: ${e.message}`) }
+  } catch (e) { handleScanError("AzureVMs", e) }
 
   // ── AKS clusters ──────────────────────────────────────────────────────
   try {
@@ -418,7 +443,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       })
       stats.aks++
     }
-  } catch (e) { stats.errors.push(`AzureAKS: ${e.message}`) }
+  } catch (e) { handleScanError("AzureAKS", e) }
 
   // ── SQL Servers + Databases ───────────────────────────────────────────
   try {
@@ -443,7 +468,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       })
       stats.sql++
     }
-  } catch (e) { stats.errors.push(`AzureSQL: ${e.message}`) }
+  } catch (e) { handleScanError("AzureSQL", e) }
 
   // ── App Services ──────────────────────────────────────────────────────
   try {
@@ -470,12 +495,12 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       })
       stats.appService++
     }
-  } catch (e) { stats.errors.push(`AzureAppService: ${e.message}`) }
+  } catch (e) { handleScanError("AzureAppService", e) }
 
   // ── Redis Caches ──────────────────────────────────────────────────────
   try {
     const redis = new RedisManagementClient(cred, subId)
-    for await (const cache of redis.redis.list()) {
+    for await (const cache of redis.redis.listAll()) {
       await upsertInfra(write, {
         cloudId:      cache.id,
         name:         cache.name,
@@ -497,7 +522,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       })
       stats.redis++
     }
-  } catch (e) { stats.errors.push(`AzureRedis: ${e.message}`) }
+  } catch (e) { handleScanError("AzureRedis", e) }
 
   // ── Virtual Networks ──────────────────────────────────────────────────
   try {
@@ -521,7 +546,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       })
       stats.vnet++
     }
-  } catch (e) { stats.errors.push(`AzureVNet: ${e.message}`) }
+  } catch (e) { handleScanError("AzureVNet", e) }
 
   return stats
 }
@@ -709,11 +734,10 @@ export default async function discoveryRoutes(fastify) {
     const validProviders = ['aws', 'azure', 'gcp']
     if (!validProviders.includes(provider)) return reply.badRequest(`provider must be one of: ${validProviders.join(', ')}`)
 
-    // Store only non-secret config fields; secrets stay in env vars
+    // Store full config including credentials — the graph is auth-protected.
+    // For production deployments, integrate with a secrets manager (AWS Secrets
+    // Manager, Azure Key Vault, GCP Secret Manager) instead of storing here.
     const safeConfig = { ...config }
-    delete safeConfig.secretAccessKey
-    delete safeConfig.clientSecret
-    delete safeConfig.private_key
 
     const records = await write(`
       MERGE (a:CloudAccount { id: $id })
@@ -766,10 +790,10 @@ export default async function discoveryRoutes(fastify) {
 
     const duration = Date.now() - startedAt
     const total = Object.entries(stats)
-      .filter(([k]) => k !== 'errors')
+      .filter(([k]) => !['errors','skipped'].includes(k))
       .reduce((s, [, v]) => s + v, 0)
 
-    fastify.log.info(`[Discovery] AWS scan complete: ${total} resources in ${duration}ms`)
+    fastify.log.info(`[Discovery] AWS scan complete: ${total} resources in ${duration}ms, ${stats.skipped.length} skipped (Pro), ${stats.errors.length} errors`)
     audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS',
       { regions, total, duration, breakdown: stats })
     return { provider: 'aws', regions, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
@@ -795,7 +819,7 @@ export default async function discoveryRoutes(fastify) {
 
     const duration = Date.now() - startedAt
     const total = Object.entries(stats)
-      .filter(([k]) => k !== 'errors')
+      .filter(([k]) => !['errors','skipped'].includes(k))
       .reduce((s, [, v]) => s + v, 0)
 
     audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure',

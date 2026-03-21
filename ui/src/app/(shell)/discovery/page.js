@@ -108,13 +108,22 @@ function AccountCard({ account, onScanComplete }) {
       const body = {}, cfg = account.config || {}
       if (account.provider === 'aws') {
         body.regions = regions
-        if (cfg.accessKeyId && cfg.secretKey)
-          body.credentials = { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretKey }
+        // Support both secretKey (stored name) and secretAccessKey (AWS SDK name)
+        const secret = cfg.secretAccessKey || cfg.secretKey
+        if (cfg.accessKeyId && secret)
+          body.credentials = { accessKeyId: cfg.accessKeyId, secretAccessKey: secret }
       }
       if (account.provider === 'azure') {
         body.subscriptionId = cfg.subscriptionId
-        if (cfg.tenantId && cfg.clientId && cfg.clientSecret)
-          body.credentials = { tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:cfg.clientSecret }
+        // clientSecret is stored in config — if missing, prompt the user
+        let secret = cfg.clientSecret
+        if (cfg.tenantId && cfg.clientId && !secret) {
+          secret = window.prompt(
+            `Enter Client Secret for ${account.name}\n(It was not saved — paste it here to scan):`
+          )
+        }
+        if (cfg.tenantId && cfg.clientId && secret)
+          body.credentials = { tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:secret }
       }
       if (account.provider === 'gcp') {
         body.projectId = cfg.projectId
