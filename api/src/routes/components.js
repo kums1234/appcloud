@@ -17,8 +17,12 @@ export default async function componentRoutes(fastify) {
     `, { type })
     return records.map(r => ({
       ...props(r.get('c')),
-      appId:   r.get('appId'),
-      appName: r.get('appName'),
+      // Return both field name variants so UI references work regardless
+      // of whether they use appId/appName or applicationId/application
+      appId:         r.get('appId'),
+      applicationId: r.get('appId'),
+      appName:       r.get('appName'),
+      application:   r.get('appName'),
     }))
   })
 
@@ -41,7 +45,9 @@ export default async function componentRoutes(fastify) {
 
   // POST /components
   fastify.post('/', async (req, reply) => {
-    const { name, type, runtime, appId } = req.body
+    const { name, type, runtime } = req.body
+    // Accept both applicationId (sent by ComponentForm) and appId
+    const appId = req.body.appId || req.body.applicationId || null
     const records = await write(`
       CREATE (c:Component { id: randomUUID(), name: $name, type: $type, runtime: $runtime })
       WITH c
@@ -50,7 +56,7 @@ export default async function componentRoutes(fastify) {
         CREATE (a)-[:CONTAINS]->(c)
       )
       RETURN c
-    `, { name, type, runtime: runtime || null, appId: appId || null })
+    `, { name, type, runtime: runtime || null, appId })
     const result = props(records[0].get('c'))
     audit(actor(req), 'create', 'Component', result.id, result.name,
       { type: result.type, runtime: result.runtime, appId })

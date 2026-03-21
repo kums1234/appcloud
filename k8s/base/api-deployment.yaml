@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: appcloud
+  labels:
+    app: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: appcloud-api:latest    # overridden per overlay with registry path
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NEO4J_URI
+              value: bolt://neo4j:7687
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_DB
+              value: appcloud
+            - name: PORT
+              value: "3000"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: JWT_EXPIRES_IN
+              value: "8h"
+            - name: DB_USERNAME_FILE
+              value: /run/secrets/db_username
+            - name: DB_PASSWORD_FILE
+              value: /run/secrets/db_password
+            - name: PG_USERNAME_FILE
+              value: /run/secrets/pg_username
+            - name: PG_PASSWORD_FILE
+              value: /run/secrets/pg_password
+            - name: JWT_SECRET_FILE
+              value: /run/secrets/jwt_secret
+          volumeMounts:
+            - name: db-username
+              mountPath: /run/secrets/db_username
+              subPath: db_username
+              readOnly: true
+            - name: db-password
+              mountPath: /run/secrets/db_password
+              subPath: db_password
+              readOnly: true
+            - name: pg-username
+              mountPath: /run/secrets/pg_username
+              subPath: pg_username
+              readOnly: true
+            - name: pg-password
+              mountPath: /run/secrets/pg_password
+              subPath: pg_password
+              readOnly: true
+            - name: jwt-secret
+              mountPath: /run/secrets/jwt_secret
+              subPath: jwt_secret
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: db-username
+          secret:
+            secretName: appcloud-db-credentials
+        - name: db-password
+          secret:
+            secretName: appcloud-db-credentials
+        - name: pg-username
+          secret:
+            secretName: appcloud-pg-credentials
+        - name: pg-password
+          secret:
+            secretName: appcloud-pg-credentials
+        - name: jwt-secret
+          secret:
+            secretName: appcloud-jwt-secret

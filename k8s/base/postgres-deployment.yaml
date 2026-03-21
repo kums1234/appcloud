@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: appcloud
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: appcloud
+            - name: POSTGRES_USER_FILE
+              value: /run/secrets/pg_username
+            - name: POSTGRES_PASSWORD_FILE
+              value: /run/secrets/pg_password
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            - name: pg-username
+              mountPath: /run/secrets/pg_username
+              subPath: pg_username
+              readOnly: true
+            - name: pg-password
+              mountPath: /run/secrets/pg_password
+              subPath: pg_password
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $(cat /run/secrets/pg_username) -d appcloud"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $(cat /run/secrets/pg_username) -d appcloud"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: postgres-init
+          configMap:
+            name: postgres-init
+        - name: pg-username
+          secret:
+            secretName: appcloud-pg-credentials
+        - name: pg-password
+          secret:
+            secretName: appcloud-pg-credentials

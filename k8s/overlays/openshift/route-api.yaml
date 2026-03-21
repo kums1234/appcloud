@@ -1,0 +1,15 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: appcloud-api
+  namespace: appcloud
+spec:
+  host: appcloud-api.apps.yourcluster.com    # replace with your cluster domain
+  to:
+    kind: Service
+    name: api
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

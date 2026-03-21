@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: appcloud
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - hpa.yaml
+
+
+# Images pulled from ECR — set your account ID and region
+# Replace 123456789012 and us-east-1 with your values
+images:
+  - name: appcloud-api
+    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/appcloud-api
+    newTag: latest
+  - name: appcloud-ui
+    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/appcloud-ui
+    newTag: latest
+
+patches:
+  # EKS gp3 StorageClass (provisioned by EBS CSI driver)
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: gp3
+    target:
+      kind: PersistentVolumeClaim
+  # AWS Load Balancer Controller annotation on ingress is in ingress.yaml

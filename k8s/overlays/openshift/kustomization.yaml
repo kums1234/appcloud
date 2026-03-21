@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: appcloud
+
+resources:
+  - ../../base
+  - route-ui.yaml
+  - route-api.yaml
+  - scc-patch.yaml
+  - hpa.yaml
+
+
+# Images pulled from OpenShift internal registry or Quay.io
+images:
+  - name: appcloud-api
+    newName: image-registry.openshift-image-registry.svc:5000/appcloud/appcloud-api
+    newTag: latest
+  - name: appcloud-ui
+    newName: image-registry.openshift-image-registry.svc:5000/appcloud/appcloud-ui
+    newTag: latest
+
+patches:
+  # OpenShift default StorageClass
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: gp2
+    target:
+      kind: PersistentVolumeClaim

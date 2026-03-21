@@ -1,0 +1,30 @@
+# OpenShift restricts pods from running as arbitrary UIDs by default.
+# Neo4j and Postgres need specific UIDs — add the anyuid SCC to the
+# default service account for the appcloud namespace.
+# Run this ONCE manually before applying the overlay:
+#   oc adm policy add-scc-to-serviceaccount anyuid -z default -n appcloud
+#
+# This file patches the deployments to add explicit runAsUser where needed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: appcloud
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: 7474
+        fsGroup: 7474
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: appcloud
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999

@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: appcloud
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - hpa.yaml
+
+
+# Images pulled from ACR — replace myregistry with your ACR name
+images:
+  - name: appcloud-api
+    newName: myregistry.azurecr.io/appcloud-api
+    newTag: latest
+  - name: appcloud-ui
+    newName: myregistry.azurecr.io/appcloud-ui
+    newTag: latest
+
+patches:
+  # AKS managed-csi StorageClass (Azure Disk)
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: managed-csi
+    target:
+      kind: PersistentVolumeClaim

@@ -1,0 +1,77 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: appcloud
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+
+# Point to locally built images (minikube image load)
+images:
+  - name: appcloud-api
+    newName: appcloud-api
+    newTag: latest
+  - name: appcloud-ui
+    newName: appcloud-ui
+    newTag: latest
+
+patches:
+  # Use 'standard' StorageClass (minikube default)
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: standard
+    target:
+      kind: PersistentVolumeClaim
+      name: neo4j-data
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: standard
+    target:
+      kind: PersistentVolumeClaim
+      name: postgres-data
+  # Single replica for local dev
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: api
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: ui
+  # Tighten resource limits for local machine
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "512Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
+    target:
+      kind: Deployment
+      name: neo4j
+
+  # Never pull from registry — use images loaded via minikube image load
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+    target:
+      kind: Deployment
+      name: api
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+    target:
+      kind: Deployment
+      name: ui

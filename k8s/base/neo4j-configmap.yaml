@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neo4j-entrypoint
+  namespace: appcloud
+data:
+  neo4j-entrypoint.sh: |
+    #!/bin/sh
+    set -e
+    USERNAME=$(cat /run/secrets/db_username | tr -d '[:space:]')
+    PASSWORD=$(cat /run/secrets/db_password | tr -d '[:space:]')
+    export NEO4J_AUTH="${USERNAME}/${PASSWORD}"
+    echo "INFO: Neo4j auth configured for user: ${USERNAME}"
+    if [ -f "/startup/docker-entrypoint.sh" ]; then
+      exec /startup/docker-entrypoint.sh neo4j
+    elif [ -f "/docker-entrypoint.sh" ]; then
+      exec /docker-entrypoint.sh neo4j
+    else
+      echo "ERROR: Cannot find Neo4j entrypoint" >&2
+      find / -name "docker-entrypoint.sh" 2>/dev/null || true
+      exit 1
+    fi

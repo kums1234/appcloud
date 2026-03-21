@@ -1,0 +1,13 @@
+# NOTE: The actual SQL content is loaded at deploy time by the create-secrets.sh
+# script using kubectl create configmap --from-file=.
+# This file is a placeholder that kustomize replaces via configMapGenerator
+# in the overlay kustomization.yaml files.
+#
+# The configMapGenerator in each overlay references the postgres-init/ SQL files
+# so they are baked into the ConfigMap at apply time.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: appcloud
+data: {}

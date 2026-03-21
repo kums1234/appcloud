@@ -1,0 +1,16 @@
+# OpenShift Route replaces Kubernetes Ingress
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: appcloud-ui
+  namespace: appcloud
+spec:
+  host: appcloud.apps.yourcluster.com    # replace with your cluster domain
+  to:
+    kind: Service
+    name: ui
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -14,8 +14,20 @@ export async function neo4jPlugin(fastify) {
   const username = readSecret('DB_USERNAME_FILE', 'NEO4J_USER', 'neo4j')
   const password = readSecret('DB_PASSWORD_FILE', 'NEO4J_PASSWORD', '')
 
+  // Use APPCLOUD_NEO4J_URI instead of NEO4J_URI.
+  // When deployed on Kubernetes, the Neo4j service injects env vars like
+  // NEO4J_PORT=tcp://10.x.x.x:7474 into every pod in the namespace.
+  // The Neo4j JS driver scans all NEO4J_* env vars and treats NEO4J_PORT
+  // as a connection URI, overriding the bolt://neo4j:7687 we intend to use.
+  // A non-NEO4J_-prefixed name is invisible to the driver's env var scanner.
+  const uri = process.env.APPCLOUD_NEO4J_URI
+           || process.env.NEO4J_URI  // fallback for docker-compose compatibility
+           || 'bolt://localhost:7687'
+
+  fastify.log.info(`Neo4j connecting to: ${uri}`)
+
   const driver = neo4j.driver(
-    process.env.NEO4J_URI || 'bolt://localhost:7687',
+    uri,
     neo4j.auth.basic(username, password)
   )
 
@@ -23,7 +35,7 @@ export async function neo4jPlugin(fastify) {
     await driver.verifyConnectivity()
     fastify.log.info('Neo4j connected successfully')
   } catch (err) {
-    fastify.log.error('Neo4j connection failed:', err.message)
+    fastify.log.error({ err }, 'Neo4j connection failed')
     throw err
   }
 
