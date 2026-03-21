@@ -13,6 +13,7 @@ import changeRoutes from './routes/changes.js'
 import userRoutes from './routes/users.js'
 import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
+import cloudAccountRoutes from './routes/integrations-cloud.js'
 import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
 import discoveryRoutes from './routes/discovery.js'
@@ -53,7 +54,8 @@ await fastify.register(infraRoutes,        { prefix: '/infra' })
 await fastify.register(changeRoutes,       { prefix: '/changes' })
 await fastify.register(userRoutes,         { prefix: '/users' })
 await fastify.register(graphRoutes,        { prefix: '/graph' })
-await fastify.register(integrationRoutes,  { prefix: '/integrations' })
+await fastify.register(integrationRoutes,   { prefix: '/integrations' })
+await fastify.register(cloudAccountRoutes,  { prefix: '/integrations' })
 await fastify.register(governanceRoutes,    { prefix: '/governance' })
 await fastify.register(workflowRoutes,      { prefix: '/workflows' })
 await fastify.register(discoveryRoutes,     { prefix: '/discovery' })

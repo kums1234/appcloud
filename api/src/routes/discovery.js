@@ -13,6 +13,7 @@
 // cloud SDKs are not installed (useful during development / local runs).
 
 import { props, serialize } from '../utils/serialize.js'
+import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
@@ -363,16 +364,45 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
   const { NetworkManagementClient }      = await import('@azure/arm-network')
   const { RedisManagementClient }        = await import('@azure/arm-rediscache')
 
-  const cred = credentials?.clientId
-    ? new ClientSecretCredential(
-        credentials.tenantId,
-        credentials.clientId,
-        credentials.clientSecret
-      )
-    : new DefaultAzureCredential()
-
   const subId = subscriptionId || process.env.AZURE_SUBSCRIPTION_ID
-  if (!subId) throw new Error('AZURE_SUBSCRIPTION_ID is required for Azure discovery')
+  if (!subId) throw new Error('subscriptionId is required for Azure discovery')
+
+  // Build credential.
+  // ClientSecretCredential REQUIRES tenantId — 'common' does not work for
+  // service principals. If tenantId is missing, resolve it from the subscription
+  // by calling the ARM unauthenticated metadata endpoint.
+  let cred
+  if (credentials?.clientId && credentials?.clientSecret) {
+    let tenantId = credentials.tenantId
+
+    if (!tenantId) {
+      // Auto-resolve tenantId from subscription metadata (no auth needed)
+      try {
+        const metaUrl = `https://management.azure.com/subscriptions/${subId}?api-version=2022-12-01`
+        const metaRes = await fetch(metaUrl)
+        // ARM returns 401 with WWW-Authenticate header containing the tenantId
+        const wwwAuth = metaRes.headers.get('www-authenticate') || ''
+        const match = wwwAuth.match(/authorization_uri="[^"]*\/([0-9a-f-]{36})/)
+        if (match) {
+          tenantId = match[1]
+          log.info(`[Azure] Resolved tenantId: ${tenantId}`)
+        }
+      } catch (e) {
+        log.warn(`[Azure] Could not auto-resolve tenantId: ${e.message}`)
+      }
+    }
+
+    if (!tenantId) {
+      throw new Error(
+        'tenantId is required for Azure service principal authentication. ' +
+        'Add it to your Azure account configuration in Integrations.'
+      )
+    }
+
+    cred = new ClientSecretCredential(tenantId, credentials.clientId, credentials.clientSecret)
+  } else {
+    cred = new DefaultAzureCredential()
+  }
 
   const stats = { vms: 0, aks: 0, sql: 0, appService: 0, redis: 0, vnet: 0, errors: [], skipped: [] }
 
@@ -498,29 +528,34 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
   } catch (e) { handleScanError("AzureAppService", e) }
 
   // ── Redis Caches ──────────────────────────────────────────────────────
+  // @azure/arm-rediscache v8: no listAll() — iterate per resource group
   try {
     const redis = new RedisManagementClient(cred, subId)
-    for await (const cache of redis.redis.listAll()) {
-      await upsertInfra(write, {
-        cloudId:      cache.id,
-        name:         cache.name,
-        provider:     'azure',
-        resourceType: 'redis',
-        region:       cache.location,
-        status:       cache.provisioningState || 'unknown',
-        public:       cache.publicNetworkAccess === 'Enabled',
-        tags:         cache.tags || {},
-        raw: {
-          sku:                 `${cache.sku?.name} ${cache.sku?.family}${cache.sku?.capacity}`,
-          hostName:            cache.hostName,
-          port:                cache.port,
-          sslPort:             cache.sslPort,
-          redisVersion:        cache.redisVersion,
-          minimumTlsVersion:   cache.minimumTlsVersion,
-          enableNonSslPort:    cache.enableNonSslPort,
-        },
-      })
-      stats.redis++
+    const { ResourceManagementClient } = await import('@azure/arm-resources')
+    const rgClient = new ResourceManagementClient(cred, subId)
+    for await (const rg of rgClient.resourceGroups.list()) {
+      for await (const cache of redis.redis.listByResourceGroup(rg.name)) {
+        await upsertInfra(write, {
+          cloudId:      cache.id,
+          name:         cache.name,
+          provider:     'azure',
+          resourceType: 'redis',
+          region:       cache.location,
+          status:       cache.provisioningState || 'unknown',
+          public:       cache.publicNetworkAccess === 'Enabled',
+          tags:         cache.tags || {},
+          raw: {
+            sku:               `${cache.sku?.name} ${cache.sku?.family}${cache.sku?.capacity}`,
+            hostName:          cache.hostName,
+            port:              cache.port,
+            sslPort:           cache.sslPort,
+            redisVersion:      cache.redisVersion,
+            minimumTlsVersion: cache.minimumTlsVersion,
+            enableNonSslPort:  cache.enableNonSslPort,
+          },
+        })
+        stats.redis++
+      }
     }
   } catch (e) { handleScanError("AzureRedis", e) }
 
@@ -718,141 +753,260 @@ export default async function discoveryRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = (req) => req.user?.name || req.user?.id || 'system'
 
-  // ── GET /discovery/accounts — list saved cloud accounts ───────────────
-  fastify.get('/accounts', async () => {
-    const records = await query(`
-      MATCH (a:CloudAccount)
-      RETURN a ORDER BY a.provider, a.name
-    `)
-    return records.map(r => props(r.get('a')))
+  // ── GET /discovery/accounts — proxy to Postgres cloud accounts ────────
+  // Kept for backwards compatibility — returns same shape as before
+  fastify.get('/accounts', async (req, reply) => {
+    if (!fastify.pg.pool) return []
+    const rows = await fastify.pg.query(
+      `SELECT id, provider, name, config, enabled,
+              last_scan_at, last_scan_status, last_scan_total
+       FROM cloud_accounts WHERE enabled = true ORDER BY provider, name`
+    )
+    return rows.map(row => ({
+      id:       row.id,
+      provider: row.provider,
+      name:     row.name,
+      enabled:  row.enabled,
+      config:   decryptConfig(row.config || {}),
+      last_scan_at:     row.last_scan_at,
+      last_scan_status: row.last_scan_status,
+    }))
   })
 
-  // ── POST /discovery/accounts — save a cloud account config ────────────
+  // ── POST /discovery/accounts — save cloud account to Postgres ──────────
+  // Backwards-compatible shim — delegates to the cloud accounts table
   fastify.post('/accounts', async (req, reply) => {
     const { name, provider, config = {} } = req.body
     if (!name || !provider) return reply.badRequest('name and provider are required')
-    const validProviders = ['aws', 'azure', 'gcp']
-    if (!validProviders.includes(provider)) return reply.badRequest(`provider must be one of: ${validProviders.join(', ')}`)
+    if (!['aws','azure','gcp'].includes(provider))
+      return reply.badRequest('provider must be aws, azure, or gcp')
 
-    // Store full config including credentials — the graph is auth-protected.
-    // For production deployments, integrate with a secrets manager (AWS Secrets
-    // Manager, Azure Key Vault, GCP Secret Manager) instead of storing here.
-    const safeConfig = { ...config }
+    const encryptedConfig = encryptConfig({ ...config })
 
+    if (fastify.pg.pool) {
+      const rows = await fastify.pg.query(
+        `INSERT INTO cloud_accounts (provider, name, config, enabled)
+         VALUES ($1, $2, $3, true)
+         ON CONFLICT (provider, name) DO UPDATE
+           SET config = EXCLUDED.config, updated_at = now()
+         RETURNING id, provider, name, enabled, created_at`,
+        [provider, name, JSON.stringify(encryptedConfig)]
+      )
+      const row = rows[0]
+      audit(actor(req), 'create', 'CloudAccount', row.id, `${provider}:${name}`, { provider })
+      reply.code(201)
+      return { ...row, config: decryptConfig(encryptedConfig) }
+    }
+
+    // Fallback to Neo4j if Postgres unavailable
     const records = await write(`
       MERGE (a:CloudAccount { id: $id })
-      SET a.name       = $name,
-          a.provider   = $provider,
-          a.config     = $config,
-          a.updatedAt  = datetime()
+      SET a.name = $name, a.provider = $provider,
+          a.config = $config, a.updatedAt = datetime()
       RETURN a
-    `, {
-      id:       `${provider}:${name}`,
-      name,
-      provider,
-      config:   JSON.stringify(safeConfig),
-    })
+    `, { id: `${provider}:${name}`, name, provider, config: JSON.stringify(encryptedConfig) })
     const acct = props(records[0].get('a'))
-    audit(actor(req), 'create', 'CloudAccount', acct.id, acct.name, { provider: acct.provider })
     reply.code(201)
     return acct
   })
 
   // ── DELETE /discovery/accounts/:id ────────────────────────────────────
   fastify.delete('/accounts/:id', async (req, reply) => {
-    const pre = await query(
-      `MATCH (a:CloudAccount {id:$id}) RETURN a.name AS name, a.provider AS provider`,
-      { id: req.params.id }
-    )
-    await write(`MATCH (a:CloudAccount {id:$id}) DELETE a`, { id: req.params.id })
-    audit(actor(req), 'delete', 'CloudAccount', req.params.id,
-      pre[0]?.get('name') || req.params.id, { provider: pre[0]?.get('provider') })
+    if (fastify.pg.pool) {
+      const rows = await fastify.pg.query(
+        `SELECT provider, name FROM cloud_accounts WHERE id = $1`, [req.params.id]
+      )
+      if (!rows.length) return reply.notFound('Account not found')
+      await fastify.pg.query(`DELETE FROM cloud_accounts WHERE id = $1`, [req.params.id])
+      audit(actor(req), 'delete', 'CloudAccount', req.params.id,
+        `${rows[0].provider}:${rows[0].name}`, {})
+    } else {
+      await write(`MATCH (a:CloudAccount {id:$id}) DELETE a`, { id: req.params.id })
+    }
     reply.code(204)
   })
 
-  // ── POST /discovery/scan/aws ──────────────────────────────────────────
-  fastify.post('/scan/aws', async (req, reply) => {
-    const {
-      regions = ['us-east-1'],
-      credentials,   // { accessKeyId, secretAccessKey, sessionToken? }
-    } = req.body || {}
 
-    fastify.log.info(`[Discovery] Starting AWS scan for regions: ${regions.join(', ')}`)
+  // ── Helper: load all enabled accounts for a provider from Postgres ──────
+  const loadAccounts = async (provider) => {
+    if (!fastify.pg.pool) return []
+    const rows = await fastify.pg.query(
+      `SELECT id, name, config FROM cloud_accounts
+       WHERE provider = $1 AND enabled = true ORDER BY name`,
+      [provider]
+    )
+    return rows.map(r => ({ id: r.id, name: r.name, config: decryptConfig(r.config || {}) }))
+  }
+
+  // ── Helper: update scan result on account ────────────────────────────────
+  const updateScanResult = async (accountId, status, total, error) => {
+    if (!fastify.pg.pool || !accountId) return
+    await fastify.pg.query(
+      `UPDATE cloud_accounts
+       SET last_scan_at = now(), last_scan_status = $1,
+           last_scan_total = $2, last_scan_error = $3
+       WHERE id = $4`,
+      [status, total || 0, error || null, accountId]
+    ).catch(() => {})
+  }
+
+  // ── POST /discovery/scan/aws ──────────────────────────────────────────────
+  // Scans all configured AWS accounts from Postgres, or uses credentials
+  // from the request body for a one-off scan.
+  fastify.post('/scan/aws', async (req, reply) => {
+    const { regions = ['us-east-1'], credentials, accountId } = req.body || {}
     const startedAt = Date.now()
 
-    let stats
-    try {
-      stats = await scanAWS({ credentials, regions, write, log: fastify.log })
-    } catch (err) {
-      fastify.log.error(`[Discovery] AWS scan failed: ${err.message}`)
-      return reply.internalServerError(`AWS scan failed: ${err.message}`)
+    // Load all configured AWS accounts from Postgres
+    const accounts = await loadAccounts('aws')
+
+    // If credentials passed directly — one-off scan, not tied to a saved account
+    if (credentials || !accounts.length) {
+      fastify.log.info(`[Discovery] AWS one-off scan for regions: ${regions.join(', ')}`)
+      let stats
+      try {
+        stats = await scanAWS({ credentials, regions, write, log: fastify.log })
+      } catch (err) {
+        return reply.internalServerError(`AWS scan failed: ${err.message}`)
+      }
+      const duration = Date.now() - startedAt
+      const total = Object.entries(stats).filter(([k]) => !['errors','skipped'].includes(k)).reduce((s,[,v])=>s+v,0)
+      audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { regions, total, duration, breakdown: stats })
+      return { provider: 'aws', accounts: 1, regions, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
+    }
+
+    // Scan all configured accounts (or a specific one if accountId provided)
+    const toScan = accountId ? accounts.filter(a => a.id === accountId || a.name === accountId) : accounts
+    fastify.log.info(`[Discovery] AWS scan: ${toScan.length} account(s)`)
+
+    const allResults = []
+    for (const account of toScan) {
+      const cfg = account.config || {}
+      const creds = cfg.accessKeyId
+        ? { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey || cfg.secretKey }
+        : null
+      const scanRegions = cfg.regions ? cfg.regions.split(',').map(r => r.trim()) : regions
+      try {
+        const stats = await scanAWS({ credentials: creds, regions: scanRegions, write, log: fastify.log })
+        const total = Object.entries(stats).filter(([k]) => !['errors','skipped'].includes(k)).reduce((s,[,v])=>s+v,0)
+        await updateScanResult(account.id, 'success', total, null)
+        allResults.push({ account: account.name, regions: scanRegions, total, breakdown: stats })
+      } catch (err) {
+        await updateScanResult(account.id, 'error', 0, err.message)
+        allResults.push({ account: account.name, error: err.message })
+      }
     }
 
     const duration = Date.now() - startedAt
-    const total = Object.entries(stats)
-      .filter(([k]) => !['errors','skipped'].includes(k))
-      .reduce((s, [, v]) => s + v, 0)
-
-    fastify.log.info(`[Discovery] AWS scan complete: ${total} resources in ${duration}ms, ${stats.skipped.length} skipped (Pro), ${stats.errors.length} errors`)
-    audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS',
-      { regions, total, duration, breakdown: stats })
-    return { provider: 'aws', regions, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
+    const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
+    audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { accounts: toScan.length, grandTotal, duration })
+    return { provider: 'aws', accounts: toScan.length, duration, total: grandTotal, results: allResults, completedAt: new Date().toISOString() }
   })
 
   // ── POST /discovery/scan/azure ────────────────────────────────────────
+  // Scans all configured Azure subscriptions from Postgres, or uses
+  // credentials from the request body for a one-off scan.
   fastify.post('/scan/azure', async (req, reply) => {
-    const {
-      subscriptionId,
-      credentials,   // { tenantId, clientId, clientSecret } — optional if using env/MSI
-    } = req.body || {}
-
-    fastify.log.info('[Discovery] Starting Azure scan')
+    const { subscriptionId, credentials, accountId } = req.body || {}
     const startedAt = Date.now()
 
-    let stats
-    try {
-      stats = await scanAzure({ credentials, subscriptionId, write, log: fastify.log })
-    } catch (err) {
-      fastify.log.error(`[Discovery] Azure scan failed: ${err.message}`)
-      return reply.internalServerError(`Azure scan failed: ${err.message}`)
+    // Load all configured Azure accounts from Postgres
+    const accounts = await loadAccounts('azure')
+
+    // One-off scan with credentials passed directly
+    if (credentials || !accounts.length) {
+      fastify.log.info(`[Discovery] Azure one-off scan: ${subscriptionId}`)
+      let stats
+      try {
+        stats = await scanAzure({ credentials, subscriptionId, write, log: fastify.log })
+      } catch (err) {
+        return reply.internalServerError(`Azure scan failed: ${err.message}`)
+      }
+      const duration = Date.now() - startedAt
+      const total = Object.entries(stats).filter(([k]) => !['errors','skipped'].includes(k)).reduce((s,[,v])=>s+v,0)
+      audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { subscriptionId, total, duration, breakdown: stats })
+      return { provider: 'azure', accounts: 1, subscriptionId, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
+    }
+
+    // Scan all configured subscriptions (or a specific one if accountId provided)
+    const toScan = accountId ? accounts.filter(a => a.id === accountId || a.name === accountId) : accounts
+    fastify.log.info(`[Discovery] Azure scan: ${toScan.length} subscription(s)`)
+
+    const allResults = []
+    for (const account of toScan) {
+      const cfg = account.config || {}
+      const creds = cfg.clientId
+        ? { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret }
+        : null
+      const subId = cfg.subscriptionId || subscriptionId
+      try {
+        const stats = await scanAzure({ credentials: creds, subscriptionId: subId, write, log: fastify.log })
+        const total = Object.entries(stats).filter(([k]) => !['errors','skipped'].includes(k)).reduce((s,[,v])=>s+v,0)
+        await updateScanResult(account.id, 'success', total, null)
+        allResults.push({ account: account.name, subscriptionId: subId, total, breakdown: stats })
+      } catch (err) {
+        await updateScanResult(account.id, 'error', 0, err.message)
+        allResults.push({ account: account.name, subscriptionId: subId, error: err.message })
+      }
     }
 
     const duration = Date.now() - startedAt
-    const total = Object.entries(stats)
-      .filter(([k]) => !['errors','skipped'].includes(k))
-      .reduce((s, [, v]) => s + v, 0)
-
-    audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure',
-      { subscriptionId, total, duration, breakdown: stats })
-    return { provider: 'azure', subscriptionId, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
+    const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
+    audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { accounts: toScan.length, grandTotal, duration })
+    return { provider: 'azure', accounts: toScan.length, duration, total: grandTotal, results: allResults, completedAt: new Date().toISOString() }
   })
 
   // ── POST /discovery/scan/gcp ──────────────────────────────────────────
+  // Scans all configured GCP projects from Postgres, or uses credentials
+  // from the request body for a one-off scan.
   fastify.post('/scan/gcp', async (req, reply) => {
-    const {
-      projectId,
-      credentials,   // service account JSON object — optional if using ADC
-    } = req.body || {}
-
-    fastify.log.info(`[Discovery] Starting GCP scan for project: ${projectId || process.env.GCP_PROJECT_ID}`)
+    const { projectId, credentials, accountId } = req.body || {}
     const startedAt = Date.now()
 
-    let stats
-    try {
-      stats = await scanGCP({ credentials, projectId, write, log: fastify.log })
-    } catch (err) {
-      fastify.log.error(`[Discovery] GCP scan failed: ${err.message}`)
-      return reply.internalServerError(`GCP scan failed: ${err.message}`)
+    const accounts = await loadAccounts('gcp')
+
+    // One-off scan with credentials passed directly
+    if (credentials || !accounts.length) {
+      fastify.log.info(`[Discovery] GCP one-off scan: ${projectId}`)
+      let stats
+      try {
+        stats = await scanGCP({ credentials, projectId, write, log: fastify.log })
+      } catch (err) {
+        return reply.internalServerError(`GCP scan failed: ${err.message}`)
+      }
+      const duration = Date.now() - startedAt
+      const total = Object.entries(stats).filter(([k]) => k !== 'errors').reduce((s,[,v])=>s+v,0)
+      audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { projectId, total, duration, breakdown: stats })
+      return { provider: 'gcp', accounts: 1, projectId, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
+    }
+
+    // Scan all configured projects
+    const toScan = accountId ? accounts.filter(a => a.id === accountId || a.name === accountId) : accounts
+    fastify.log.info(`[Discovery] GCP scan: ${toScan.length} project(s)`)
+
+    const allResults = []
+    for (const account of toScan) {
+      const cfg = account.config || {}
+      let creds = null
+      if (cfg.serviceAccount) {
+        try { creds = JSON.parse(cfg.serviceAccount) } catch {}
+      }
+      const proj = cfg.projectId || projectId
+      try {
+        const stats = await scanGCP({ credentials: creds, projectId: proj, write, log: fastify.log })
+        const total = Object.entries(stats).filter(([k]) => k !== 'errors').reduce((s,[,v])=>s+v,0)
+        await updateScanResult(account.id, 'success', total, null)
+        allResults.push({ account: account.name, projectId: proj, total, breakdown: stats })
+      } catch (err) {
+        await updateScanResult(account.id, 'error', 0, err.message)
+        allResults.push({ account: account.name, projectId: proj, error: err.message })
+      }
     }
 
     const duration = Date.now() - startedAt
-    const total = Object.entries(stats)
-      .filter(([k]) => k !== 'errors')
-      .reduce((s, [, v]) => s + v, 0)
-
-    audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP',
-      { projectId, total, duration, breakdown: stats })
-    return { provider: 'gcp', projectId, duration, total, breakdown: stats, completedAt: new Date().toISOString() }
+    const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
+    audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { accounts: toScan.length, grandTotal, duration })
+    return { provider: 'gcp', accounts: toScan.length, duration, total: grandTotal, results: allResults, completedAt: new Date().toISOString() }
   })
 
   // ── POST /discovery/scan/all — run all configured providers in parallel

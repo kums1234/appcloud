@@ -69,11 +69,11 @@ const INTEGRATIONS = [
     color:'#0078D4', secondaryColor:'#50B0F0',
     logo:'AZ',
     fields:[
-      { key:'tenantId',       label:'TENANT ID',       type:'text',     placeholder:'xxxxxxxx-xxxx-…' },
-      { key:'subscriptionId', label:'SUBSCRIPTION ID', type:'text',     placeholder:'xxxxxxxx-xxxx-…' },
-      { key:'clientId',       label:'CLIENT ID',       type:'text',     placeholder:'App registration client ID' },
-      { key:'clientSecret',   label:'CLIENT SECRET',   type:'password', placeholder:'••••••••' },
-      { key:'syncScope',      label:'RESOURCE GROUPS', type:'text',     placeholder:'* for all, or comma-separated names' },
+      { key:'subscriptionId', label:'SUBSCRIPTION ID',         type:'text',     placeholder:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', required:true },
+      { key:'clientId',       label:'CLIENT ID (APP REG)',      type:'text',     placeholder:'App registration Application ID', required:true },
+      { key:'clientSecret',   label:'CLIENT SECRET',           type:'password', placeholder:'••••••••', required:true },
+      { key:'tenantId',       label:'TENANT ID (OPTIONAL)',    type:'text',     placeholder:'Auto-detected if blank — Azure Portal > Azure Active Directory > Overview' },
+      { key:'syncScope',      label:'RESOURCE GROUPS (OPTIONAL)', type:'text', placeholder:'* for all, or comma-separated names' },
     ],
     capabilities:['Virtual Machines','AKS clusters','Azure SQL','App Services','VNets','Storage Accounts','Resource Groups'],
     badge:'Discovery',
@@ -180,61 +180,97 @@ const BADGE_COLOR = {
 const CLOUD_IDS = ['aws', 'azure', 'gcp']
 
 function useSavedConnections() {
-  const [connections, setConnections] = useState({})
+  // cloudAccounts: array of all saved cloud accounts from Postgres (multiple per provider)
+  // connections: map of non-cloud integration state (localStorage)
+  const [cloudAccounts, setCloudAccounts] = useState([])
+  const [connections,   setConnections]   = useState({})
 
-  // Load: cloud accounts from API, everything else from localStorage
-  useEffect(() => {
-    let base = {}
-    try { base = JSON.parse(localStorage.getItem('appcloud_integrations') || '{}') } catch {}
-
-    fetch('/api/discovery/accounts')
+  const loadCloudAccounts = () => {
+    fetch('/api/integrations/cloud')
       .then(r => r.ok ? r.json() : [])
       .then(accounts => {
-        const merged = { ...base }
-        for (const acc of accounts) {
-          try {
-            const cfg = JSON.parse(acc.config || '{}')
-            merged[acc.provider] = { ...cfg, _saved: true, _accountId: acc.id }
-          } catch {}
-        }
-        setConnections(merged)
+        setCloudAccounts(Array.isArray(accounts) ? accounts : [])
       })
-      .catch(() => setConnections(base))
+      .catch(() => setCloudAccounts([]))
+  }
+
+  useEffect(() => {
+    // Non-cloud integrations from localStorage
+    try {
+      const base = JSON.parse(localStorage.getItem('appcloud_integrations') || '{}')
+      setConnections(base)
+    } catch {}
+    // Cloud accounts from Postgres
+    loadCloudAccounts()
   }, [])
 
-  const save = async (id, data) => {
-    const next = { ...connections, [id]: { ...data, _saved: true } }
-    setConnections(next)
+  // Save a cloud account — name differentiates multiple accounts per provider
+  const saveCloud = async (provider, name, config) => {
+    const res = await fetch('/api/integrations/cloud', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, name, config }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.message || `Save failed: ${res.status}`)
+    }
+    const saved = await res.json()
+    // Immediately update cloudAccounts so connected status reflects the save
+    setCloudAccounts(prev => {
+      const without = prev.filter(a => a.id !== saved.id)
+      return [...without, saved]
+    })
+    return saved
+  }
 
+  // Save non-cloud integration to localStorage
+  const save = async (id, data) => {
     if (CLOUD_IDS.includes(id)) {
-      // Persist cloud credentials to Neo4j via discovery API
+      const name = data._name || id
       try {
-        await fetch('/api/discovery/accounts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: id, provider: id, config: data }),
-        })
-      } catch (e) { console.error('Failed to save cloud account:', e) }
+        await saveCloud(id, name, data)
+      } catch (e) {
+        console.error('Failed to save cloud account:', e)
+        // Fall back to localStorage so UI shows connected even if API failed
+        const next = { ...connections, [id]: { ...data, _saved: true } }
+        setConnections(next)
+        try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
+      }
     } else {
+      const next = { ...connections, [id]: { ...data, _saved: true } }
+      setConnections(next)
       try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
     }
   }
 
-  const remove = async (id) => {
-    const existing = connections[id]
-    const next = { ...connections }
-    delete next[id]
-    setConnections(next)
-
-    if (CLOUD_IDS.includes(id) && existing?._accountId) {
-      try {
-        await fetch(`/api/discovery/accounts/${existing._accountId}`, { method: 'DELETE' })
-      } catch {}
-    }
-    try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
+  const removeCloud = async (accountId) => {
+    try {
+      await fetch(`/api/integrations/cloud/${accountId}`, { method: 'DELETE' })
+      loadCloudAccounts()
+    } catch {}
   }
 
-  return { connections, save, remove }
+  const remove = async (id, accountId) => {
+    if (CLOUD_IDS.includes(id) && accountId) {
+      await removeCloud(accountId)
+    } else {
+      const next = { ...connections }
+      delete next[id]
+      setConnections(next)
+      try { localStorage.setItem('appcloud_integrations', JSON.stringify(next)) } catch {}
+    }
+  }
+
+  // Legacy compat: return first saved account per provider as connections[provider]
+  const legacyConnections = { ...connections }
+  for (const acc of cloudAccounts) {
+    if (!legacyConnections[acc.provider]) {
+      legacyConnections[acc.provider] = { ...acc.config, _saved: true, _accountId: acc.id }
+    }
+  }
+
+  return { connections: legacyConnections, cloudAccounts, save, remove, saveCloud, removeCloud, reload: loadCloudAccounts }
 }
 
 // ── Terraform upload panel ───────────────────────────────────────────────────
@@ -411,21 +447,26 @@ function TerraformUploadPanel() {
 }
 
 // ── Config modal ──────────────────────────────────────────────────────────────
-function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClose }) {
+function ConfigModal({ integration: intg, existing, accountName, onSave, onDisconnect, onClose }) {
+  const IS_CLOUD = ['aws','azure','gcp'].includes(intg.id)
+  // accountName field — lets users label multiple accounts per provider
+  const [name,    setName]    = useState(accountName || existing?._name || intg.id)
   const [form,    setForm]    = useState(
     () => Object.fromEntries(intg.fields.map(f => [f.key, existing?.[f.key] || '']))
   )
-  const [testing,  setTesting]  = useState(false)
-  const [testMsg,  setTestMsg]  = useState(null) // { ok, text }
-  const [saving,   setSaving]   = useState(false)
-  const [saved,    setSaved]    = useState(false)
+  const [testing,    setTesting]    = useState(false)
+  const [testMsg,    setTestMsg]    = useState(null)
+  const [saving,     setSaving]     = useState(false)
+  const [saved,      setSaved]      = useState(false)
+  const [saveError,  setSaveError]  = useState(null)
+  const [scanning,   setScanning]   = useState(false)
+  const [scanResult, setScanResult] = useState(null)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const handleTest = async () => {
     setTesting(true); setTestMsg(null)
     await new Promise(r => setTimeout(r, 1400))
-    // Simulated — in production this would call your backend
     const ok = Object.values(form).some(v => v.trim?.().length > 3)
     setTestMsg(ok
       ? { ok:true,  text:`Connection to ${intg.name} verified successfully.` }
@@ -434,15 +475,17 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
     setTesting(false)
   }
 
-  const [scanning, setScanning] = useState(false)
-  const [scanResult, setScanResult] = useState(null)
-
   const handleSave = async () => {
     setSaving(true)
-    await onSave(form)   // now async
-    setSaved(true)
-    setTimeout(() => { setSaved(false); onClose() }, 900)
-    setSaving(false)
+    try {
+      await onSave(form, name)
+      setSaved(true)
+      setTimeout(() => { setSaved(false); onClose() }, 900)
+    } catch (e) {
+      setSaveError(e.message || 'Save failed — check the console for details')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleScanNow = async () => {
@@ -452,32 +495,45 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
       const body = {}
       if (intg.id === 'aws') {
         body.regions = form.region ? [form.region] : ['us-east-1']
-        if (form.accessKeyId && form.secretKey)
-          body.credentials = { accessKeyId: form.accessKeyId, secretAccessKey: form.secretKey }
+        const secret = form.secretKey || form.secretAccessKey
+        if (form.accessKeyId && secret)
+          body.credentials = { accessKeyId: form.accessKeyId, secretAccessKey: secret }
       } else if (intg.id === 'azure') {
         body.subscriptionId = form.subscriptionId
-        if (form.tenantId && form.clientId && form.clientSecret)
-          body.credentials = { tenantId: form.tenantId, clientId: form.clientId, clientSecret: form.clientSecret }
+        // tenantId is optional — send credentials as long as clientId + clientSecret present
+        if (form.clientId && form.clientSecret)
+          body.credentials = {
+            clientId:     form.clientId,
+            clientSecret: form.clientSecret,
+            ...(form.tenantId ? { tenantId: form.tenantId } : {}),
+          }
       } else if (intg.id === 'gcp') {
         body.projectId = form.projectId
-        if (form.serviceAccount) {
-          try { body.credentials = JSON.parse(form.serviceAccount) } catch {}
-        }
+        if (form.serviceAccount) { try { body.credentials = JSON.parse(form.serviceAccount) } catch {} }
       }
-      const res = await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res  = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
       const data = await res.json()
-      setScanResult(res.ok
-        ? { ok: true, total: data.total, duration: data.duration, breakdown: data.breakdown }
-        : { ok: false, error: data.message || 'Scan failed' }
-      )
-    } catch (e) { setScanResult({ ok: false, error: e.message }) }
-    finally { setScanning(false) }
+      if (res.ok) {
+        setScanResult({
+          ok:       true,
+          total:    data.total,
+          duration: data.duration,
+          breakdown:data.breakdown,  // single-account scan
+          results:  data.results,    // multi-account scan
+        })
+      } else {
+        setScanResult({ ok:false, error: data.message || data.error || `HTTP ${res.status}` })
+      }
+    } catch (e) {
+      setScanResult({ ok:false, error: e.message || 'Network error — is the API running?' })
+    } finally {
+      setScanning(false)
+    }
   }
 
   const isConnected = !!existing
+  const T = getT('dark')
+  const mono = { fontFamily:'monospace' }
 
   return (
     <div style={{ position:'fixed',inset:0,zIndex:60,display:'flex',
@@ -499,7 +555,6 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
         boxShadow:`0 0 80px ${intg.color}18, 0 30px 80px #00000099`,
         animation:'mIn .22s cubic-bezier(.16,1,.3,1)' }}>
 
-        {/* Top shimmer */}
         <div style={{ position:'absolute',top:0,left:'5%',right:'5%',height:1,
           background:`linear-gradient(90deg,transparent,${intg.color}88,transparent)` }} />
 
@@ -511,17 +566,11 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
             border:`1.5px solid ${intg.color}44`,
             display:'flex',alignItems:'center',justifyContent:'center',
             boxShadow:`0 0 20px ${intg.color}22` }}>
-            <span style={{ ...mono,fontSize:11,fontWeight:900,color:intg.color }}>
-              {intg.logo}
-            </span>
+            <span style={{ ...mono,fontSize:11,fontWeight:900,color:intg.color }}>{intg.logo}</span>
           </div>
           <div style={{ flex:1 }}>
-            <div style={{ ...mono,fontSize:14,fontWeight:800,color:T.text }}>
-              {intg.name}
-            </div>
-            <div style={{ ...mono,fontSize:10,color:T.dim,marginTop:2 }}>
-              {intg.tagline}
-            </div>
+            <div style={{ ...mono,fontSize:14,fontWeight:800,color:T.text }}>{intg.name}</div>
+            <div style={{ ...mono,fontSize:10,color:T.dim,marginTop:2 }}>{intg.tagline}</div>
           </div>
           <button onClick={onClose} style={{ background:'none',border:'none',
             color:T.muted,cursor:'pointer',fontSize:22,lineHeight:1 }}>×</button>
@@ -529,114 +578,159 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
 
         {/* Scrollable form body */}
         <div className="cfg-scroll" style={{ overflowY:'auto',padding:'18px 22px',flex:1 }}>
-          {/* Terraform gets the upload panel above the config fields */}
-          {intg.id==='terraform'&&(
-            <div style={{ marginBottom:20,paddingBottom:20,
-              borderBottom:`1px solid ${T.border}` }}>
+
+          {/* Account name — cloud providers only, enables multiple accounts */}
+          {IS_CLOUD && (
+            <div style={{ marginBottom:16, padding:'12px 14px', borderRadius:10,
+              background:T.surface2, border:`1px solid ${intg.color}33` }}>
+              <div style={{ ...mono,fontSize:8,color:intg.color,letterSpacing:'0.12em',
+                fontWeight:700,marginBottom:6 }}>ACCOUNT LABEL</div>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder={`e.g. ${intg.id === 'aws' ? 'prod-account' : intg.id === 'azure' ? 'prod-subscription' : 'my-gcp-project'}`}
+                style={{ width:'100%',background:T.surface,border:`1px solid ${T.border2}`,
+                  borderRadius:8,padding:'8px 12px',color:T.text,fontSize:12,
+                  fontFamily:'monospace',outline:'none',boxSizing:'border-box' }}
+              />
+              <div style={{ ...mono,fontSize:9,color:T.muted,marginTop:5 }}>
+                A unique label for this account. Add multiple accounts by saving with different labels.
+              </div>
+            </div>
+          )}
+
+          {intg.id==='terraform' && (
+            <div style={{ marginBottom:20,paddingBottom:20,borderBottom:`1px solid ${T.border}` }}>
               <div style={{ ...mono,fontSize:8,color:T.muted,letterSpacing:'0.12em',
                 fontWeight:700,marginBottom:10 }}>IMPORT STATE FILE</div>
               <TerraformUploadPanel/>
             </div>
           )}
+
           {intg.fields.map(field => (
             <div key={field.key} style={{ marginBottom:14 }}>
               <div style={{ ...mono,fontSize:8,color:T.muted,letterSpacing:'0.12em',
                 fontWeight:700,marginBottom:6 }}>{field.label}</div>
               {field.type==='select' ? (
                 <select value={form[field.key]} onChange={e=>set(field.key,e.target.value)}
-                  style={{ width:'100%',background:T.surface2,
-                    border:`1px solid ${T.border2}`,borderRadius:8,
-                    padding:'9px 12px',color:form[field.key]?T.text:T.dim,
-                    fontSize:12,fontFamily:'monospace',outline:'none',
-                    cursor:'pointer',appearance:'none' }}>
+                  style={{ width:'100%',background:T.surface2,border:`1px solid ${T.border2}`,
+                    borderRadius:8,padding:'9px 12px',color:form[field.key]?T.text:T.dim,
+                    fontSize:12,fontFamily:'monospace',outline:'none',cursor:'pointer',appearance:'none' }}>
                   <option value="">Select…</option>
                   {field.options.map(o=><option key={o} value={o}>{o}</option>)}
                 </select>
               ) : field.type==='textarea' ? (
-                <textarea value={form[field.key]}
-                  onChange={e=>set(field.key,e.target.value)}
+                <textarea value={form[field.key]} onChange={e=>set(field.key,e.target.value)}
                   rows={4} placeholder={field.placeholder}
-                  style={{ width:'100%',background:T.surface2,
-                    border:`1px solid ${T.border2}`,borderRadius:8,
-                    padding:'9px 12px',color:T.text,fontSize:11,
-                    fontFamily:'monospace',outline:'none',resize:'vertical',
-                    boxSizing:'border-box' }} />
+                  style={{ width:'100%',background:T.surface2,border:`1px solid ${T.border2}`,
+                    borderRadius:8,padding:'9px 12px',color:T.text,fontSize:11,
+                    fontFamily:'monospace',outline:'none',resize:'vertical',boxSizing:'border-box' }} />
               ) : (
                 <input type={field.type==='password'?'password':'text'}
-                  value={form[field.key]}
-                  onChange={e=>set(field.key,e.target.value)}
+                  value={form[field.key]} onChange={e=>set(field.key,e.target.value)}
                   placeholder={field.placeholder}
-                  style={{ width:'100%',background:T.surface2,
-                    border:`1px solid ${T.border2}`,borderRadius:8,
-                    padding:'9px 12px',color:T.text,fontSize:12,
+                  style={{ width:'100%',background:T.surface2,border:`1px solid ${T.border2}`,
+                    borderRadius:8,padding:'9px 12px',color:T.text,fontSize:12,
                     fontFamily:'monospace',outline:'none',boxSizing:'border-box' }} />
               )}
             </div>
           ))}
 
-          {/* Test connection result */}
-          {testMsg&&(
+          {testMsg && (
             <div style={{ padding:'9px 13px',borderRadius:8,marginBottom:4,
               background:testMsg.ok?T.green+'12':T.red+'12',
               border:`1px solid ${testMsg.ok?T.green+'44':T.red+'44'}` }}>
-              <span style={{ ...mono,fontSize:11,
-                color:testMsg.ok?T.green:T.red }}>
+              <span style={{ ...mono,fontSize:11,color:testMsg.ok?T.green:T.red }}>
                 {testMsg.ok?'✓ ':'✗ '}{testMsg.text}
               </span>
             </div>
           )}
+          {saveError && (
+            <div style={{ padding:'9px 13px',borderRadius:8,marginBottom:4,
+              background:T.red+'12', border:`1px solid ${T.red}44` }}>
+              <span style={{ ...mono,fontSize:11,color:T.red }}>✗ {saveError}</span>
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
-        {/* Scan result (cloud providers only) */}
+        {/* Scan result */}
         {scanResult && (
           <div style={{ padding:'8px 22px', borderTop:`1px solid ${T.border}` }}>
-            <div style={{ padding:'8px 12px', borderRadius:7,
-              background: scanResult.ok ? T.green+'0a' : T.red+'0a',
-              border:`1px solid ${scanResult.ok ? T.green+'44' : T.red+'44'}` }}>
+            <div style={{ padding:'8px 12px',borderRadius:7,
+              background:scanResult.ok?T.green+'0a':T.red+'0a',
+              border:`1px solid ${scanResult.ok?T.green+'44':T.red+'44'}` }}>
               {scanResult.ok ? (
                 <div>
-                  <div style={{ ...mono, fontSize:10, fontWeight:700, color:T.green, marginBottom:4 }}>
-                    ✓ Discovery complete — {scanResult.total} resources in {(scanResult.duration/1000).toFixed(1)}s
+                  <div style={{ ...mono,fontSize:10,fontWeight:700,color:T.green,marginBottom:4 }}>
+                    ✓ {scanResult.total} resource{scanResult.total!==1?'s':''} in {(scanResult.duration/1000).toFixed(1)}s
                   </div>
-                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                    {Object.entries(scanResult.breakdown || {})
-                      .filter(([k]) => k !== 'errors')
-                      .map(([k, v]) => (
-                        <span key={k} style={{ ...mono, fontSize:8, color:T.dim,
-                          background:T.surface2, border:`1px solid ${T.border}`,
-                          borderRadius:3, padding:'1px 6px' }}>{k}: {v}</span>
+                  {/* Multi-account results array */}
+                  {scanResult.results?.map((r,i) => (
+                    <div key={i} style={{ ...mono,fontSize:9,color:T.dim,marginBottom:3 }}>
+                      {r.error
+                        ? <span style={{ color:T.red }}>✗ {r.account}: {r.error}</span>
+                        : <span>✓ {r.account}: {r.total} resources</span>
+                      }
+                    </div>
+                  ))}
+                  {/* Single-scan breakdown */}
+                  {scanResult.breakdown && (
+                    <div style={{ display:'flex',gap:6,flexWrap:'wrap',marginTop:4 }}>
+                      {Object.entries(scanResult.breakdown)
+                        .filter(([k])=>!['errors','skipped'].includes(k))
+                        .map(([k,v]) => v > 0 && (
+                          <span key={k} style={{ ...mono,fontSize:8,color:T.dim,
+                            background:T.surface2,border:`1px solid ${T.border}`,
+                            borderRadius:3,padding:'1px 6px' }}>{k}: {v}</span>
+                        ))}
+                    </div>
+                  )}
+                  {(scanResult.breakdown?.errors?.length > 0) && (
+                    <div style={{ marginTop:4 }}>
+                      {scanResult.breakdown.errors.slice(0,3).map((e,i)=>(
+                        <div key={i} style={{ ...mono,fontSize:8,color:T.amber }}>⚠ {e}</div>
                       ))}
-                  </div>
+                    </div>
+                  )}
+                  {(scanResult.breakdown?.skipped?.length > 0) && (
+                    <div style={{ ...mono,fontSize:8,color:T.muted,marginTop:3 }}>
+                      {scanResult.breakdown.skipped.length} service{scanResult.breakdown.skipped.length!==1?'s':''} skipped (not available)
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div style={{ ...mono, fontSize:10, color:T.red }}>✗ {scanResult.error}</div>
+                <div>
+                  <div style={{ ...mono,fontSize:10,color:T.red,fontWeight:700 }}>✗ Scan failed</div>
+                  <div style={{ ...mono,fontSize:9,color:T.red,marginTop:3,wordBreak:'break-word' }}>
+                    {scanResult.error}
+                  </div>
+                </div>
               )}
             </div>
           </div>
         )}
 
+        {/* Footer buttons */}
         <div style={{ padding:'14px 22px',borderTop:`1px solid ${T.border}`,
           display:'flex',gap:8,flexShrink:0 }}>
-          {isConnected&&(
+          {isConnected && (
             <button onClick={onDisconnect}
               style={{ ...mono,fontSize:11,padding:'9px 14px',
                 background:T.red+'12',border:`1px solid ${T.red}33`,
                 borderRadius:8,color:T.red,cursor:'pointer' }}>
-              Disconnect
+              Remove
             </button>
           )}
-          {/* Run discovery button — cloud providers only */}
-          {['aws','azure','gcp'].includes(intg.id) && (
+          {IS_CLOUD && (
             <button onClick={handleScanNow} disabled={scanning}
-              style={{ ...mono, fontSize:11, padding:'9px 14px',
-                background: T.teal+'18', border:`1px solid ${T.teal}44`,
-                borderRadius:8, color:T.teal, cursor:'pointer',
-                display:'flex', alignItems:'center', gap:6,
-                opacity: scanning ? .6 : 1 }}>
+              style={{ ...mono,fontSize:11,padding:'9px 14px',
+                background:T.teal+'18',border:`1px solid ${T.teal}44`,
+                borderRadius:8,color:T.teal,cursor:'pointer',
+                display:'flex',alignItems:'center',gap:6,opacity:scanning?.6:1 }}>
               {scanning ? (
-                <><div style={{ width:10, height:10, borderRadius:'50%',
-                  border:`1.5px solid ${T.teal}33`, borderTop:`1.5px solid ${T.teal}`,
+                <><div style={{ width:10,height:10,borderRadius:'50%',
+                  border:`1.5px solid ${T.teal}33`,borderTop:`1.5px solid ${T.teal}`,
                   animation:'spin .7s linear infinite' }}/> Scanning…</>
               ) : '▶ Scan Now'}
             </button>
@@ -646,11 +740,9 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
               background:T.surface2,border:`1px solid ${T.border2}`,
               borderRadius:8,color:T.dim,cursor:'pointer',
               display:'flex',alignItems:'center',gap:7 }}>
-            {testing&&(
-              <div style={{ width:10,height:10,borderRadius:'50%',
-                border:`1.5px solid ${T.border2}`,borderTop:`1.5px solid ${T.dim}`,
-                animation:'spin .7s linear infinite' }} />
-            )}
+            {testing && <div style={{ width:10,height:10,borderRadius:'50%',
+              border:`1.5px solid ${T.border2}`,borderTop:`1.5px solid ${T.dim}`,
+              animation:'spin .7s linear infinite' }} />}
             {testing?'Testing…':'Test Connection'}
           </button>
           <button onClick={handleSave} disabled={saving||saved}
@@ -659,7 +751,7 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
               border:'none',borderRadius:8,color:'#fff',cursor:'pointer',
               flex:1,transition:'all .2s',
               boxShadow:saved?`0 0 20px ${T.green}44`:`0 0 20px ${intg.color}33` }}>
-            {saved?'✓ Saved!':saving?'Saving…':(isConnected?'Update Connection':'Connect')}
+            {saved?'✓ Saved!':saving?'Saving…':(isConnected?'Update':'Save Account')}
           </button>
         </div>
       </div>
@@ -668,7 +760,7 @@ function ConfigModal({ integration: intg, existing, onSave, onDisconnect, onClos
 }
 
 // ── Integration card ──────────────────────────────────────────────────────────
-function IntegrationCard({ intg, connected, onConfigure }) {
+function IntegrationCard({ intg, connected, accountCount, onConfigure }) {
   const [hover, setHover] = useState(false)
   const badgeMeta = BADGE_COLOR[intg.badge] || BADGE_COLOR.Discovery
 
@@ -815,9 +907,10 @@ export default function IntegrationsPage() {
   const { theme } = useTheme()
   const T = getT(theme)
 
-  const { connections, save, remove } = useSavedConnections()
+  const { connections, cloudAccounts, save, remove, saveCloud, removeCloud, reload } = useSavedConnections()
   const [activeCategory, setActiveCategory] = useState('all')
   const [configuring,    setConfiguring]    = useState(null) // integration id
+  const [editAccount,    setEditAccount]    = useState(null) // { id, name, config } for editing existing
 
   const filtered = activeCategory==='all'
     ? INTEGRATIONS
@@ -826,6 +919,11 @@ export default function IntegrationsPage() {
   const connectedCount = INTEGRATIONS.filter(i=>connections[i.id]).length
 
   const intgBeingConfigured = INTEGRATIONS.find(i=>i.id===configuring)
+
+  // Accounts for the currently-being-configured provider
+  const providerAccounts = intgBeingConfigured
+    ? cloudAccounts.filter(a => a.provider === intgBeingConfigured.id)
+    : []
 
   return (
     <div style={{ minHeight:'100vh',
@@ -896,7 +994,14 @@ export default function IntegrationsPage() {
             style={{ animationDelay:`${i*40}ms` }}>
             <IntegrationCard
               intg={intg}
-              connected={!!connections[intg.id]}
+              connected={
+                CLOUD_IDS.includes(intg.id)
+                  ? cloudAccounts.some(a => a.provider === intg.id)
+                  : !!connections[intg.id]
+              }
+              accountCount={CLOUD_IDS.includes(intg.id)
+                ? cloudAccounts.filter(a => a.provider === intg.id).length
+                : undefined}
               onConfigure={()=>setConfiguring(intg.id)}
             />
           </div>
@@ -913,15 +1018,91 @@ export default function IntegrationsPage() {
       )}
 
       {/* Config modal */}
-      {intgBeingConfigured&&(
+      {/* Saved accounts panel — shows all accounts for this provider */}
+      {intgBeingConfigured && ['aws','azure','gcp'].includes(intgBeingConfigured.id) && providerAccounts.length > 0 && !editAccount && (
+        <div style={{ position:'fixed',inset:0,zIndex:60,display:'flex',
+          alignItems:'center',justifyContent:'center',padding:20 }}>
+          <div style={{ position:'absolute',inset:0,background:'#000000cc',backdropFilter:'blur(6px)' }}
+            onClick={()=>setConfiguring(null)} />
+          <div style={{ position:'relative',background:T.surface,
+            border:`1px solid ${intgBeingConfigured.color}33`,borderRadius:18,
+            width:'100%',maxWidth:520,
+            boxShadow:`0 0 80px ${intgBeingConfigured.color}18, 0 30px 80px #00000099` }}>
+            <div style={{ padding:'18px 22px',borderBottom:`1px solid ${T.border}`,
+              display:'flex',alignItems:'center',justifyContent:'space-between' }}>
+              <div style={{ ...mono,fontSize:14,fontWeight:800,color:T.text }}>
+                {intgBeingConfigured.name} Accounts
+              </div>
+              <button onClick={()=>setConfiguring(null)}
+                style={{ background:'none',border:'none',color:T.muted,cursor:'pointer',fontSize:22 }}>×</button>
+            </div>
+            <div style={{ padding:'14px 22px' }}>
+              {providerAccounts.map(acc => (
+                <div key={acc.id} style={{ display:'flex',alignItems:'center',gap:10,
+                  padding:'10px 14px',borderRadius:10,marginBottom:8,
+                  background:T.surface2,border:`1px solid ${T.border}` }}>
+                  <div style={{ width:8,height:8,borderRadius:'50%',
+                    background:acc.last_scan_status==='success'?T.green:acc.last_scan_status==='error'?T.red:T.muted }} />
+                  <div style={{ flex:1 }}>
+                    <div style={{ ...mono,fontSize:12,fontWeight:700,color:T.text }}>{acc.name}</div>
+                    <div style={{ ...mono,fontSize:9,color:T.muted,marginTop:1 }}>
+                      {acc.last_scan_at
+                        ? `Last scan: ${new Date(acc.last_scan_at).toLocaleString()} · ${acc.last_scan_total || 0} resources`
+                        : 'Never scanned'}
+                    </div>
+                  </div>
+                  <button onClick={()=>setEditAccount(acc)}
+                    style={{ ...mono,fontSize:10,padding:'5px 12px',borderRadius:7,
+                      background:intgBeingConfigured.color+'18',
+                      border:`1px solid ${intgBeingConfigured.color}44`,
+                      color:intgBeingConfigured.color,cursor:'pointer' }}>Edit</button>
+                  <button onClick={()=>{ removeCloud(acc.id); reload() }}
+                    style={{ ...mono,fontSize:10,padding:'5px 10px',borderRadius:7,
+                      background:T.red+'12',border:`1px solid ${T.red}33`,
+                      color:T.red,cursor:'pointer' }}>✕</button>
+                </div>
+              ))}
+              <button onClick={()=>setEditAccount({ id:null, name:'', config:{}, provider:intgBeingConfigured.id })}
+                style={{ ...mono,fontSize:11,fontWeight:700,width:'100%',padding:'10px 0',
+                  borderRadius:10,background:intgBeingConfigured.color+'18',
+                  border:`1px solid ${intgBeingConfigured.color}44`,
+                  color:intgBeingConfigured.color,cursor:'pointer',marginTop:4 }}>
+                + Add Another Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Config modal — new account or editing existing */}
+      {intgBeingConfigured && (
+        (editAccount || !['aws','azure','gcp'].includes(intgBeingConfigured.id) || providerAccounts.length === 0) && (
         <ConfigModal
           integration={intgBeingConfigured}
-          existing={connections[intgBeingConfigured.id]}
-          onSave={data=>save(intgBeingConfigured.id,data)}
-          onDisconnect={()=>{ remove(intgBeingConfigured.id); setConfiguring(null) }}
-          onClose={()=>setConfiguring(null)}
+          existing={editAccount?.config ? { ...editAccount.config, _name: editAccount.name } : connections[intgBeingConfigured.id]}
+          accountName={editAccount?.name}
+          onSave={async (data, name) => {
+            if (['aws','azure','gcp'].includes(intgBeingConfigured.id)) {
+              await saveCloud(intgBeingConfigured.id, name || intgBeingConfigured.id, data)
+              reload()
+            } else {
+              await save(intgBeingConfigured.id, data)
+            }
+            setEditAccount(null)
+          }}
+          onDisconnect={() => {
+            if (editAccount?.id) {
+              removeCloud(editAccount.id)
+              reload()
+            } else {
+              remove(intgBeingConfigured.id, connections[intgBeingConfigured.id]?._accountId)
+            }
+            setEditAccount(null)
+            setConfiguring(null)
+          }}
+          onClose={() => { setEditAccount(null); setConfiguring(null) }}
         />
-      )}
+      ))}
     </div>
   )
 }
