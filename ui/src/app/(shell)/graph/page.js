@@ -42,7 +42,9 @@ const PAD_T       = 50   // top padding inside bubble (for label)
 const PAD_S       = 26   // side padding
 const PAD_B       = 22   // bottom padding
 const COMP_GAP    = 18   // vertical gap between components in same bubble
-const BUB_GAP     = 200  // horizontal gap between bubbles — wide to keep lines clear
+const BUB_GAP     = 80   // horizontal gap between bubbles
+const ROW_GAP     = 120  // vertical gap between bubble rows
+const COLS        = 3    // max bubbles per row — creates 2D grid layout
 
 function infraBadgeRows(n) { return n > 0 ? Math.ceil(n / 2) : 0 }
 function nodeH(infraCount) { return COMP_H_BASE + (infraBadgeRows(infraCount) > 0 ? 12 + infraBadgeRows(infraCount) * BADGE_H : 0) }
@@ -233,32 +235,46 @@ function buildGraph({ apps, components, connections, deployments, infra }) {
     if(!same){ crossSrc.add(conn.fromId); crossTgt.add(conn.toId) }
   })
 
-  // ── Position bubbles ───────────────────────────────────────────────────────
+  // ── Position bubbles — 2D grid layout ─────────────────────────────────────
+  // Apps are arranged in rows of COLS bubbles. Each row's height is the
+  // tallest bubble in that row, so nothing overlaps regardless of comp count.
   const bubbleW = COMP_W + PAD_S*2
-  let cursorX = 0
 
-  apps.forEach(app=>{
+  // Pre-compute all bubble heights so we can track row heights
+  const bubbleMeta = apps.map(app => {
     const all = compsByApp[app.id]||[]
-
-    // Sort order inside bubble:
-    // 1. Cross-app sources at top (their "out" handle is on the right → lines exit cleanly)
-    // 2. Neutral components in middle
-    // 3. Cross-app targets at bottom
     const sorted = [
       ...all.filter(c=> crossSrc.has(c.id)&&!crossTgt.has(c.id)),
       ...all.filter(c=>!crossSrc.has(c.id)&&!crossTgt.has(c.id)),
       ...all.filter(c=>!crossSrc.has(c.id)&& crossTgt.has(c.id)),
       ...all.filter(c=> crossSrc.has(c.id)&& crossTgt.has(c.id)),
     ]
-
-    // Compute per-component heights based on infra badge count
     const heights = sorted.map(c=>nodeH((deploysByComp[c.id]||[]).length))
     const totalH  = heights.reduce((a,b)=>a+b,0)+Math.max(sorted.length-1,0)*COMP_GAP
     const bubbleH = totalH+PAD_T+PAD_B
+    return { app, sorted, heights, bubbleH }
+  })
+
+  // Compute row Y offsets — each row is as tall as its tallest bubble
+  const rowHeights = []
+  for(let i=0; i<bubbleMeta.length; i+=COLS){
+    const row = bubbleMeta.slice(i, i+COLS)
+    rowHeights.push(Math.max(...row.map(m=>m.bubbleH)))
+  }
+  const rowY = rowHeights.reduce((acc,h,i)=>{
+    acc.push(i===0 ? 0 : acc[i-1]+rowHeights[i-1]+ROW_GAP)
+    return acc
+  }, [])
+
+  bubbleMeta.forEach(({ app, sorted, heights, bubbleH }, idx) => {
+    const col = idx % COLS
+    const row = Math.floor(idx / COLS)
+    const x   = col * (bubbleW + BUB_GAP)
+    const y   = rowY[row]
 
     nodes.push({
       id:`app-${app.id}`, type:'appGroup',
-      position:{ x:cursorX, y:0 },
+      position:{ x, y },
       style:{ width:bubbleW, height:bubbleH },
       data:{ label:app.name, nodeType:'Application',
              meta:`tier ${app.tier} · ${app.environment}` },
@@ -279,8 +295,6 @@ function buildGraph({ apps, components, connections, deployments, infra }) {
       })
       cy+=heights[ci]+COMP_GAP
     })
-
-    cursorX+=bubbleW+BUB_GAP
   })
 
   // ── Edges ─────────────────────────────────────────────────────────────────
