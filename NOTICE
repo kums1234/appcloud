@@ -1,0 +1,135 @@
+AppCloud — Infrastructure Intelligence Platform
+===============================================
+
+Copyright (c) 2026. All rights reserved.
+
+───────────────────────────────────────────────────────────────────────────────
+PRIOR ART NOTICE
+───────────────────────────────────────────────────────────────────────────────
+
+This software and the accompanying technical paper constitute a public
+disclosure of prior art. This notice is filed in connection with the initial
+public release of the AppCloud codebase, tagged v1.0.0-prior-art, on the date
+recorded by the Git commit timestamp of this repository.
+
+The following novel technical contributions are hereby publicly disclosed:
+
+1. TOPOLOGY-AWARE BLAST RADIUS AND RISK SCORING
+   A graph traversal algorithm that computes pre-change impact by traversing
+   upstream CONNECTS_TO edges up to four hops in a property graph, scoring
+   the result using a tier-weighted formula incorporating application
+   criticality, blast breadth, and infrastructure involvement.
+
+2. GRAPH-TRAVERSAL POLICY ENGINE
+   A governance policy enforcement mechanism in which each policy is expressed
+   as a Cypher graph query executed against a live Neo4j property graph,
+   including policies for self-approval detection, high-risk unapproved
+   changes, public infrastructure exposure, and deployment record validation.
+
+3. THREE-ENGINE WORKFLOW SYSTEM
+   A workflow enforcement system comprising three engines — change lifecycle,
+   application onboarding, and drift detection — in which workflow completion
+   state is computed by traversing the property graph rather than by
+   maintaining external state.
+
+4. LIVE MULTI-CLOUD DISCOVERY WITH GRAPH LINKAGE
+   A system that ingests live resource inventories from AWS, Azure, and GCP
+   control plane APIs and writes discovered resources as Infra nodes in a
+   property graph, with a linking mechanism that creates DEPLOYED_ON
+   relationships between discovered infrastructure and registered application
+   components.
+
+5. APPEND-ONLY AUDIT LOG WITH STRUCTURED QUERY API
+   An immutable PostgreSQL-backed audit log capturing actor, action, resource,
+   diff, and metadata for every write operation in the system, with a
+   structured query API supporting filtering, pagination, per-resource
+   history, per-actor history, and aggregated statistics.
+
+6. POLYGLOT GRAPH-RELATIONAL ARCHITECTURE WITH GRACEFUL DEGRADATION
+   An architecture in which a property graph database (Neo4j) and a relational
+   database (PostgreSQL) are operated concurrently with clearly separated
+   concerns, each decorated with a stub that returns empty results on
+   unavailability, enabling API operation under partial database failure.
+
+7. ENCRYPTED CLOUD ACCOUNT CREDENTIAL STORAGE WITH AUTO-TENANT RESOLUTION
+   AES-256-GCM encryption of cloud provider secret credentials before storage
+   in a relational database, using the application's existing JWT signing
+   secret as the encryption key. Includes auto-resolution of the Azure tenant
+   identifier from the ARM unauthenticated subscription metadata endpoint.
+
+8. KUBERNETES-NATIVE DEPLOYMENT WITH SERVICE DISCOVERY ISOLATION
+   A Kustomize-based Kubernetes deployment in which the Neo4j bolt connection
+   URI environment variable is namespaced (APPCLOUD_NEO4J_URI) to prevent
+   Kubernetes service-discovery environment variable injection from overriding
+   the intended connection string, and in which the Neo4j container entrypoint
+   is adapted via a ConfigMap and initContainer pattern.
+
+───────────────────────────────────────────────────────────────────────────────
+COPYRIGHT NOTICE
+───────────────────────────────────────────────────────────────────────────────
+
+The source code, documentation, user interface designs, database schemas,
+API specifications, Kubernetes manifests, deployment scripts, and technical
+paper contained in this repository are copyright works.
+
+Copyright (c) 2026. All rights reserved.
+
+Unauthorised reproduction, distribution, or creation of derivative works
+is prohibited without express written permission, except as permitted by
+applicable law.
+
+US Copyright registration has been filed for:
+  - The source code (as a literary work)
+  - The technical paper (as a literary work)
+
+───────────────────────────────────────────────────────────────────────────────
+THIRD-PARTY COMPONENTS
+───────────────────────────────────────────────────────────────────────────────
+
+This software incorporates the following open-source components. Each
+component is used in accordance with its respective licence. AppCloud claims
+no ownership of these components.
+
+  Neo4j Community Edition    — GPL v3
+  PostgreSQL                 — PostgreSQL Licence
+  Fastify                    — MIT
+  Next.js                    — MIT
+  React                      — MIT
+  ReactFlow                  — MIT
+  @azure/identity            — MIT
+  @azure/arm-*               — MIT
+  @aws-sdk/*                 — Apache 2.0
+  @google-cloud/*            — Apache 2.0
+  bcrypt                     — MIT
+  @fastify/jwt               — MIT
+  neo4j-driver               — Apache 2.0
+  pg (node-postgres)         — MIT
+  Docker                     — Apache 2.0 (CLI), commercial (Desktop)
+  Kubernetes / kubectl       — Apache 2.0
+  Kustomize                  — Apache 2.0
+
+Full dependency lists with version numbers are in:
+  api/package.json
+  ui/package.json
+
+───────────────────────────────────────────────────────────────────────────────
+TECHNICAL PAPER
+───────────────────────────────────────────────────────────────────────────────
+
+The technical paper "AppCloud: A Graph-Native Infrastructure Intelligence
+Platform" (docs/main.tex) describes the system architecture and novel
+contributions in detail. It has been submitted to arXiv (cs.DC) and filed
+with OSF Preprints for DOI assignment.
+
+Citation:
+  AppCloud: A Graph-Native Infrastructure Intelligence Platform.
+  arXiv preprint, March 2026.
+
+───────────────────────────────────────────────────────────────────────────────
+CONTACT
+───────────────────────────────────────────────────────────────────────────────
+
+For licensing enquiries or permissions requests, contact the repository owner
+via the GitHub profile associated with this repository.
+
+───────────────────────────────────────────────────────────────────────────────
