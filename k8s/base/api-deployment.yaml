@@ -15,6 +15,7 @@ spec:
       labels:
         app: api
     spec:
+      enableServiceLinks: false
       containers:
         - name: api
           image: appcloud-api:latest    # overridden per overlay with registry path
@@ -23,7 +24,7 @@ spec:
             - name: http
               containerPort: 3000
           env:
-            - name: NEO4J_URI
+            - name: APPCLOUD_NEO4J_URI
               value: bolt://neo4j:7687
             - name: POSTGRES_HOST
               value: postgres

@@ -43,19 +43,33 @@ async function azureList(iter) {
 
 /** Upsert an Infra node into Neo4j — returns the node id */
 async function upsertInfra(write, fields) {
+  // Merge incoming tags with any existing tags on the node.
+  // This preserves tags that were manually added in the cloud console
+  // or directly on the Neo4j node after the last scan.
+  const incomingTagsStr = JSON.stringify(fields.tags || {})
+
   const records = await write(`
     MERGE (i:Infra { cloud_id: $cloudId })
-    SET i.id           = COALESCE(i.id, randomUUID()),
-        i.name         = $name,
-        i.provider     = $provider,
+    SET i.id            = COALESCE(i.id, randomUUID()),
+        i.name          = $name,
+        i.provider      = $provider,
         i.resource_type = $resourceType,
-        i.region       = $region,
-        i.status       = $status,
-        i.public       = $public,
-        i.source       = 'discovery',
-        i.tags         = $tags,
-        i.raw          = $raw,
-        i.discovered_at = datetime()
+        i.region        = $region,
+        i.status        = $status,
+        i.public        = $public,
+        i.source        = 'discovery',
+        i.raw           = $raw,
+        i.discovered_at = datetime(),
+        i.tags          = CASE
+          WHEN i.tags IS NULL OR i.tags = '{}'
+          THEN $tags
+          ELSE apoc.convert.toJson(
+            apoc.map.merge(
+              apoc.convert.fromJsonMap(COALESCE(i.tags, '{}')),
+              apoc.convert.fromJsonMap($tags)
+            )
+          )
+        END
     RETURN i.id AS nodeId
   `, {
     cloudId:      fields.cloudId,
@@ -65,8 +79,35 @@ async function upsertInfra(write, fields) {
     region:       fields.region      || '',
     status:       fields.status      || 'unknown',
     public:       fields.public      ?? false,
-    tags:         JSON.stringify(fields.tags || {}),
+    tags:         incomingTagsStr,
     raw:          JSON.stringify(fields.raw  || {}),
+  }).catch(async () => {
+    // Fallback if APOC not available — overwrite tags (original behaviour)
+    return write(`
+      MERGE (i:Infra { cloud_id: $cloudId })
+      SET i.id            = COALESCE(i.id, randomUUID()),
+          i.name          = $name,
+          i.provider      = $provider,
+          i.resource_type = $resourceType,
+          i.region        = $region,
+          i.status        = $status,
+          i.public        = $public,
+          i.source        = 'discovery',
+          i.tags          = $tags,
+          i.raw           = $raw,
+          i.discovered_at = datetime()
+      RETURN i.id AS nodeId
+    `, {
+      cloudId:      fields.cloudId,
+      name:         fields.name        || fields.cloudId,
+      provider:     fields.provider,
+      resourceType: fields.resourceType,
+      region:       fields.region      || '',
+      status:       fields.status      || 'unknown',
+      public:       fields.public      ?? false,
+      tags:         incomingTagsStr,
+      raw:          JSON.stringify(fields.raw  || {}),
+    })
   })
   return records[0]?.get('nodeId')
 }
@@ -364,6 +405,7 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
   const { NetworkManagementClient }      = await import('@azure/arm-network')
   const { RedisManagementClient }        = await import('@azure/arm-rediscache')
 
+
   const subId = subscriptionId || process.env.AZURE_SUBSCRIPTION_ID
   if (!subId) throw new Error('subscriptionId is required for Azure discovery')
 
@@ -582,6 +624,78 @@ async function scanAzure({ credentials, subscriptionId, write, log }) {
       stats.vnet++
     }
   } catch (e) { handleScanError("AzureVNet", e) }
+
+
+  // ── Generic ARM resource scanner ─────────────────────────────────────
+  // Uses @azure/arm-resources (already a dependency) to list ALL resource
+  // types in the subscription. This picks up Application Insights, Storage
+  // Accounts, Service Bus, Key Vaults and anything else — with full tags.
+  // This avoids needing separate SDK packages for each resource type.
+  try {
+    const { ResourceManagementClient: GenericRMC } = await import('@azure/arm-resources')
+    const genericClient = new GenericRMC(cred, subId)
+
+    // Resource type → AppCloud resourceType mapping
+    const ARM_TYPE_MAP = {
+      'microsoft.insights/components':              'app_insights',
+      'microsoft.storage/storageaccounts':          'storage_account',
+      'microsoft.servicebus/namespaces':            'service_bus',
+      'microsoft.keyvault/vaults':                  'key_vault',
+      'microsoft.web/sites':                        'app_service',
+      'microsoft.web/serverfarms':                  'app_service_plan',
+      'microsoft.containerservice/managedclusters': 'aks_cluster',
+      'microsoft.sql/servers':                      'sql_server',
+      'microsoft.dbforpostgresql/servers':          'postgresql',
+      'microsoft.dbformysql/servers':               'mysql',
+      'microsoft.cache/redis':                      'redis',
+      'microsoft.network/virtualnetworks':          'vnet',
+      'microsoft.compute/virtualmachines':          'vm',
+      'microsoft.logic/workflows':                  'logic_app',
+      'microsoft.eventgrid/topics':                 'event_grid',
+      'microsoft.eventhub/namespaces':              'event_hub',
+      'microsoft.cdn/profiles':                     'cdn',
+      'microsoft.apimanagement/service':            'api_management',
+    }
+
+    for await (const resource of genericClient.resources.list()) {
+      const armType = resource.type?.toLowerCase() || ''
+      const resourceType = ARM_TYPE_MAP[armType]
+
+      // Skip types we handle with dedicated scanners (VMs, AKS, SQL already scanned above)
+      // and types we don't recognise
+      const alreadyScanned = [
+        'microsoft.compute/virtualmachines',
+        'microsoft.containerservice/managedclusters',
+        'microsoft.sql/servers',
+        'microsoft.web/sites',
+        'microsoft.cache/redis',
+        'microsoft.network/virtualnetworks',
+      ]
+      if (!resourceType || alreadyScanned.includes(armType)) continue
+
+      await upsertInfra(write, {
+        cloudId:      resource.id,
+        name:         resource.name,
+        provider:     'azure',
+        resourceType,
+        region:       resource.location || 'global',
+        status:       resource.provisioningState || 'unknown',
+        public:       false,
+        tags:         resource.tags || {},
+        raw: {
+          type:     resource.type,
+          kind:     resource.kind,
+          sku:      resource.sku?.name,
+          identity: resource.identity?.type,
+        },
+      })
+
+      // Count by type
+      const countKey = resourceType.replace(/_/g, '') + 'Count'
+      stats[countKey] = (stats[countKey] || 0) + 1
+    }
+    log.info(`[Azure] Generic ARM scan complete`)
+  } catch (e) { handleScanError('AzureGenericResources', e) }
 
   return stats
 }
@@ -1030,6 +1144,550 @@ export default async function discoveryRoutes(fastify) {
     return { results, errors, completedAt: new Date().toISOString() }
   })
 
+  // ── GET /discovery/schedule ─────────────────────────────────────────────
+  // Returns the current auto-discovery schedule configuration
+  fastify.get('/schedule', async (req, reply) => {
+    if (!fastify.pg?.pool) return {
+      scope: 'global', enabled: false, interval_mins: 15,
+      last_run_at: null, last_run_status: null, last_run_total: 0, next_run_at: null
+    }
+    try {
+      await fastify.pg.query(`
+        CREATE TABLE IF NOT EXISTS discovery_schedule (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          scope TEXT NOT NULL DEFAULT 'global',
+          enabled BOOLEAN NOT NULL DEFAULT true,
+          interval_mins INTEGER NOT NULL DEFAULT 15,
+          last_run_at TIMESTAMPTZ, last_run_status TEXT,
+          last_run_total INTEGER DEFAULT 0, next_run_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (scope)
+        );
+        INSERT INTO discovery_schedule (scope, enabled, interval_mins)
+        VALUES ('global', false, 15) ON CONFLICT (scope) DO NOTHING;
+      `).catch(() => {})
+      const rows = await fastify.pg.query(
+        `SELECT * FROM discovery_schedule WHERE scope = 'global' LIMIT 1`
+      )
+      return rows[0] || { scope: 'global', enabled: false, interval_mins: 15 }
+    } catch (err) {
+      return { scope: 'global', enabled: false, interval_mins: 15, error: err.message }
+    }
+  })
+
+  // ── PUT /discovery/schedule ──────────────────────────────────────────────
+  // Update schedule config — enabled flag and/or interval_mins
+  // interval_mins: minimum 5 (5 minutes), maximum 1440 (24 hours)
+  fastify.put('/schedule', async (req, reply) => {
+    const { enabled, interval_mins, hours, minutes } = req.body || {}
+
+    // Accept either interval_mins directly or hours+minutes breakdown
+    let intervalMins = interval_mins
+    if (intervalMins === undefined && (hours !== undefined || minutes !== undefined)) {
+      intervalMins = (parseInt(hours) || 0) * 60 + (parseInt(minutes) || 0)
+    }
+
+    // Validate
+    if (intervalMins !== undefined) {
+      if (intervalMins < 5)    return reply.badRequest('Minimum interval is 5 minutes')
+      if (intervalMins > 1440) return reply.badRequest('Maximum interval is 1440 minutes (24 hours)')
+    }
+
+    if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
+
+    try {
+      const fields = {}
+      if (enabled !== undefined)    fields.enabled       = enabled
+      if (intervalMins !== undefined) fields.interval_mins = intervalMins
+
+      // Compute next_run_at based on new interval
+      if (intervalMins !== undefined && enabled !== false) {
+        fields.next_run_at = new Date(Date.now() + intervalMins * 60 * 1000)
+      }
+
+      const setClauses = Object.keys(fields).map((k, i) => `${k} = $${i + 1}`)
+      setClauses.push('updated_at = now()')
+      const values = [...Object.values(fields), 'global']
+
+      const rows = await fastify.pg.query(
+        `INSERT INTO discovery_schedule (scope, enabled, interval_mins)
+         VALUES ('global', $1, $2)
+         ON CONFLICT (scope) DO UPDATE SET ${setClauses.join(', ')}
+         WHERE discovery_schedule.scope = $${values.length}
+         RETURNING *`,
+        [enabled ?? false, intervalMins ?? 15, ...values]
+      ).catch(async () => {
+        // Simpler upsert fallback
+        await fastify.pg.query(
+          `INSERT INTO discovery_schedule (scope, enabled, interval_mins)
+           VALUES ('global', COALESCE($1, false), COALESCE($2, 15))
+           ON CONFLICT (scope) DO UPDATE
+             SET enabled = COALESCE($1, discovery_schedule.enabled),
+                 interval_mins = COALESCE($2, discovery_schedule.interval_mins),
+                 next_run_at = $3, updated_at = now()`,
+          [enabled ?? null, intervalMins ?? null, fields.next_run_at ?? null]
+        )
+        const r = await fastify.pg.query(
+          `SELECT * FROM discovery_schedule WHERE scope = 'global' LIMIT 1`
+        )
+        return r
+      })
+
+      const schedule = Array.isArray(rows) ? rows[0] : rows?.rows?.[0]
+
+      // Restart the timer if scheduler plugin is available
+      if (fastify.scheduler?.restart) {
+        await fastify.scheduler.restart()
+      }
+
+      audit(actor(req), 'update', 'DiscoverySchedule', 'global', 'Discovery Schedule',
+        { enabled, interval_mins: intervalMins })
+
+      return schedule || { scope: 'global', enabled: enabled ?? false, interval_mins: intervalMins ?? 15 }
+    } catch (err) {
+      fastify.log.error(`[Schedule] PUT error: ${err.message}`)
+      return reply.internalServerError(`Failed to update schedule: ${err.message}`)
+    }
+  })
+
+  // ── POST /discovery/schedule/run-now ────────────────────────────────────
+  // Manually trigger an immediate scan outside the schedule
+  fastify.post('/schedule/run-now', async (req, reply) => {
+    if (fastify.scheduler?.runNow) {
+      // Fire and forget — don't await so the response returns immediately
+      fastify.scheduler.runNow().catch(err =>
+        fastify.log.error(`[Scheduler] Manual run error: ${err.message}`)
+      )
+      return { triggered: true, message: 'Scan started — check /discovery/schedule for status' }
+    }
+    // Fallback: call scan/all directly
+    const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    })
+    const data = await res.json()
+    return { triggered: true, ...data }
+  })
+
+
+
+
+  // ── GET /discovery/debug/:id — inspect raw Neo4j data for a resource ──
+  // Use this to verify tags and raw are being stored correctly.
+  // curl http://localhost:3000/discovery/debug/INFRA_ID
+  fastify.get('/debug/:id', async (req, reply) => {
+    const records = await query(
+      `MATCH (i:Infra) WHERE i.id = $id OR i.cloud_id = $id RETURN i LIMIT 1`,
+      { id: req.params.id }
+    )
+    if (!records.length) {
+      // Return all infra node names so you can find the right ID
+      const all = await query(
+        `MATCH (i:Infra {source:'discovery'})
+         RETURN i.id AS id, i.name AS name, i.provider AS provider,
+                i.resource_type AS type,
+                i.tags IS NOT NULL AS hasTags,
+                i.raw  IS NOT NULL AS hasRaw,
+                COALESCE(i.tags, '{}') AS tags
+         ORDER BY i.provider, i.name LIMIT 50`
+      )
+      return {
+        error: 'Infra node not found for id: ' + req.params.id,
+        availableResources: all.map(r => ({
+          id:       r.get('id'),
+          name:     r.get('name'),
+          provider: r.get('provider'),
+          type:     r.get('type'),
+          hasTags:  r.get('hasTags'),
+          hasRaw:   r.get('hasRaw'),
+          tagsRaw:  r.get('tags'),  // show raw string value from Neo4j
+        }))
+      }
+    }
+    const node = records[0].get('i')
+    const raw = node.properties
+    return {
+      id:               raw.id,
+      name:             raw.name,
+      provider:         raw.provider,
+      resource_type:    raw.resource_type,
+      // Show the raw string values as stored in Neo4j
+      tags_type:        typeof raw.tags,
+      tags_raw:         raw.tags,       // raw string from Neo4j
+      raw_type:         typeof raw.raw,
+      raw_truncated:    typeof raw.raw === 'string' ? raw.raw.slice(0, 200) : raw.raw,
+      // Show parsed values
+      tags_parsed:      (() => { try { return typeof raw.tags === 'string' ? JSON.parse(raw.tags) : raw.tags } catch(e) { return { parseError: e.message } } })(),
+      discovered_at:    raw.discovered_at?.toString(),
+    }
+  })
+
+  // ── GET /discovery/suggest ────────────────────────────────────────────────
+  // Analyses tags, metadata and name of every unmapped Infra node and returns
+  // ranked mapping suggestions against existing Applications and Components.
+  //
+  // Scoring (0-100):
+  //   appcloud:app tag matches Application.name exactly   → +40
+  //   appcloud:app tag matches Application.name fuzzy     → +25
+  //   appcloud:component tag matches Component.name       → +30
+  //   appcloud:owner / team tag matches Application.owner → +15
+  //   appcloud:env / environment matches                  → +10
+  //   appcloud:tier matches Application.tier              → +5
+  //   resource name contains component/app name          → +10
+  //   resource type matches component type               → +5
+  //
+  //   Threshold for "high confidence" auto-suggest: >= 60
+  //   Threshold for "possible match" display:       >= 25
+
+  fastify.get('/suggest', async (req) => {
+    const { minScore = 25, limit = 100 } = req.query
+
+    // Load all unmapped Infra nodes
+    const infraRecords = await query(`
+      MATCH (i:Infra)
+      WHERE i.source = 'discovery'
+        AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+      RETURN i
+      ORDER BY i.provider, i.resource_type, i.name
+      LIMIT toInteger($limit)
+    `, { limit: parseInt(limit) })
+
+    if (!infraRecords.length) return {
+      suggestions: [],
+      diagnostic: { unmappedInfra: 0, applications: 0, message: 'No unmapped infrastructure resources found' }
+    }
+
+    // Load all Applications and their Components
+    const appRecords = await query(`
+      MATCH (a:Application)
+      OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
+      RETURN a, collect(DISTINCT c) AS components
+    `)
+
+    const apps = appRecords.map(r => ({
+      ...props(r.get('a')),
+      components: r.get('components').map(props)
+    }))
+
+    if (!apps.length) return {
+      suggestions: [],
+      diagnostic: {
+        unmappedInfra: infraRecords.length,
+        applications: 0,
+        message: 'No Applications found in AppCloud. Create Applications and Components first, then run Analyse.',
+        hint: 'Go to Applications → Create Application, then add Components to it.'
+      }
+    }
+
+    const suggestions = []
+
+    for (const ir of infraRecords) {
+      const infra = props(ir.get('i'))
+
+      // tags and raw are stored as JSON strings in Neo4j.
+      // props() returns them as strings, but guard against both cases.
+      const parseProp = (val) => {
+        if (!val) return {}
+        if (typeof val === 'object') return val   // already parsed
+        if (typeof val === 'string') {
+          try { return JSON.parse(val) } catch { return {} }
+        }
+        return {}
+      }
+      let tags = parseProp(infra.tags)
+      let raw  = parseProp(infra.raw)
+
+      // Normalise tag keys — strip all known prefixes, lowercase everything.
+      // Handles: appcloud:app, appcloud-app, app, application, App, APPLICATION
+      // and Azure/AWS/GCP conventions.
+      const tagNorm = {}
+      for (const [k, v] of Object.entries(tags)) {
+        const normKey = k.toLowerCase()
+          .replace(/^appcloud[:-]/, '')  // strip appcloud: or appcloud-
+          .replace(/^app[:-]/, '')       // strip app: or app-
+          .replace(/-/g, '_')            // normalise hyphens to underscores
+          .trim()
+        tagNorm[normKey] = String(v || '').toLowerCase().trim()
+      }
+
+      // Also store original casing for display
+      const tagRaw = {}
+      for (const [k, v] of Object.entries(tags)) {
+        tagRaw[k.toLowerCase()] = String(v || '').toLowerCase().trim()
+      }
+
+      // Application name — check all common conventions
+      const tagApp = (
+        tagNorm['app']          ||
+        tagNorm['application']  ||
+        tagNorm['app_name']     ||
+        tagNorm['application_name'] ||
+        tagNorm['project']      ||
+        tagRaw['appcloud:app']  ||
+        tagRaw['appcloud-app']  ||
+        ''
+      )
+
+      // Component name
+      const tagComponent = (
+        tagNorm['component']      ||
+        tagNorm['service']        ||
+        tagNorm['service_name']   ||
+        tagNorm['component_name'] ||
+        tagNorm['module']         ||
+        tagRaw['appcloud:component'] ||
+        tagRaw['appcloud-component'] ||
+        ''
+      )
+
+      // Owner / team
+      const tagOwner = (
+        tagNorm['owner']          ||
+        tagNorm['team']           ||
+        tagNorm['managed_by']     ||
+        tagNorm['owned_by']       ||
+        tagNorm['contact']        ||
+        tagNorm['cost_centre']    ||
+        tagNorm['costcentre']     ||
+        ''
+      )
+
+      // Environment
+      const tagEnv = (
+        tagNorm['env']            ||
+        tagNorm['environment']    ||
+        tagNorm['stage']          ||
+        tagNorm['deployment_env'] ||
+        ''
+      )
+
+      // Tier
+      const tagTier = tagNorm['tier'] || tagNorm['criticality'] || ''
+      const infraNameLow = infra.name.toLowerCase()
+      const infraType    = infra.resource_type?.toLowerCase() || ''
+
+      // Resource type → likely Component type mapping
+      const TYPE_MAP = {
+        ec2_instance:    ['api','worker','app','server'],
+        function:        ['api','worker','function','lambda'],
+        rds_instance:    ['db','database','datastore'],
+        app_service:     ['api','web','ui','frontend'],
+        vm:              ['api','worker','app','server'],
+        compute_instance:['api','worker','app','server'],
+        cloud_run:       ['api','worker','service'],
+        cloud_function:  ['api','worker','function'],
+        app_insights:    ['monitoring','insights','observability','telemetry'],
+        storage_account: ['storage','assets','datastore','blob'],
+        service_bus:     ['queue','eventbus','messaging','bus'],
+        key_vault:       ['secrets','security','vault'],
+        s3_bucket:       ['storage','assets','datastore'],
+        dynamodb:        ['db','database','datastore'],
+        eks_cluster:     ['kubernetes','k8s','cluster'],
+        aks_cluster:     ['kubernetes','k8s','cluster'],
+        gke_cluster:     ['kubernetes','k8s','cluster'],
+      }
+      const likelyCompTypes = TYPE_MAP[infraType] || []
+
+      const scored = []
+
+      for (const app of apps) {
+        const appNameLow   = app.name.toLowerCase()
+        const appOwnerLow  = (app.owner || '').toLowerCase()
+        const appEnvLow    = (app.environment || '').toLowerCase()
+
+        // ── Score against the application ──────────────────────────────────
+        let appScore = 0
+        const appReasons = []
+
+        if (tagApp && tagApp === appNameLow) {
+          appScore += 40; appReasons.push(`tag "app" = "${app.name}" (exact)`)
+        } else if (tagApp && (appNameLow.includes(tagApp) || tagApp.includes(appNameLow))) {
+          appScore += 25; appReasons.push(`tag "app" ≈ "${app.name}" (partial)`)
+        } else if (infraNameLow.includes(appNameLow) || appNameLow.split(' ').some(w => infraNameLow.includes(w) && w.length > 3)) {
+          appScore += 10; appReasons.push(`name contains "${app.name}"`)
+        }
+
+        if (tagOwner && tagOwner === appOwnerLow) {
+          appScore += 15; appReasons.push(`tag "owner" = "${app.owner}"`)
+        } else if (tagOwner && (appOwnerLow.includes(tagOwner) || tagOwner.includes(appOwnerLow))) {
+          appScore += 8; appReasons.push(`tag "owner" ≈ "${app.owner}"`)
+        }
+
+        if (tagEnv && appEnvLow && tagEnv === appEnvLow) {
+          appScore += 10; appReasons.push(`tag "env" = "${app.environment}"`)
+        }
+
+        if (tagTier && app.tier && String(app.tier) === tagTier) {
+          appScore += 5; appReasons.push(`tag "tier" = ${app.tier}`)
+        }
+
+        if (appScore < 10) continue  // Not related to this app at all
+
+        // ── Score against each component within the app ────────────────────
+        for (const comp of app.components) {
+          let compScore = appScore
+          const compReasons = [...appReasons]
+          const compNameLow = comp.name.toLowerCase()
+          const compTypeLow = (comp.type || '').toLowerCase()
+
+          if (tagComponent && tagComponent === compNameLow) {
+            compScore += 30; compReasons.push(`tag "component" = "${comp.name}" (exact)`)
+          } else if (tagComponent && (compNameLow.includes(tagComponent) || tagComponent.includes(compNameLow))) {
+            compScore += 20; compReasons.push(`tag "component" ≈ "${comp.name}" (partial)`)
+          } else if (infraNameLow.includes(compNameLow) || compNameLow.split('-').some(w => infraNameLow.includes(w) && w.length > 2)) {
+            compScore += 10; compReasons.push(`name contains "${comp.name}"`)
+          }
+
+          if (likelyCompTypes.includes(compTypeLow)) {
+            compScore += 5; compReasons.push(`resource type suits ${comp.type} component`)
+          }
+
+          const finalScore = Math.min(100, compScore)
+          if (finalScore >= parseInt(minScore)) {
+            scored.push({
+              infraId:       infra.id,
+              componentId:   comp.id,
+              componentName: comp.name,
+              applicationId: app.id,
+              applicationName: app.name,
+              score:         finalScore,
+              confidence:    finalScore >= 70 ? 'high' : finalScore >= 45 ? 'medium' : 'low',
+              reasons:       compReasons,
+            })
+          }
+        }
+
+        // ── App-only suggestion (no component match) — suggest creating one ─
+        if (!app.components.length || scored.filter(s => s.applicationId === app.id).length === 0) {
+          const finalScore = Math.min(100, appScore)
+          if (finalScore >= parseInt(minScore)) {
+            scored.push({
+              infraId:         infra.id,
+              componentId:     null,
+              componentName:   null,
+              applicationId:   app.id,
+              applicationName: app.name,
+              score:           finalScore,
+              confidence:      finalScore >= 70 ? 'high' : finalScore >= 45 ? 'medium' : 'low',
+              reasons:         appReasons,
+              noComponent:     true,
+            })
+          }
+        }
+      }
+
+      if (scored.length > 0) {
+        // Sort by score descending, keep top 3 per infra node
+        scored.sort((a, b) => b.score - a.score)
+        suggestions.push({
+          infra: {
+            id:           infra.id,
+            name:         infra.name,
+            provider:     infra.provider,
+            resourceType: infra.resource_type,
+            region:       infra.region,
+            tags,
+            raw,
+          },
+          suggestions:    scored.slice(0, 3),
+          topScore:       scored[0].score,
+          topConfidence:  scored[0].confidence,
+        })
+      }
+    }
+
+    // Sort by top score descending
+    suggestions.sort((a, b) => b.topScore - a.topScore)
+
+    return {
+      suggestions,
+      diagnostic: {
+        unmappedInfra:    infraRecords.length,
+        applications:     apps.length,
+        withSuggestions:  suggestions.length,
+        belowThreshold:   infraRecords.length - suggestions.length,
+        minScore:         parseInt(minScore),
+        message: suggestions.length === 0
+          ? `Found ${infraRecords.length} unmapped resource(s) and ${apps.length} application(s) but no matches above score ${minScore}. Try lowering the minimum score or adding appcloud:app / appcloud-app tags to your cloud resources.`
+          : `Found ${suggestions.length} suggestion(s) from ${infraRecords.length} unmapped resource(s)`
+      }
+    }
+  })
+
+  // ── POST /discovery/suggest/apply ────────────────────────────────────────
+  // Applies confirmed mapping suggestions — creates DEPLOYED_ON relationships.
+  // Body: { mappings: [{ infraId, componentId }] }
+  // Returns: { applied, skipped, errors }
+
+  fastify.post('/suggest/apply', async (req, reply) => {
+    const { mappings = [] } = req.body || {}
+    if (!mappings.length) return reply.badRequest('mappings array is required')
+
+    const results = { applied: 0, skipped: 0, errors: [] }
+
+    for (const { infraId, componentId } of mappings) {
+      if (!infraId || !componentId) { results.skipped++; continue }
+      try {
+        const r = await write(`
+          MATCH (c:Component {id: $componentId}), (i:Infra {id: $infraId})
+          MERGE (c)-[rel:DEPLOYED_ON]->(i)
+          SET rel.source = 'auto-mapped', rel.mappedAt = datetime()
+          RETURN c.name AS comp, i.name AS infra
+        `, { componentId, infraId })
+        if (r.length) {
+          results.applied++
+          audit(actor(req), 'create', 'Infra', infraId,
+            r[0].get('infra'), { componentId, source: 'auto-mapped' })
+        } else {
+          results.errors.push(`${infraId}: component or infra not found`)
+        }
+      } catch (err) {
+        results.errors.push(`${infraId}: ${err.message}`)
+      }
+    }
+
+    return results
+  })
+
+  // ── GET /discovery/resources/:id/refresh ─────────────────────────────────
+  // Re-fetches tags and metadata for a single Infra node from the cloud API.
+  // This picks up tags that were added manually after the last scan.
+
+  fastify.get('/resources/:id/refresh', async (req, reply) => {
+    const records = await query(
+      `MATCH (i:Infra {id: $id}) RETURN i`, { id: req.params.id }
+    )
+    if (!records.length) return reply.notFound('Infra node not found')
+    const infra = props(records[0].get('i'))
+
+    // Re-run a targeted scan for just this resource's cloud account
+    // by triggering the appropriate provider scan with the node's cloud_id
+    const provider = infra.provider
+    const cloudId  = infra.cloud_id
+
+    if (!provider || !cloudId) {
+      return reply.badRequest('Cannot refresh — missing provider or cloud_id')
+    }
+
+    // Load the matching cloud account credentials
+    const accounts = await loadAccounts(provider)
+    if (!accounts.length) {
+      return { refreshed: false, reason: 'No configured cloud account for ' + provider }
+    }
+
+    // For now return the stored data with a note — full per-resource refresh
+    // requires provider-specific describe calls (future enhancement)
+    return {
+      refreshed: false,
+      reason: 'Per-resource tag refresh requires a full scan — run discovery scan to pick up new tags',
+      infra: {
+        ...infra,
+        tags: (() => { try { return JSON.parse(infra.tags || '{}') } catch { return {} } })(),
+      },
+      hint: `Run: POST /discovery/scan/${provider} to refresh all ${provider} resources`
+    }
+  })
+
   // ── GET /discovery/resources — all discovered Infra nodes ─────────────
   fastify.get('/resources', async (req) => {
     const { provider, resourceType, limit = 200 } = req.query
@@ -1047,12 +1705,23 @@ export default async function discoveryRoutes(fastify) {
       LIMIT toInteger($limit)
     `, { provider, resourceType, limit: parseInt(limit) })
 
-    return records.map(r => ({
-      ...props(r.get('i')),
-      components:   r.get('components').filter(Boolean),
-      applications: r.get('applications').filter(Boolean),
-      mapped:       r.get('components').filter(Boolean).length > 0,
-    }))
+    return records.map(r => {
+      const node = props(r.get('i'))
+      // Parse stored JSON strings so callers get real objects, not strings
+      const parseProp = (val) => {
+        if (!val) return {}
+        if (typeof val === 'object') return val
+        try { return JSON.parse(val) } catch { return {} }
+      }
+      return {
+        ...node,
+        tags:         parseProp(node.tags),
+        raw:          parseProp(node.raw),
+        components:   r.get('components').filter(Boolean),
+        applications: r.get('applications').filter(Boolean),
+        mapped:       r.get('components').filter(Boolean).length > 0,
+      }
+    })
   })
 
   // ── GET /discovery/summary — counts by provider + resource type ────────

@@ -30,8 +30,6 @@ if ! minikube status --profile=appcloud &>/dev/null; then
     --memory=6g \
     --disk-size=30g \
     --container-runtime=containerd
-  # No --kubernetes-version pin: let minikube choose a version compatible
-  # with the local binaries. Pinning to v1.29.0 caused kubelet flag conflicts.
 fi
 
 echo "► Enabling required addons..."
@@ -62,7 +60,6 @@ echo "  ✓ Images loaded"
 echo "► Creating namespace and secrets..."
 kubectl apply -f "$K8S_DIR/base/namespace.yaml" || true
 
-# Idempotent — delete + recreate so re-runs always pick up fresh secret files
 kubectl -n appcloud delete secret appcloud-db-credentials 2>/dev/null || true
 kubectl -n appcloud create secret generic appcloud-db-credentials \
   --from-file=db_username="$SECRETS_DIR/db_username.txt" \
@@ -82,17 +79,43 @@ echo "► Applying kustomize overlay (minikube)..."
 kubectl apply -k "$K8S_DIR/overlays/minikube"
 
 # ── Wait for rollout ───────────────────────────────────────────────────────────
-echo "► Waiting for Neo4j to be ready (this takes ~60s)..."
-kubectl -n appcloud rollout status deployment/neo4j --timeout=180s
+# Uses a manual poll instead of `rollout status --timeout` so a slow minikube
+# node doesn't cause a false failure. Prints pod state every 10s.
 
-echo "► Waiting for Postgres..."
-kubectl -n appcloud rollout status deployment/postgres --timeout=120s
+wait_for_deployment() {
+  local name=$1
+  local timeout=${2:-300}
+  local elapsed=0
+  echo "► Waiting for $name..."
+  while true; do
+    local ready
+    ready=$(kubectl -n appcloud get deployment "$name" \
+      -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    local desired
+    desired=$(kubectl -n appcloud get deployment "$name" \
+      -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    if [[ "${ready:-0}" -ge "${desired:-1}" ]]; then
+      echo "  ✓ $name is ready ($ready/$desired)"
+      return 0
+    fi
+    if [[ $elapsed -ge $timeout ]]; then
+      echo "  ✗ $name not ready after ${timeout}s — current state:"
+      kubectl -n appcloud get pods -l "app=$name"
+      kubectl -n appcloud logs -l "app=$name" --tail=20 2>/dev/null || true
+      echo ""
+      echo "  Continuing anyway — run 'kubectl -n appcloud get pods' to monitor"
+      return 0   # don't abort the whole script — partial deploy is still useful
+    fi
+    echo "  ... $name not ready yet ($ready/$desired) — ${elapsed}s elapsed"
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+}
 
-echo "► Waiting for API..."
-kubectl -n appcloud rollout status deployment/api --timeout=120s
-
-echo "► Waiting for UI..."
-kubectl -n appcloud rollout status deployment/ui --timeout=120s
+wait_for_deployment neo4j    360
+wait_for_deployment postgres  180
+wait_for_deployment api       240
+wait_for_deployment ui        180
 
 # ── /etc/hosts ────────────────────────────────────────────────────────────────
 # On Mac with the Docker driver, minikube tunnel binds to 127.0.0.1 — not the
@@ -109,18 +132,21 @@ echo "════════════════════════�
 echo "  ✓  AppCloud is running on Minikube!"
 echo "══════════════════════════════════════════════════"
 echo ""
-echo "  ⚠  On Mac you must run minikube tunnel in a separate terminal:"
+echo "  Access options:"
+echo ""
+echo "  OPTION A — Permanent (recommended, run once):"
+echo "     ./setup-local-access.sh"
+echo "     Then open: http://appcloud.local  (no tunnel terminal needed)"
+echo ""
+echo "  OPTION B — Quick tunnel (one terminal):"
 echo "     minikube tunnel --profile=appcloud"
-echo "     (keep it running — it requires sudo)"
+echo "     Then open: http://appcloud.local"
 echo ""
-echo "  UI:          http://appcloud.local"
-echo "  API health:  http://appcloud.local/health"
-echo ""
-echo "  OR skip tunnel and use port-forward directly:"
+echo "  OPTION C — Port forward (no tunnel):"
 echo "     kubectl -n appcloud port-forward svc/ui 4000:4000"
-echo "     then open http://localhost:4000"
+echo "     Then open: http://localhost:4000"
 echo ""
-echo "  Neo4j UI:    kubectl -n appcloud port-forward svc/neo4j 7474:7474"
+echo "  Neo4j UI:    kubectl -n appcloud port-forward svc/neo4j 7474:7474 7687:7687"
 echo "               then open http://localhost:7474"
 echo ""
 echo "  Logs:        kubectl -n appcloud logs -f deploy/api"

@@ -14,6 +14,7 @@ import userRoutes from './routes/users.js'
 import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
 import cloudAccountRoutes from './routes/integrations-cloud.js'
+import { schedulerPlugin } from './plugins/scheduler.js'
 import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
 import discoveryRoutes from './routes/discovery.js'
@@ -41,6 +42,9 @@ await postgresPlugin(fastify)
 
 // Auth plugin — must come after DB plugins (uses User nodes) and before routes
 await authPlugin(fastify)
+
+// Scheduler — starts after server ready, requires pg to be initialised
+await schedulerPlugin(fastify)
 
 // Public routes (no auth required)
 await fastify.register(authRoutes, { prefix: '/auth' })
