@@ -14,6 +14,9 @@
 
 import { props, serialize } from '../utils/serialize.js'
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
+import { bootstrapDiscovery } from './discovery.bootstrap.js'
+import { bootstrapSuggestFallback } from './discovery.suggest.patch.js'
+import { runAutoCreateIfEnabled } from '../plugins/scheduler.auto-create.patch.js'
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
@@ -1141,6 +1144,7 @@ export default async function discoveryRoutes(fastify) {
     const providers = Object.keys(results)
     audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
       { providers, results, errors })
+    await runAutoCreateIfEnabled(fastify)
     return { results, errors, completedAt: new Date().toISOString() }
   })
 
@@ -1158,21 +1162,35 @@ export default async function discoveryRoutes(fastify) {
           scope TEXT NOT NULL DEFAULT 'global',
           enabled BOOLEAN NOT NULL DEFAULT true,
           interval_mins INTEGER NOT NULL DEFAULT 15,
+          auto_create BOOLEAN NOT NULL DEFAULT false,
+          auto_create_min_score INTEGER NOT NULL DEFAULT 70,
           last_run_at TIMESTAMPTZ, last_run_status TEXT,
-          last_run_total INTEGER DEFAULT 0, next_run_at TIMESTAMPTZ,
+          last_run_total INTEGER DEFAULT 0,
+          last_auto_create_total INTEGER DEFAULT 0,
+          next_run_at TIMESTAMPTZ,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           UNIQUE (scope)
         );
-        INSERT INTO discovery_schedule (scope, enabled, interval_mins)
-        VALUES ('global', false, 15) ON CONFLICT (scope) DO NOTHING;
+        ALTER TABLE discovery_schedule
+          ADD COLUMN IF NOT EXISTS auto_create BOOLEAN NOT NULL DEFAULT false,
+          ADD COLUMN IF NOT EXISTS auto_create_min_score INTEGER NOT NULL DEFAULT 70,
+          ADD COLUMN IF NOT EXISTS last_auto_create_total INTEGER DEFAULT 0;
+        INSERT INTO discovery_schedule (scope, enabled, interval_mins, auto_create, auto_create_min_score)
+        VALUES ('global', false, 15, false, 70) ON CONFLICT (scope) DO NOTHING;
       `).catch(() => {})
       const rows = await fastify.pg.query(
         `SELECT * FROM discovery_schedule WHERE scope = 'global' LIMIT 1`
       )
-      return rows[0] || { scope: 'global', enabled: false, interval_mins: 15 }
+      return rows[0] || {
+        scope: 'global', enabled: false, interval_mins: 15,
+        auto_create: false, auto_create_min_score: 70
+      }
     } catch (err) {
-      return { scope: 'global', enabled: false, interval_mins: 15, error: err.message }
+      return {
+        scope: 'global', enabled: false, interval_mins: 15,
+        auto_create: false, auto_create_min_score: 70, error: err.message
+      }
     }
   })
 
@@ -1180,7 +1198,7 @@ export default async function discoveryRoutes(fastify) {
   // Update schedule config — enabled flag and/or interval_mins
   // interval_mins: minimum 5 (5 minutes), maximum 1440 (24 hours)
   fastify.put('/schedule', async (req, reply) => {
-    const { enabled, interval_mins, hours, minutes } = req.body || {}
+    const { enabled, interval_mins, hours, minutes, auto_create, auto_create_min_score } = req.body || {}
 
     // Accept either interval_mins directly or hours+minutes breakdown
     let intervalMins = interval_mins
@@ -1198,8 +1216,11 @@ export default async function discoveryRoutes(fastify) {
 
     try {
       const fields = {}
-      if (enabled !== undefined)    fields.enabled       = enabled
-      if (intervalMins !== undefined) fields.interval_mins = intervalMins
+      if (enabled !== undefined)               fields.enabled                = enabled
+      if (intervalMins !== undefined)          fields.interval_mins          = intervalMins
+      if (auto_create !== undefined)           fields.auto_create            = auto_create
+      if (auto_create_min_score !== undefined) fields.auto_create_min_score  =
+        Math.max(0, Math.min(100, parseInt(auto_create_min_score) || 70))
 
       // Compute next_run_at based on new interval
       if (intervalMins !== undefined && enabled !== false) {
@@ -1220,13 +1241,17 @@ export default async function discoveryRoutes(fastify) {
       ).catch(async () => {
         // Simpler upsert fallback
         await fastify.pg.query(
-          `INSERT INTO discovery_schedule (scope, enabled, interval_mins)
-           VALUES ('global', COALESCE($1, false), COALESCE($2, 15))
+          `INSERT INTO discovery_schedule (scope, enabled, interval_mins, auto_create, auto_create_min_score)
+           VALUES ('global', COALESCE($1, false), COALESCE($2, 15), COALESCE($3, false), COALESCE($4, 70))
            ON CONFLICT (scope) DO UPDATE
-             SET enabled = COALESCE($1, discovery_schedule.enabled),
-                 interval_mins = COALESCE($2, discovery_schedule.interval_mins),
-                 next_run_at = $3, updated_at = now()`,
-          [enabled ?? null, intervalMins ?? null, fields.next_run_at ?? null]
+             SET enabled               = COALESCE($1, discovery_schedule.enabled),
+                 interval_mins         = COALESCE($2, discovery_schedule.interval_mins),
+                 auto_create           = COALESCE($3, discovery_schedule.auto_create),
+                 auto_create_min_score = COALESCE($4, discovery_schedule.auto_create_min_score),
+                 next_run_at = $5, updated_at = now()`,
+          [enabled ?? null, intervalMins ?? null,
+           auto_create ?? null, auto_create_min_score ?? null,
+           fields.next_run_at ?? null]
         )
         const r = await fastify.pg.query(
           `SELECT * FROM discovery_schedule WHERE scope = 'global' LIMIT 1`
@@ -1369,13 +1394,38 @@ export default async function discoveryRoutes(fastify) {
       components: r.get('components').map(props)
     }))
 
-    if (!apps.length) return {
-      suggestions: [],
-      diagnostic: {
-        unmappedInfra: infraRecords.length,
-        applications: 0,
-        message: 'No Applications found in AppCloud. Create Applications and Components first, then run Analyse.',
-        hint: 'Go to Applications → Create Application, then add Components to it.'
+    if (!apps.length) {
+      const fallback = bootstrapSuggestFallback(infraRecords, props)
+      const suggestions = []
+      for (const appSuggestion of fallback.suggestions || []) {
+        for (const match of appSuggestion.matches || []) {
+          const infra = match.infra || {}
+          const score = parseInt(match.score || 0)
+          const confidence = score >= 70 ? 'high' : score >= 45 ? 'medium' : 'low'
+          suggestions.push({
+            infra,
+            suggestions: [{
+              infraId: infra.id,
+              componentId: null,
+              componentName: null,
+              applicationId: null,
+              applicationName: appSuggestion.application?.name || 'unknown',
+              score,
+              confidence,
+              reasons: match.reasons || [],
+              action: 'create_application',
+              actionLabel: `Create application "${appSuggestion.application?.name || 'app'}" with component "${infra.name || 'component'}"`,
+              newAppName: appSuggestion.application?.name || infra.name || 'default-app',
+              newCompName: infra.name || 'component',
+            }],
+            topScore: score,
+            topConfidence: confidence,
+          })
+        }
+      }
+      return {
+        suggestions,
+        diagnostic: fallback.diagnostic || { mode: 'bootstrap', unmappedInfra: infraRecords.length }
       }
     }
 
@@ -1576,9 +1626,56 @@ export default async function discoveryRoutes(fastify) {
         }
       }
 
-      if (scored.length > 0) {
-        // Sort by score descending, keep top 3 per infra node
-        scored.sort((a, b) => b.score - a.score)
+      // ── Enrich suggestions with action types ─────────────────────────────
+      // action: 'link_component'     — component exists, just link it
+      // action: 'create_component'   — app exists, component doesn't; create + link
+      // action: 'create_application' — neither app nor component exist; create both
+
+      const enriched = scored.map(s => {
+        let action, actionLabel
+        if (s.componentId) {
+          action = 'link_component'
+          actionLabel = `Link to ${s.componentName} in ${s.applicationName}`
+        } else if (s.applicationId) {
+          action = 'create_component'
+          actionLabel = `Create component "${tagComponent || infra.name}" in ${s.applicationName}`
+        } else {
+          action = 'create_application'
+          actionLabel = `Create application "${s.applicationName}" with component "${tagComponent || infra.name}"`
+        }
+        return { ...s, action, actionLabel }
+      })
+
+      // ── If tagApp doesn't match any existing app, suggest creating one ──
+      if (tagApp) {
+        const appExists = apps.some(a => a.name.toLowerCase() === tagApp)
+        if (!appExists && !enriched.some(s => s.action === 'create_application')) {
+          const newAppName  = tagApp.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+          const newCompName = tagComponent
+            ? tagComponent.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+            : infra.name
+          enriched.unshift({
+            infraId:         infra.id,
+            componentId:     null,
+            componentName:   newCompName,
+            applicationId:   null,
+            applicationName: newAppName,
+            score:           85,   // high confidence — exact tag match
+            confidence:      'high',
+            reasons:         [`tag "application" = "${newAppName}" — not yet in AppCloud`],
+            action:          'create_application',
+            actionLabel:     `Create application "${newAppName}" with component "${newCompName}"`,
+            newAppName,
+            newCompName,
+            suggestedTier:   tagTier ? parseInt(tagTier) || 1 : 1,
+            suggestedEnv:    tagEnv  || 'production',
+            suggestedOwner:  tagOwner || '',
+          })
+        }
+      }
+
+      if (enriched.length > 0) {
+        enriched.sort((a, b) => b.score - a.score)
         suggestions.push({
           infra: {
             id:           infra.id,
@@ -1589,9 +1686,9 @@ export default async function discoveryRoutes(fastify) {
             tags,
             raw,
           },
-          suggestions:    scored.slice(0, 3),
-          topScore:       scored[0].score,
-          topConfidence:  scored[0].confidence,
+          suggestions:    enriched.slice(0, 4),
+          topScore:       enriched[0].score,
+          topConfidence:  enriched[0].confidence,
         })
       }
     }
@@ -1617,7 +1714,6 @@ export default async function discoveryRoutes(fastify) {
   // ── POST /discovery/suggest/apply ────────────────────────────────────────
   // Applies confirmed mapping suggestions — creates DEPLOYED_ON relationships.
   // Body: { mappings: [{ infraId, componentId }] }
-  // Returns: { applied, skipped, errors }
 
   fastify.post('/suggest/apply', async (req, reply) => {
     const { mappings = [] } = req.body || {}
@@ -1643,6 +1739,133 @@ export default async function discoveryRoutes(fastify) {
         }
       } catch (err) {
         results.errors.push(`${infraId}: ${err.message}`)
+      }
+    }
+
+    return results
+  })
+
+  // ── POST /discovery/suggest/apply-all ────────────────────────────────────
+  // Handles all action types from the suggest engine in a single call:
+  //   link_component     — MERGE DEPLOYED_ON between existing component + infra
+  //   create_component   — create Component under existing Application + link infra
+  //   create_application — create Application + Component + link infra
+  //
+  // Body: { actions: [{ action, infraId, componentId?, applicationId?,
+  //                     newAppName?, newCompName?, suggestedTier?,
+  //                     suggestedEnv?, suggestedOwner? }] }
+
+  fastify.post('/suggest/apply-all', async (req, reply) => {
+    const { actions = [] } = req.body || {}
+    if (!actions.length) return reply.badRequest('actions array is required')
+
+    const results = {
+      linked: 0, componentsCreated: 0, applicationsCreated: 0,
+      skipped: 0, errors: []
+    }
+
+    for (const action of actions) {
+      try {
+        const { infraId } = action
+        if (!infraId) { results.skipped++; continue }
+
+        if (action.action === 'link_component') {
+          // ── Link existing component to infra ──────────────────────────
+          if (!action.componentId) { results.skipped++; continue }
+          const r = await write(`
+            MATCH (c:Component {id: $componentId}), (i:Infra {id: $infraId})
+            MERGE (c)-[rel:DEPLOYED_ON]->(i)
+            SET rel.source = 'auto-mapped', rel.mappedAt = datetime()
+            RETURN c.name AS comp, i.name AS infra
+          `, { componentId: action.componentId, infraId })
+          if (r.length) {
+            results.linked++
+            audit(actor(req), 'create', 'Infra', infraId, r[0].get('infra'),
+              { componentId: action.componentId, source: 'auto-mapped' })
+          }
+
+        } else if (action.action === 'create_component') {
+          // ── Create component under existing app + link infra ──────────
+          if (!action.applicationId || !action.newCompName) { results.skipped++; continue }
+          const compName = action.newCompName
+          const r = await write(`
+            MATCH (a:Application {id: $appId}), (i:Infra {id: $infraId})
+            CREATE (c:Component {
+              id:          randomUUID(),
+              name:        $compName,
+              type:        $compType,
+              description: $desc,
+              createdAt:   datetime()
+            })
+            MERGE (a)-[:CONTAINS]->(c)
+            MERGE (c)-[rel:DEPLOYED_ON]->(i)
+            SET rel.source = 'auto-created', rel.mappedAt = datetime()
+            RETURN c.id AS compId, c.name AS comp, i.name AS infra, a.name AS app
+          `, {
+            appId:   action.applicationId,
+            infraId,
+            compName,
+            compType: action.suggestedType || 'service',
+            desc:     `Auto-created from discovery: ${infraId}`,
+          })
+          if (r.length) {
+            results.componentsCreated++
+            results.linked++
+            audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
+              { applicationId: action.applicationId, source: 'auto-created', infraId })
+          }
+
+        } else if (action.action === 'create_application') {
+          // ── Create app + component + link infra ───────────────────────
+          if (!action.newAppName) { results.skipped++; continue }
+          const appName  = action.newAppName
+          const compName = action.newCompName || action.newAppName
+          const r = await write(`
+            MATCH (i:Infra {id: $infraId})
+            CREATE (a:Application {
+              id:           randomUUID(),
+              name:         $appName,
+              tier:         $tier,
+              environment:  $env,
+              owner:        $owner,
+              createdAt:    datetime()
+            })
+            CREATE (c:Component {
+              id:          randomUUID(),
+              name:        $compName,
+              type:        $compType,
+              description: $desc,
+              createdAt:   datetime()
+            })
+            MERGE (a)-[:CONTAINS]->(c)
+            MERGE (c)-[rel:DEPLOYED_ON]->(i)
+            SET rel.source = 'auto-created', rel.mappedAt = datetime()
+            RETURN a.id AS appId, c.id AS compId,
+                   a.name AS app, c.name AS comp, i.name AS infra
+          `, {
+            infraId,
+            appName,
+            compName,
+            tier:     action.suggestedTier  || 1,
+            env:      action.suggestedEnv   || 'production',
+            owner:    action.suggestedOwner || '',
+            compType: action.suggestedType  || 'service',
+            desc:     `Auto-created from discovery: ${infraId}`,
+          })
+          if (r.length) {
+            results.applicationsCreated++
+            results.componentsCreated++
+            results.linked++
+            audit(actor(req), 'create', 'Application', r[0].get('appId'), appName,
+              { source: 'auto-created', infraId })
+            audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
+              { applicationId: r[0].get('appId'), source: 'auto-created', infraId })
+          }
+        } else {
+          results.skipped++
+        }
+      } catch (err) {
+        results.errors.push(`${action.infraId}: ${err.message}`)
       }
     }
 
@@ -1765,9 +1988,23 @@ export default async function discoveryRoutes(fastify) {
   // ── DELETE /discovery/resources/:id — remove a discovered resource ────
   fastify.delete('/resources/:id', async (req, reply) => {
     const pre = await query(
-      `MATCH (i:Infra {id:$id}) WHERE i.source = 'discovery' RETURN i.name AS name, i.provider AS provider`,
+      `MATCH (i:Infra {id:$id}) WHERE i.source = 'discovery'
+       OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+       RETURN i.name AS name, i.provider AS provider,
+              count(c) AS linkedComponents`,
       { id: req.params.id }
     )
+    if (!pre.length) return reply.notFound('Resource not found')
+
+    const linked = pre[0].get('linkedComponents')
+    const count  = typeof linked === 'object' ? linked.toNumber?.() ?? 0 : linked ?? 0
+
+    if (count > 0) {
+      return reply.conflict(
+        `Cannot delete — resource is linked to ${count} component(s). Unlink first.`
+      )
+    }
+
     await write(`
       MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery'
       DETACH DELETE i
@@ -1777,4 +2014,55 @@ export default async function discoveryRoutes(fastify) {
       { source: 'discovery', provider: pre[0]?.get('provider') })
     reply.code(204)
   })
+
+  // ── DELETE /discovery/resources/bulk ─────────────────────────────────────
+  // Delete multiple resources at once.
+  // Skips any that are linked to components.
+  // Body: { ids: [string] }
+
+  fastify.post('/resources/bulk-delete', async (req, reply) => {
+    const { ids = [] } = req.body || {}
+    if (!ids.length) return reply.badRequest('ids array is required')
+
+    const results = { deleted: 0, skipped: [], errors: [] }
+
+    for (const id of ids) {
+      try {
+        const pre = await query(
+          `MATCH (i:Infra {id:$id}) WHERE i.source = 'discovery'
+           OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+           RETURN i.name AS name, count(c) AS linkedComponents`,
+          { id }
+        )
+        if (!pre.length) { results.skipped.push({ id, reason: 'not found' }); continue }
+
+        const linked = pre[0].get('linkedComponents')
+        const count  = typeof linked === 'object' ? linked.toNumber?.() ?? 0 : linked ?? 0
+
+        if (count > 0) {
+          results.skipped.push({
+            id,
+            name:   pre[0].get('name'),
+            reason: `linked to ${count} component(s)`
+          })
+          continue
+        }
+
+        await write(
+          `MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery' DETACH DELETE i`,
+          { id }
+        )
+        audit(actor(req), 'delete', 'Infra', id, pre[0].get('name'),
+          { source: 'bulk-delete' })
+        results.deleted++
+      } catch (err) {
+        results.errors.push({ id, error: err.message })
+      }
+    }
+
+    return results
+  })
+
+  //bootstrap
+  fastify.post('/bootstrap', async (req) => bootstrapDiscovery(fastify))
 }

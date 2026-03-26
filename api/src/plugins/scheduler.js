@@ -207,11 +207,76 @@ export async function schedulerPlugin(fastify) {
       // Record result and schedule next run
       const schedule = await getSchedule()
       const intervalMs = (schedule?.interval_mins || 15) * 60 * 1000
+
+      // ── Auto-create: run suggest → apply-all if enabled ─────────────────
+      let autoCreateTotal = 0
+      if (schedule?.auto_create) {
+        const minScore = schedule.auto_create_min_score ?? 70
+        fastify.log.info(`[Scheduler] Auto-create enabled — running suggest (minScore=${minScore})`)
+        try {
+          // Fetch suggestions
+          const suggestRes = await fetch(
+            `http://localhost:${process.env.PORT || 3000}/discovery/suggest?minScore=${minScore}&limit=200`
+          )
+          const suggestData = await suggestRes.json()
+          const suggestions = Array.isArray(suggestData)
+            ? suggestData
+            : (suggestData.suggestions || [])
+
+          if (suggestions.length > 0) {
+            // Build actions — take the top suggestion per resource
+            const actions = suggestions
+              .map(item => item.suggestions?.[0])
+              .filter(Boolean)
+              .filter(s => (s.score || 0) >= minScore)
+
+            fastify.log.info(`[Scheduler] Auto-create: ${actions.length} action(s) to apply`)
+
+            if (actions.length > 0) {
+              const applyRes = await fetch(
+                `http://localhost:${process.env.PORT || 3000}/discovery/suggest/apply-all`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ actions }),
+                }
+              )
+              const applyData = await applyRes.json()
+              autoCreateTotal = (applyData.linked || 0) +
+                                (applyData.componentsCreated || 0) +
+                                (applyData.applicationsCreated || 0)
+
+              fastify.log.info(
+                `[Scheduler] Auto-create complete: ` +
+                `${applyData.linked || 0} linked, ` +
+                `${applyData.componentsCreated || 0} components created, ` +
+                `${applyData.applicationsCreated || 0} applications created`
+              )
+
+              fastify.pg?.audit?.('system', 'auto-create', 'CloudAccount', 'all',
+                'Auto-Create after Scheduled Scan', {
+                  linked:               applyData.linked,
+                  componentsCreated:    applyData.componentsCreated,
+                  applicationsCreated:  applyData.applicationsCreated,
+                  minScore,
+                  errors:               applyData.errors,
+                }).catch(() => {})
+            }
+          } else {
+            fastify.log.info('[Scheduler] Auto-create: no suggestions above threshold')
+          }
+        } catch (e) {
+          fastify.log.error(`[Scheduler] Auto-create failed: ${e.message}`)
+          errors.push(`AutoCreate: ${e.message}`)
+        }
+      }
+
       await updateSchedule({
-        last_run_status: status,
-        last_run_total:  grandTotal,
-        last_run_at:     new Date(),
-        next_run_at:     new Date(Date.now() + intervalMs),
+        last_run_status:       status,
+        last_run_total:        grandTotal,
+        last_auto_create_total: autoCreateTotal,
+        last_run_at:           new Date(),
+        next_run_at:           new Date(Date.now() + intervalMs),
       })
 
       fastify.pg?.audit?.('system', 'scan', 'CloudAccount', 'all', 'Scheduled Scan',

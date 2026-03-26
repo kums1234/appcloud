@@ -27,3 +27,14 @@ CREATE INDEX IF NOT EXISTS idx_discovery_schedule_scope ON discovery_schedule(sc
 CREATE TRIGGER discovery_schedule_updated_at
   BEFORE UPDATE ON discovery_schedule
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ── Auto-create columns (added after initial release) ────────────────────────
+ALTER TABLE discovery_schedule
+  ADD COLUMN IF NOT EXISTS auto_create          BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS auto_create_min_score INTEGER NOT NULL DEFAULT 70;
+
+-- Update comment
+COMMENT ON COLUMN discovery_schedule.auto_create IS
+  'When true, automatically run suggest+apply-all after each scheduled scan';
+COMMENT ON COLUMN discovery_schedule.auto_create_min_score IS
+  'Minimum confidence score (0-100) for auto-create actions. Default 70 (high confidence only)';

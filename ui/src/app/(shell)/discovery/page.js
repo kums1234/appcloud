@@ -244,9 +244,12 @@ function NoAccounts() {
   )
 }
 
-function ResourceTable({ resources, onLink, onDelete }) {
-  const [filter,   setFilter]   = useState({ provider:'', mapped:'', search:'' })
-  const [selected, setSelected] = useState(null)
+function ResourceTable({ resources, onLink, onDelete, onBulkDelete }) {
+  const [filter,        setFilter]        = useState({ provider:'', mapped:'', search:'' })
+  const [selected,      setSelected]      = useState(null)   // detail panel
+  const [checkedIds,    setCheckedIds]    = useState(new Set()) // bulk select
+  const [bulkDeleting,  setBulkDeleting]  = useState(false)
+  const [bulkResult,    setBulkResult]    = useState(null)
   const inputStyle = { background:T.surface2, border:`1px solid ${T.border2}`, borderRadius:6,
     padding:'7px 10px', color:T.text, fontSize:11, fontFamily:'monospace', outline:'none', boxSizing:'border-box' }
   const filtered = (resources||[]).filter(r => {
@@ -256,9 +259,51 @@ function ResourceTable({ resources, onLink, onDelete }) {
     if (filter.search && !r.name?.toLowerCase().includes(filter.search.toLowerCase())) return false
     return true
   })
+
+  const toggleCheck = (id, e) => {
+    e.stopPropagation()
+    setCheckedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (checkedIds.size === filtered.length) {
+      setCheckedIds(new Set())
+    } else {
+      setCheckedIds(new Set(filtered.map(r => r.id)))
+    }
+  }
+
+  const bulkDelete = async () => {
+    if (!checkedIds.size) return
+    if (!window.confirm(`Delete ${checkedIds.size} resource(s)? Linked resources will be skipped.`)) return
+    setBulkDeleting(true); setBulkResult(null)
+    try {
+      const res = await fetch('/api/discovery/resources/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...checkedIds] }),
+      })
+      const data = await res.json()
+      setBulkResult(data)
+      setCheckedIds(new Set())
+      onBulkDelete?.()
+    } catch (e) {
+      setBulkResult({ deleted: 0, errors: [{ error: e.message }] })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
+  const allChecked = filtered.length > 0 && checkedIds.size === filtered.length
+  const someChecked = checkedIds.size > 0
+
   return (
     <div>
-      <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap', alignItems:'center' }}>
         <input style={{ ...inputStyle, width:200 }} placeholder="Search by name…"
           value={filter.search} onChange={e => setFilter(f=>({...f,search:e.target.value}))}/>
         <select style={{ ...inputStyle, cursor:'pointer', appearance:'none', width:130 }}
@@ -272,12 +317,46 @@ function ResourceTable({ resources, onLink, onDelete }) {
           <option value="mapped">Mapped to app</option>
           <option value="unmapped">Unmapped</option>
         </select>
-        <span style={{ ...mono9, color:T.dim, alignSelf:'center', marginLeft:'auto' }}>{filtered.length} of {resources?.length??0} resources</span>
+        {someChecked && (
+          <button onClick={bulkDelete} disabled={bulkDeleting}
+            style={{ ...mono, fontSize:11, fontWeight:700, padding:'6px 14px', borderRadius:7,
+              cursor:'pointer', background:T.red+'18', border:`1px solid ${T.red}44`,
+              color:T.red, opacity:bulkDeleting?.6:1,
+              display:'flex', alignItems:'center', gap:6 }}>
+            {bulkDeleting ? <><Spinner size={11} color={T.red}/> Deleting…</> : `🗑 Delete ${checkedIds.size} selected`}
+          </button>
+        )}
+        <span style={{ ...mono9, color:T.dim, alignSelf:'center', marginLeft:'auto' }}>
+          {filtered.length} of {resources?.length??0} resources
+          {someChecked && <span style={{ color:T.red }}> · {checkedIds.size} selected</span>}
+        </span>
       </div>
+
+      {/* Bulk delete result */}
+      {bulkResult && (
+        <div style={{ padding:'8px 12px', borderRadius:7, marginBottom:8,
+          background: bulkResult.deleted > 0 ? T.green+'0a' : T.amber+'0a',
+          border:`1px solid ${bulkResult.deleted > 0 ? T.green+'33' : T.amber+'33'}` }}>
+          <span style={{ ...mono9, color: bulkResult.deleted > 0 ? T.green : T.amber }}>
+            {bulkResult.deleted > 0 && `✓ ${bulkResult.deleted} deleted  `}
+            {bulkResult.skipped?.length > 0 && `⚠ ${bulkResult.skipped.length} skipped (linked to components)  `}
+            {bulkResult.errors?.length > 0 && `✗ ${bulkResult.errors.length} errors`}
+          </span>
+          {bulkResult.skipped?.map((s,i) => (
+            <div key={i} style={{ ...mono9, color:T.amber, marginTop:2 }}>
+              – {s.name}: {s.reason}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden' }}>
         <table style={{ width:'100%', borderCollapse:'collapse' }}>
           <thead>
             <tr style={{ borderBottom:`1px solid ${T.border}` }}>
+              <th style={{ padding:'10px 8px 10px 14px', width:32 }}>
+                <input type="checkbox" checked={allChecked} onChange={toggleAll}
+                  style={{ cursor:'pointer', width:14, height:14 }}/>
+              </th>
               {['Resource','Type','Provider','Region','Status','Applications',''].map(h => (
                 <th key={h} style={{ ...mono9, color:T.muted, textAlign:'left', padding:'10px 14px', letterSpacing:'0.1em', fontWeight:700 }}>{h}</th>
               ))}
@@ -293,9 +372,16 @@ function ResourceTable({ resources, onLink, onDelete }) {
               const sc = ['running','active','available'].includes(r.status)?T.green:['stopped','failed','error'].includes(r.status)?T.red:T.amber
               return (
                 <tr key={r.id} onClick={()=>setSelected(isSel?null:r)}
-                  style={{ borderBottom:`1px solid ${T.border}`, cursor:'pointer', background:isSel?T.surface2:'transparent', transition:'background .1s' }}
-                  onMouseEnter={e=>!isSel&&(e.currentTarget.style.background=T.surface3)}
-                  onMouseLeave={e=>!isSel&&(e.currentTarget.style.background='transparent')}>
+                  style={{ borderBottom:`1px solid ${T.border}`, cursor:'pointer',
+                    background: checkedIds.has(r.id) ? T.red+'08' : isSel ? T.surface2 : 'transparent',
+                    transition:'background .1s' }}
+                  onMouseEnter={e=>!checkedIds.has(r.id)&&!isSel&&(e.currentTarget.style.background=T.surface3||T.surface2)}
+                  onMouseLeave={e=>!checkedIds.has(r.id)&&!isSel&&(e.currentTarget.style.background='transparent')}>
+                  <td style={{ padding:'10px 8px 10px 14px' }} onClick={e=>e.stopPropagation()}>
+                    <input type="checkbox" checked={checkedIds.has(r.id)}
+                      onChange={e => toggleCheck(r.id, e)}
+                      style={{ cursor:'pointer', width:14, height:14 }}/>
+                  </td>
                   <td style={{ padding:'10px 14px' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                       <span style={{ color:pm.color, fontSize:13 }}>{icon}</span>
@@ -462,35 +548,26 @@ function SuggestionsPanel({ onMappingApplied }) {
   const mono  = { fontFamily:'monospace' }
   const mono9 = { ...mono, fontSize:9 }
 
-  const [suggestions,  setSuggestions]  = useState([])
-  const [loading,      setLoading]      = useState(false)
-  const [applying,     setApplying]     = useState(false)
-  const [selected,     setSelected]     = useState({}) // { infraId: { componentId, score } }
-  const [result,       setResult]       = useState(null)
-  const [expanded,     setExpanded]     = useState({}) // { infraId: bool }
-  const [minScore,     setMinScore]     = useState(25)
-
+  const [suggestions, setSuggestions] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [result, setResult] = useState(null)
   const [diagnostic, setDiagnostic] = useState(null)
+  const [minScore, setMinScore] = useState(25)
 
   const load = async () => {
-    setLoading(true); setSuggestions([]); setSelected({}); setResult(null); setDiagnostic(null)
+    setLoading(true)
+    setSuggestions([])
+    setResult(null)
+    setDiagnostic(null)
+
     try {
-      const res = await fetch(`/api/discovery/suggest?minScore=${minScore}&limit=50`)
+      const res = await fetch(`/api/discovery/suggest?minScore=${minScore}&limit=200`)
       const data = await res.json()
-      // Handle both array (old) and {suggestions, diagnostic} (new) response shapes
-      const list = Array.isArray(data) ? data : (data.suggestions || [])
+      const list = Array.isArray(data) ? data : data.suggestions || []
       const diag = Array.isArray(data) ? null : data.diagnostic
       setSuggestions(list)
       setDiagnostic(diag)
-      // Auto-select highest-confidence suggestions
-      const autoSelect = {}
-      for (const item of list) {
-        const top = item.suggestions?.[0]
-        if (top && top.confidence === 'high' && top.componentId) {
-          autoSelect[item.infra.id] = { componentId: top.componentId, score: top.score }
-        }
-      }
-      setSelected(autoSelect)
     } catch (e) {
       setDiagnostic({ message: `Failed to load: ${e.message}`, error: true })
     } finally {
@@ -498,37 +575,44 @@ function SuggestionsPanel({ onMappingApplied }) {
     }
   }
 
-  const applySelected = async () => {
-    const mappings = Object.entries(selected)
-      .filter(([, v]) => v?.componentId)
-      .map(([infraId, v]) => ({ infraId, componentId: v.componentId }))
+  useEffect(() => { load() }, [minScore])
 
-    if (!mappings.length) return
+  const recommendedActions = suggestions
+    .map(item => {
+      const top = (item.suggestions || [])[0]
+      if (!top) return null
+      return { ...top, infraId: item.infra.id }
+    })
+    .filter(Boolean)
 
-    setApplying(true); setResult(null)
+  const applyAll = async () => {
+    if (!recommendedActions.length) return
+    setApplying(true)
+    setResult(null)
+
     try {
-      const res = await fetch('/api/discovery/suggest/apply', {
+      const res = await fetch('/api/discovery/suggest/apply-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mappings }),
+        body: JSON.stringify({ actions: recommendedActions }),
       })
       const data = await res.json()
       setResult(data)
-      if (data.applied > 0) {
-        onMappingApplied?.()
-        // Remove applied items from suggestions
-        setSuggestions(prev => prev.filter(s => !selected[s.infra.id]?.componentId))
-        setSelected({})
-      }
+      onMappingApplied?.()
+      load()
     } catch (e) {
-      setResult({ applied: 0, errors: [e.message] })
+      setResult({ errors: [e.message] })
     } finally {
       setApplying(false)
     }
   }
 
+  const ACTION_META = {
+    link_component:     { color: '#2dd4bf', icon: '⟶', label: 'Link' },
+    create_component:   { color: '#a78bfa', icon: '+', label: 'Create Component' },
+    create_application: { color: '#f59e0b', icon: '✦', label: 'Create Application' },
+  }
   const CONF_COLOR = { high: T.green, medium: T.amber, low: T.muted }
-  const selectedCount = Object.values(selected).filter(v => v?.componentId).length
 
   return (
     <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
@@ -543,64 +627,43 @@ function SuggestionsPanel({ onMappingApplied }) {
           <div>
             <div style={{ ...mono, fontSize:13, fontWeight:700, color:T.text }}>Mapping Suggestions</div>
             <div style={{ ...mono9, color:T.dim, marginTop:1 }}>
-              AI-assisted mapping of discovered resources to applications and components
+              Tag-driven recommendations — link, create components, or onboard new applications
             </div>
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          {/* Min score filter */}
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ ...mono9, color:T.muted }}>MIN SCORE</span>
-            {[25,45,70].map(s => (
-              <button key={s} onClick={() => setMinScore(s)}
-                style={{ ...mono9, padding:'3px 8px', borderRadius:5, cursor:'pointer',
-                  border:`1px solid ${minScore===s ? T.purple+'66' : T.border}`,
-                  background: minScore===s ? T.purple+'18' : T.surface2,
-                  color: minScore===s ? T.purple : T.muted }}>
-                {s === 25 ? 'All' : s === 45 ? 'Medium+' : 'High'}
-              </button>
-            ))}
-          </div>
-          <button onClick={load} disabled={loading}
-            style={{ ...mono, fontSize:11, fontWeight:700, padding:'7px 16px', borderRadius:8,
-              cursor:'pointer', background:T.purple+'18', border:`1px solid ${T.purple}44`,
-              color:T.purple, opacity:loading?.6:1,
-              display:'flex', alignItems:'center', gap:6 }}>
-            {loading ? <><Spinner size={12} color={T.purple}/> Analysing…</> : '⟡ Analyse'}
-          </button>
+          {[25,45,70].map(s => (
+            <button key={s} onClick={() => setMinScore(s)}
+              style={{ ...mono9, padding:'3px 8px', borderRadius:5, cursor:'pointer',
+                border:`1px solid ${minScore===s ? T.purple+'66' : T.border}`,
+                background: minScore===s ? T.purple+'18' : T.surface2,
+                color: minScore===s ? T.purple : T.muted }}>
+              {s === 25 ? 'All' : s === 45 ? 'Medium+' : 'High'}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Results */}
+      {/* Empty / diagnostic state */}
       {suggestions.length === 0 && !loading && (
         <div style={{ padding:'16px', borderRadius:8, textAlign:'center',
           background: diagnostic?.error ? T.red+'0a' : T.surface2,
           border: `1px solid ${diagnostic?.error ? T.red+'33' : T.border}` }}>
           {!diagnostic ? (
             <div style={{ ...mono9, color:T.muted }}>
-              Click Analyse to scan unmapped resources for mapping suggestions
+              No suggestions found at current threshold — try lowering the confidence filter above
             </div>
           ) : (
             <>
-              <div style={{ ...mono9, color: diagnostic.error ? T.red : T.muted, marginBottom:6 }}>
+              <div style={{ ...mono9, color: diagnostic.error ? T.red : T.muted, marginBottom:4 }}>
                 {diagnostic.message}
               </div>
-              {diagnostic.hint && (
-                <div style={{ ...mono9, color:T.teal }}>{diagnostic.hint}</div>
-              )}
+              {diagnostic.hint && <div style={{ ...mono9, color:T.teal }}>{diagnostic.hint}</div>}
               {diagnostic.unmappedInfra > 0 && (
-                <div style={{ display:'flex', gap:12, justifyContent:'center', marginTop:8 }}>
-                  <span style={{ ...mono9, color:T.dim }}>
-                    Unmapped resources: <strong style={{ color:T.text }}>{diagnostic.unmappedInfra}</strong>
-                  </span>
-                  <span style={{ ...mono9, color:T.dim }}>
-                    Applications: <strong style={{ color:T.text }}>{diagnostic.applications}</strong>
-                  </span>
-                  {diagnostic.belowThreshold > 0 && (
-                    <span style={{ ...mono9, color:T.amber }}>
-                      Below score threshold: {diagnostic.belowThreshold}
-                    </span>
-                  )}
+                <div style={{ display:'flex', gap:16, justifyContent:'center', marginTop:8 }}>
+                  <span style={{ ...mono9, color:T.dim }}>Unmapped: <strong style={{ color:T.text }}>{diagnostic.unmappedInfra}</strong></span>
+                  <span style={{ ...mono9, color:T.dim }}>Applications: <strong style={{ color:T.text }}>{diagnostic.applications}</strong></span>
+                  {diagnostic.belowThreshold > 0 && <span style={{ ...mono9, color:T.amber }}>Below threshold: {diagnostic.belowThreshold}</span>}
                 </div>
               )}
             </>
@@ -611,178 +674,135 @@ function SuggestionsPanel({ onMappingApplied }) {
       {suggestions.length > 0 && (
         <>
           {/* Bulk action bar */}
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12,
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12,
             padding:'8px 12px', borderRadius:8, background:T.surface2, border:`1px solid ${T.border}` }}>
             <span style={{ ...mono9, color:T.muted, flex:1 }}>
-              {suggestions.length} unmapped resource{suggestions.length!==1?'s':''} ·{' '}
-              {selectedCount} selected for mapping
+              {suggestions.length} resource{suggestions.length!==1?'s':''} with suggestions
             </span>
-            <button
-              onClick={() => {
-                const all = {}
-                for (const item of suggestions) {
-                  const top = item.suggestions?.find(s => s.componentId)
-                  if (top) all[item.infra.id] = { componentId: top.componentId, score: top.score }
-                }
-                setSelected(all)
-              }}
-              style={{ ...mono9, padding:'4px 10px', borderRadius:5, cursor:'pointer',
-                border:`1px solid ${T.border}`, background:T.surface, color:T.dim }}>
-              Select all
-            </button>
-            <button onClick={() => setSelected({})}
-              style={{ ...mono9, padding:'4px 10px', borderRadius:5, cursor:'pointer',
-                border:`1px solid ${T.border}`, background:T.surface, color:T.dim }}>
-              Clear
-            </button>
-            <button onClick={applySelected} disabled={applying || selectedCount === 0}
-              style={{ ...mono, fontSize:11, fontWeight:700, padding:'7px 16px', borderRadius:8,
-                cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
-                background: selectedCount > 0 ? T.green : T.surface2,
-                border:`1px solid ${selectedCount > 0 ? T.green+'44' : T.border}`,
-                color: selectedCount > 0 ? 'white' : T.muted,
-                opacity: applying ? .6 : 1 }}>
-              {applying ? 'Applying…' : `✓ Apply ${selectedCount} Mapping${selectedCount!==1?'s':''}`}
+            {/* Legend */}
+            <div style={{ display:'flex', gap:10 }}>
+              {Object.entries(ACTION_META).map(([k, m]) => (
+                <div key={k} style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <span style={{ ...mono9, color:m.color, fontWeight:700 }}>{m.icon}</span>
+                  <span style={{ ...mono9, color:T.muted }}>{m.label}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={applyAll} disabled={applying || recommendedActions.length === 0}
+              style={{ ...mono, fontSize:11, fontWeight:700, padding:'7px 18px', borderRadius:8,
+                cursor: recommendedActions.length === 0 ? 'not-allowed' : 'pointer',
+                background: recommendedActions.length > 0 ? T.green : T.surface2,
+                border:`1px solid ${recommendedActions.length > 0 ? T.green+'44' : T.border}`,
+                color: recommendedActions.length > 0 ? 'white' : T.muted,
+                opacity: applying ? .6 : 1,
+                display:'flex', alignItems:'center', gap:6 }}>
+              {applying ? <><Spinner size={12} color="white"/> Applying…</> : `✦ Apply All (${recommendedActions.length})`}
             </button>
           </div>
 
           {/* Result banner */}
           {result && (
             <div style={{ padding:'8px 12px', borderRadius:7, marginBottom:10,
-              background: result.applied > 0 ? T.green+'0a' : T.red+'0a',
-              border:`1px solid ${result.applied > 0 ? T.green+'33' : T.red+'33'}` }}>
-              <span style={{ ...mono9, color: result.applied > 0 ? T.green : T.red }}>
-                {result.applied > 0
-                  ? `✓ ${result.applied} mapping${result.applied!==1?'s':''} applied successfully`
-                  : `✗ No mappings applied`}
-                {result.errors?.length > 0 && ` · ${result.errors.length} error(s)`}
-              </span>
+              background: (result.errors?.length === 0) ? T.green+'0a' : T.amber+'0a',
+              border:`1px solid ${result.errors?.length === 0 ? T.green+'33' : T.amber+'33'}` }}>
+              <div style={{ ...mono9, color: result.errors?.length === 0 ? T.green : T.amber }}>
+                {result.linked > 0 && `✓ ${result.linked} linked  `}
+                {result.componentsCreated > 0 && `✓ ${result.componentsCreated} component(s) created  `}
+                {result.applicationsCreated > 0 && `✓ ${result.applicationsCreated} application(s) created  `}
+                {result.errors?.length > 0 && `⚠ ${result.errors.length} error(s)`}
+              </div>
+              {result.errors?.map((e,i) => (
+                <div key={i} style={{ ...mono9, color:T.red, marginTop:2 }}>✗ {typeof e === 'string' ? e : JSON.stringify(e)}</div>
+              ))}
             </div>
           )}
 
-          {/* Suggestion rows */}
+          {/* Suggestion cards */}
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {suggestions.map(item => {
-              const sel = selected[item.infra.id]
-              const isExpanded = expanded[item.infra.id]
-              const topConf = item.topConfidence
-              const confColor = CONF_COLOR[topConf] || T.muted
+              const topSuggestion = item.suggestions?.[0]
+              const confColor = CONF_COLOR[item.topConfidence] || T.muted
 
               return (
                 <div key={item.infra.id} style={{ border:`1px solid ${T.border}`,
                   borderRadius:10, overflow:'hidden',
-                  borderLeft:`3px solid ${confColor}` }}>
+                  borderLeft:`3px solid ${confColor}`,
+                  background: 'transparent' }}>
 
-                  {/* Resource row */}
-                  <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
-                    background: sel?.componentId ? T.green+'08' : T.surface2 }}>
-
-                    {/* Select checkbox */}
-                    <input type="checkbox"
-                      checked={!!sel?.componentId}
-                      onChange={e => {
-                        if (e.target.checked) {
-                          const top = item.suggestions?.find(s => s.componentId)
-                          if (top) setSelected(prev => ({ ...prev, [item.infra.id]: { componentId: top.componentId, score: top.score } }))
-                        } else {
-                          setSelected(prev => { const n = {...prev}; delete n[item.infra.id]; return n })
-                        }
-                      }}
-                      style={{ width:14, height:14, cursor:'pointer', flexShrink:0 }}
-                    />
-
-                    {/* Infra info */}
+                  {/* Resource header row */}
+                  <div style={{ display:'flex', alignItems:'center', gap:10,
+                    padding:'10px 14px', background:T.surface2 }}>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                         <span style={{ ...mono, fontSize:12, fontWeight:700, color:T.text }}>
-                          {RESOURCE_ICONS[item.infra.resourceType] || '◎'} {item.infra.name}
+                          {RESOURCE_ICONS[item.infra.resourceType]||'◎'} {item.infra.name}
                         </span>
                         <span style={{ ...mono9, color:T.muted, background:T.surface,
                           border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 6px' }}>
-                          {item.infra.resourceType}
+                          {item.infra.resourceType?.replace(/_/g,' ')}
                         </span>
                         <span style={{ ...mono9, color:T.muted }}>{item.infra.provider} · {item.infra.region}</span>
                       </div>
                       {/* Tag preview */}
                       {Object.keys(item.infra.tags || {}).length > 0 && (
                         <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:4 }}>
-                          {Object.entries(item.infra.tags).slice(0,5).map(([k,v]) => (
-                            <span key={k} style={{ ...mono9, color:T.dim, background:T.surface,
-                              border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 6px' }}>
-                              {k}: {v}
+                          {Object.entries(item.infra.tags).slice(0,4).map(([k,v]) => (
+                            <span key={k} style={{ ...mono9, borderRadius:4, overflow:'hidden',
+                              border:`1px solid ${T.border}`, display:'flex' }}>
+                              <span style={{ padding:'1px 6px', background:T.surface, color:T.muted, borderRight:`1px solid ${T.border}` }}>{k}</span>
+                              <span style={{ padding:'1px 6px', background:T.teal+'10', color:T.teal }}>{String(v)}</span>
                             </span>
                           ))}
                         </div>
                       )}
                     </div>
-
-                    {/* Confidence badge */}
-                    <div style={{ display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
-                      <div style={{ width:6, height:6, borderRadius:'50%', background:confColor }} />
-                      <span style={{ ...mono9, color:confColor, fontWeight:700, textTransform:'uppercase' }}>
-                        {topConf}
-                      </span>
-                      <span style={{ ...mono9, color:T.muted }}>{item.topScore}%</span>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+                      <span style={{ ...mono9, color:confColor, fontWeight:700 }}>{item.topScore}%</span>
                     </div>
-
-                    {/* Expand toggle */}
-                    <button onClick={() => setExpanded(e => ({ ...e, [item.infra.id]: !e[item.infra.id] }))}
-                      style={{ ...mono9, background:'none', border:'none', color:T.muted,
-                        cursor:'pointer', padding:'2px 6px' }}>
-                      {isExpanded ? '▲' : '▼'}
-                    </button>
                   </div>
 
-                  {/* Suggestions list */}
-                  <div style={{ padding:'0 14px 10px',
-                    display: isExpanded ? 'block' : suggestions.length <= 5 ? 'block' : 'none' }}>
-                    {item.suggestions.map((s, si) => {
-                      const isSelected = sel?.componentId === s.componentId
-                      const sColor = CONF_COLOR[s.confidence] || T.muted
-                      return (
-                        <div key={si} onClick={() => {
-                            if (s.componentId)
-                              setSelected(prev => ({ ...prev, [item.infra.id]: { componentId: s.componentId, score: s.score } }))
-                          }}
-                          style={{ display:'flex', alignItems:'flex-start', gap:10,
-                            padding:'8px 10px', borderRadius:7, marginTop:6, cursor: s.componentId ? 'pointer' : 'default',
-                            border:`1px solid ${isSelected ? sColor+'44' : T.border}`,
-                            background: isSelected ? sColor+'0a' : T.surface }}>
+                  {/* Recommended action */}
+                  {topSuggestion && (
+                    <div style={{ padding:'8px 14px 10px', display:'flex', flexDirection:'column', gap:6 }}>
+                      <div style={{ display:'flex', alignItems:'flex-start', gap:10,
+                        padding:'8px 12px', borderRadius:8,
+                        border:`1px solid ${T.border}`,
+                        background: T.surface }}>
 
-                          <input type="radio" readOnly
-                            checked={isSelected}
-                            disabled={!s.componentId}
-                            style={{ marginTop:2, flexShrink:0 }}
-                          />
-                          <div style={{ flex:1 }}>
-                            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
-                              <span style={{ ...mono, fontSize:11, fontWeight:700, color:T.text }}>
-                                {s.applicationName}
-                                {s.componentName && <span style={{ color:T.muted }}> / {s.componentName}</span>}
-                              </span>
-                              {s.noComponent && (
-                                <span style={{ ...mono9, color:T.amber, background:T.amber+'12',
-                                  border:`1px solid ${T.amber}33`, borderRadius:3, padding:'1px 6px' }}>
-                                  no component — create one first
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-                              {s.reasons.map((r, ri) => (
-                                <span key={ri} style={{ ...mono9, color:T.dim, background:T.surface2,
-                                  border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 6px' }}>
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
+                        <div style={{ width:14, height:14, borderRadius:'50%', flexShrink:0, marginTop:1,
+                          border:`2px solid ${T.green}`,
+                          background: T.green,
+                          display:'flex', alignItems:'center', justifyContent:'center' }}>
+                          <div style={{ width:5, height:5, borderRadius:'50%', background:'white' }}/>
+                        </div>
+
+                        <div style={{ flex:1, minWidth:0 }}>
+                          {/* Recommended badge + action label */}
+                          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4, flexWrap:'wrap' }}>
+                            <span style={{ ...mono9, padding:'2px 8px', borderRadius:4,
+                              background:T.green+'18', border:`1px solid ${T.green}44`,
+                              color:T.green, fontWeight:700 }}>
+                              Recommended
+                            </span>
+                            <span style={{ ...mono, fontSize:11, color:T.text }}>{topSuggestion.actionLabel}</span>
                           </div>
-                          <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
-                            <span style={{ ...mono9, color:sColor, fontWeight:700 }}>{s.score}%</span>
+                          {/* Reasons */}
+                          <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                            {topSuggestion.reasons?.map((r, ri) => (
+                              <span key={ri} style={{ ...mono9, color:T.dim, background:T.surface2,
+                                border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 6px' }}>
+                                {r}
+                              </span>
+                            ))}
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
+
+                        <span style={{ ...mono9, color:CONF_COLOR[topSuggestion.confidence] || T.muted, fontWeight:700, flexShrink:0 }}>
+                          {topSuggestion.score}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -793,19 +813,22 @@ function SuggestionsPanel({ onMappingApplied }) {
   )
 }
 
+
 function SchedulerPanel() {
   const { theme } = useTheme()
   const T = getT(theme)
   const mono = { fontFamily:'monospace' }
   const mono9 = { ...mono, fontSize:9 }
 
-  const [schedule,  setSchedule]  = useState(null)
-  const [saving,    setSaving]    = useState(false)
-  const [running,   setRunning]   = useState(false)
-  const [hours,     setHours]     = useState(0)
-  const [minutes,   setMinutes]   = useState(15)
-  const [enabled,   setEnabled]   = useState(false)
-  const [msg,       setMsg]       = useState(null)
+  const [schedule,       setSchedule]       = useState(null)
+  const [saving,         setSaving]         = useState(false)
+  const [running,        setRunning]        = useState(false)
+  const [hours,          setHours]          = useState(0)
+  const [minutes,        setMinutes]        = useState(15)
+  const [enabled,        setEnabled]        = useState(false)
+  const [autoCreate,     setAutoCreate]     = useState(false)
+  const [autoMinScore,   setAutoMinScore]   = useState(70)
+  const [msg,            setMsg]            = useState(null)
 
   const load = () => {
     fetch('/api/discovery/schedule')
@@ -814,6 +837,8 @@ function SchedulerPanel() {
         if (!s) return
         setSchedule(s)
         setEnabled(s.enabled || false)
+        setAutoCreate(s.auto_create || false)
+        setAutoMinScore(s.auto_create_min_score ?? 70)
         const h = Math.floor((s.interval_mins || 15) / 60)
         const m = (s.interval_mins || 15) % 60
         setHours(h)
@@ -824,7 +849,6 @@ function SchedulerPanel() {
 
   useEffect(() => { load() }, [])
 
-  // Refresh status every 30s when enabled
   useEffect(() => {
     if (!enabled) return
     const t = setInterval(load, 30000)
@@ -840,13 +864,20 @@ function SchedulerPanel() {
       const res = await fetch('/api/discovery/schedule', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, hours, minutes }),
+        body: JSON.stringify({
+          enabled, hours, minutes,
+          auto_create: autoCreate,
+          auto_create_min_score: autoMinScore,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Save failed')
       setSchedule(data)
-      setMsg({ ok:true, text: enabled ? `Auto-scan enabled — every ${totalMins} minutes` : 'Auto-scan disabled' })
-      setTimeout(() => setMsg(null), 3000)
+      const parts = []
+      if (enabled) parts.push(`scan every ${totalMins}m`)
+      if (autoCreate) parts.push(`auto-create at ${autoMinScore}% confidence`)
+      setMsg({ ok:true, text: parts.length ? parts.join(' + ') + ' enabled' : 'Settings saved (disabled)' })
+      setTimeout(() => setMsg(null), 4000)
     } catch (e) {
       setMsg({ ok:false, text: e.message })
     } finally {
@@ -857,8 +888,7 @@ function SchedulerPanel() {
   const runNow = async () => {
     setRunning(true); setMsg(null)
     try {
-      const res = await fetch('/api/discovery/schedule/run-now', { method:'POST' })
-      const data = await res.json()
+      await fetch('/api/discovery/schedule/run-now', { method:'POST' })
       setMsg({ ok:true, text:'Scan triggered — running in background' })
       setTimeout(() => { setMsg(null); load() }, 4000)
     } catch (e) {
@@ -877,9 +907,22 @@ function SchedulerPanel() {
     ? new Date(schedule.next_run_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
     : null
 
+  const Toggle = ({ value, onChange, color }) => (
+    <button onClick={() => onChange(!value)}
+      style={{ position:'relative', width:40, height:22, borderRadius:11, border:'none',
+        cursor:'pointer', transition:'background .2s', flexShrink:0,
+        background: value ? (color || T.teal) : T.border2 }}>
+      <div style={{ position:'absolute', top:3, left: value ? 21 : 3,
+        width:16, height:16, borderRadius:'50%', background:'white',
+        transition:'left .2s', boxShadow:'0 1px 3px #0004' }} />
+    </button>
+  )
+
   return (
     <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
       padding:'18px 20px', marginBottom:24 }}>
+
+      {/* ── Section: Auto Scan ─────────────────────────────────────────── */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ width:32, height:32, borderRadius:8, background:T.teal+'18',
@@ -892,74 +935,149 @@ function SchedulerPanel() {
             </div>
           </div>
         </div>
-        {/* Enable toggle */}
-        <button
-          onClick={() => setEnabled(e => !e)}
-          style={{ position:'relative', width:44, height:24, borderRadius:12, border:'none',
-            cursor:'pointer', transition:'background .2s',
-            background: enabled ? T.teal : T.border2, flexShrink:0 }}>
-          <div style={{ position:'absolute', top:3, left: enabled ? 23 : 3,
-            width:18, height:18, borderRadius:'50%', background:'white',
-            transition:'left .2s', boxShadow:'0 1px 3px #0004' }} />
-        </button>
+        <Toggle value={enabled} onChange={setEnabled} color={T.teal}/>
       </div>
 
       {/* Interval picker */}
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20,
+        padding:'12px 14px', borderRadius:10, background:T.surface2,
+        border:`1px solid ${enabled ? T.teal+'33' : T.border}`,
+        opacity: enabled ? 1 : 0.5 }}>
         <span style={{ ...mono9, color:T.muted, letterSpacing:'0.1em' }}>SCAN EVERY</span>
-
-        {/* Hours */}
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <button onClick={() => setHours(h => Math.max(0, h - 1))}
+          <button onClick={() => setHours(h => Math.max(0, h - 1))} disabled={!enabled}
             style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface2, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>−</button>
+              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>−</button>
           <div style={{ ...mono, fontSize:20, fontWeight:700, color:T.text, minWidth:28, textAlign:'center' }}>
             {hours}
           </div>
-          <button onClick={() => setHours(h => Math.min(23, h + 1))}
+          <button onClick={() => setHours(h => Math.min(23, h + 1))} disabled={!enabled}
             style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface2, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>+</button>
+              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>+</button>
           <span style={{ ...mono9, color:T.muted }}>hr</span>
         </div>
-
-        {/* Minutes */}
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <button onClick={() => setMinutes(m => {
-              const next = m - 5; return next < 0 ? (hours > 0 ? 55 : 5) : next
-            })}
+          <button onClick={() => setMinutes(m => { const n = m-5; return n<0?(hours>0?55:5):n })} disabled={!enabled}
             style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface2, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>−</button>
+              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>−</button>
           <div style={{ ...mono, fontSize:20, fontWeight:700, color:T.text, minWidth:28, textAlign:'center' }}>
             {String(minutes).padStart(2,'0')}
           </div>
-          <button onClick={() => setMinutes(m => (m + 5) % 60)}
+          <button onClick={() => setMinutes(m => (m+5)%60)} disabled={!enabled}
             style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface2, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>+</button>
+              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>+</button>
           <span style={{ ...mono9, color:T.muted }}>min</span>
         </div>
-
-        {/* Quick presets */}
-        <div style={{ display:'flex', gap:5, marginLeft:8 }}>
+        <div style={{ display:'flex', gap:5, marginLeft:4 }}>
           {[[0,15,'15m'],[0,30,'30m'],[1,0,'1h'],[4,0,'4h'],[12,0,'12h']].map(([h,m,label]) => {
-            const active = hours === h && minutes === m
+            const active = hours===h && minutes===m
             return (
-              <button key={label} onClick={() => { setHours(h); setMinutes(m) }}
+              <button key={label} onClick={() => { setHours(h); setMinutes(m) }} disabled={!enabled}
                 style={{ ...mono9, padding:'4px 10px', borderRadius:6, cursor:'pointer',
-                  border:`1px solid ${active ? T.teal+'66' : T.border}`,
-                  background: active ? T.teal+'18' : T.surface2,
-                  color: active ? T.teal : T.muted, fontWeight: active ? 700 : 400 }}>
+                  border:`1px solid ${active?T.teal+'66':T.border}`,
+                  background:active?T.teal+'18':T.surface,
+                  color:active?T.teal:T.muted, fontWeight:active?700:400 }}>
                 {label}
               </button>
             )
           })}
         </div>
-
-        <div style={{ ...mono9, color: totalMins < 5 ? T.red : T.muted, marginLeft:'auto' }}>
-          {totalMins < 5 ? 'Minimum 5 minutes' : `Every ${totalMins} min total`}
+        <div style={{ ...mono9, color: totalMins<5?T.red:T.muted, marginLeft:'auto' }}>
+          {totalMins<5 ? 'Min 5 minutes' : `Every ${totalMins} min`}
         </div>
       </div>
 
-      {/* Status row */}
+      {/* ── Section: Auto Create ───────────────────────────────────────── */}
+      <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:16, marginBottom:16 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ width:32, height:32, borderRadius:8,
+              background: autoCreate ? T.purple+'18' : T.surface2,
+              border:`1.5px solid ${autoCreate ? T.purple+'44' : T.border}`,
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:16,
+              transition:'all .2s' }}>✦</div>
+            <div>
+              <div style={{ ...mono, fontSize:13, fontWeight:700, color:T.text }}>
+                Auto Create & Map
+                <span style={{ ...mono9, marginLeft:8, padding:'2px 8px', borderRadius:4,
+                  background: autoCreate ? T.purple+'18' : T.surface2,
+                  border:`1px solid ${autoCreate ? T.purple+'44' : T.border}`,
+                  color: autoCreate ? T.purple : T.muted, fontWeight:700 }}>
+                  {autoCreate ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              <div style={{ ...mono9, color:T.dim, marginTop:1 }}>
+                After each scan, automatically create applications, components and link resources using tag suggestions
+              </div>
+            </div>
+          </div>
+          <Toggle value={autoCreate} onChange={setAutoCreate} color={T.purple}/>
+        </div>
+
+        {/* Auto-create settings — shown when enabled */}
+        <div style={{ padding:'12px 14px', borderRadius:10,
+          background: autoCreate ? T.purple+'08' : T.surface2,
+          border:`1px solid ${autoCreate ? T.purple+'33' : T.border}`,
+          opacity: autoCreate ? 1 : 0.5, transition:'all .2s' }}>
+
+          {/* Min score selector */}
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:10 }}>
+            <span style={{ ...mono9, color:T.muted, letterSpacing:'0.1em', minWidth:120 }}>
+              MIN CONFIDENCE
+            </span>
+            <div style={{ display:'flex', gap:6 }}>
+              {[
+                [50, 'Medium (50%)', T.amber],
+                [70, 'High (70%)',   T.green],
+                [85, 'Very High (85%)', '#22c55e'],
+              ].map(([score, label, color]) => {
+                const active = autoMinScore === score
+                return (
+                  <button key={score}
+                    onClick={() => autoCreate && setAutoMinScore(score)}
+                    disabled={!autoCreate}
+                    style={{ ...mono9, padding:'5px 12px', borderRadius:6, cursor: autoCreate ? 'pointer' : 'default',
+                      border:`1px solid ${active ? color+'66' : T.border}`,
+                      background: active ? color+'18' : T.surface,
+                      color: active ? color : T.muted, fontWeight: active ? 700 : 400 }}>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <input
+              type="range" min="50" max="95" step="5"
+              value={autoMinScore}
+              onChange={e => autoCreate && setAutoMinScore(parseInt(e.target.value))}
+              disabled={!autoCreate}
+              style={{ flex:1, accentColor:T.purple }}
+            />
+            <span style={{ ...mono, fontSize:14, fontWeight:700, color:T.purple, minWidth:40, textAlign:'right' }}>
+              {autoMinScore}%
+            </span>
+          </div>
+
+          {/* Warning about auto-create */}
+          <div style={{ display:'flex', gap:8, padding:'8px 10px', borderRadius:7,
+            background: T.amber+'0a', border:`1px solid ${T.amber}33` }}>
+            <span style={{ color:T.amber, flexShrink:0 }}>⚠</span>
+            <span style={{ ...mono9, color:T.amber, lineHeight:1.6 }}>
+              Auto Create will automatically create Applications and Components in AppCloud
+              based on resource tags. Only suggestions at or above {autoMinScore}% confidence
+              will be applied. Review the Analyse panel to preview what will be created before enabling.
+            </span>
+          </div>
+
+          {/* Last auto-create result */}
+          {schedule?.last_auto_create_total > 0 && (
+            <div style={{ marginTop:8, ...mono9, color:T.green }}>
+              ✓ Last run created/linked {schedule.last_auto_create_total} item(s)
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Status row ────────────────────────────────────────────────── */}
       <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:14,
         padding:'10px 14px', borderRadius:8, background:T.surface2, border:`1px solid ${T.border}` }}>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
@@ -971,22 +1089,23 @@ function SchedulerPanel() {
         </div>
         {schedule?.last_run_at && (
           <span style={{ ...mono9, color:T.muted }}>
-            Last: {new Date(schedule.last_run_at).toLocaleString()} · {schedule.last_run_total || 0} resources
+            Last: {new Date(schedule.last_run_at).toLocaleString()} · {schedule.last_run_total||0} resources
           </span>
         )}
+        {schedule?.last_auto_create_total > 0 && (
+          <span style={{ ...mono9, color:T.purple }}>✦ {schedule.last_auto_create_total} auto-created</span>
+        )}
         {nextRun && (
-          <span style={{ ...mono9, color:T.teal, marginLeft:'auto' }}>
-            ⏰ Next at {nextRun}
-          </span>
+          <span style={{ ...mono9, color:T.teal, marginLeft:'auto' }}>⏰ Next at {nextRun}</span>
         )}
       </div>
 
       {/* Message */}
       {msg && (
         <div style={{ padding:'8px 12px', borderRadius:7, marginBottom:12,
-          background: msg.ok ? T.green+'0a' : T.red+'0a',
-          border:`1px solid ${msg.ok ? T.green+'44' : T.red+'44'}` }}>
-          <span style={{ ...mono9, color: msg.ok ? T.green : T.red }}>{msg.ok ? '✓' : '✗'} {msg.text}</span>
+          background: msg.ok?T.green+'0a':T.red+'0a',
+          border:`1px solid ${msg.ok?T.green+'44':T.red+'44'}` }}>
+          <span style={{ ...mono9, color: msg.ok?T.green:T.red }}>{msg.ok?'✓':'✗'} {msg.text}</span>
         </div>
       )}
 
@@ -995,15 +1114,15 @@ function SchedulerPanel() {
         <button onClick={save} disabled={saving}
           style={{ ...mono, fontSize:12, fontWeight:700, padding:'9px 20px', borderRadius:8,
             cursor:'pointer', border:'none', transition:'all .2s',
-            background: enabled ? T.teal : T.surface2,
-            color: enabled ? 'white' : T.muted,
+            background: enabled || autoCreate ? T.teal : T.surface2,
+            color: enabled || autoCreate ? 'white' : T.muted,
             opacity: saving ? .6 : 1 }}>
-          {saving ? 'Saving…' : enabled ? '✓ Save Schedule' : 'Save (Disabled)'}
+          {saving ? 'Saving…' : 'Save Settings'}
         </button>
         <button onClick={runNow} disabled={running}
           style={{ ...mono, fontSize:12, fontWeight:700, padding:'9px 20px', borderRadius:8,
             cursor:'pointer', background:T.surface2, border:`1px solid ${T.border2}`,
-            color:T.text, opacity: running ? .6 : 1,
+            color:T.text, opacity:running?.6:1,
             display:'flex', alignItems:'center', gap:7 }}>
           {running ? <><Spinner size={12} color={T.teal}/> Running…</> : '▶ Run Now'}
         </button>
@@ -1016,89 +1135,103 @@ export default function DiscoveryPage() {
   const { theme } = useTheme()
   const T = getT(theme)
 
-  const [accounts,   setAccounts]   = useState([])
-  const [summary,    setSummary]    = useState(null)
-  const [resources,  setResources]  = useState([])
-  const [loadingRes, setLoadingRes] = useState(false)
-  const [linkTarget, setLinkTarget] = useState(null)
+  const [summary, setSummary] = useState({ total: 0, totalMapped: 0, unmapped: 0, byProvider: {} })
+  const [accounts, setAccounts] = useState([])
+  const [resources, setResources] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [linkResource, setLinkResource] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  const loadAccounts = useCallback(() => {
-    fetch('/api/discovery/accounts').then(r=>r.ok?r.json():[])
-      .then(rows => setAccounts(rows.map(a => ({
-        ...a, config: (() => { try { return JSON.parse(a.config||'{}') } catch { return {} } })()
-      })))).catch(()=>setAccounts([]))
-  }, [])
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    setError('')
 
-  const loadSummary = useCallback(() => {
-    fetch('/api/discovery/summary').then(r=>r.json()).then(setSummary).catch(()=>{})
-  }, [])
+    try {
+      const [sRes, aRes, rRes] = await Promise.all([
+        fetch('/api/discovery/summary'),
+        fetch('/api/discovery/accounts'),
+        fetch('/api/discovery/resources?limit=500'),
+      ])
 
-  const loadResources = useCallback(() => {
-    setLoadingRes(true)
-    fetch('/api/discovery/resources?limit=500').then(r=>r.json()).then(setResources)
-      .catch(()=>setResources([])).finally(()=>setLoadingRes(false))
-  }, [])
+      if (!sRes.ok) throw new Error('Failed to load discovery summary')
+      if (!aRes.ok) throw new Error('Failed to load discovery accounts')
+      if (!rRes.ok) throw new Error('Failed to load discovered resources')
 
-  useEffect(() => { loadAccounts(); loadSummary(); loadResources() }, [loadAccounts, loadSummary, loadResources])
+      const s = await sRes.json()
+      const a = await aRes.json()
+      const r = await rRes.json()
 
-  const onScanComplete = () => { loadSummary(); loadResources() }
+      setSummary(s || { total: 0, totalMapped: 0, unmapped: 0, byProvider: {} })
+      setAccounts(Array.isArray(a) ? a : [])
+      setResources(Array.isArray(r) ? r : [])
+    } catch (err) {
+      setError(err?.message || 'Unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }, [refreshKey])
 
-  const deleteResource = async (id) => {
-    if (!confirm('Remove this discovered resource from the graph?')) return
-    await fetch(`/api/discovery/resources/${id}`, { method:'DELETE' })
-    loadResources(); loadSummary()
+  useEffect(() => { loadData() }, [loadData])
+
+  const refresh = () => setRefreshKey(k => k + 1)
+  const onScanComplete = () => refresh()
+  const onMappingApplied = () => refresh()
+  const onResourcesChanged = () => refresh()
+
+  const handleDelete = async (id) => {
+    try {
+      const res = await fetch(`/api/discovery/resources/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message || 'Delete failed')
+      }
+      refresh()
+    } catch (err) {
+      setError(err?.message || 'Unable to delete resource')
+    }
   }
 
   return (
-    <div style={{ minHeight:'100vh', background:T.bg, color:T.text, fontFamily:'monospace', padding:'28px 32px' }}>
-      <div style={{ marginBottom:22 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
-          <div style={{ width:28, height:28, borderRadius:7, background:T.purple+'22',
-            border:`1.5px solid ${T.purple}55`, display:'flex', alignItems:'center',
-            justifyContent:'center', fontSize:14, color:T.purple }}>◎</div>
-          <h1 style={{ margin:0, fontSize:20, fontWeight:800, letterSpacing:'-0.02em' }}>Cloud Discovery</h1>
+    <div style={{ minHeight: '100vh', background: `radial-gradient(ellipse at 10% 20%, #0a1628 0%, ${T.bg} 60%)`, padding: '28px 32px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+        <div>
+          <h1 style={{ ...mono, fontSize: 20, fontWeight: 800, color: T.text, letterSpacing: '-0.02em', margin: '0 0 6px' }}>Discovery</h1>
+          <p style={{ ...mono, fontSize: 11, color: T.muted, letterSpacing: '0.05em' }}>Live cloud inventory, mapping suggestions and auto-scan scheduling</p>
         </div>
-        <p style={{ margin:0, fontSize:11, color:T.dim, lineHeight:1.7 }}>
-          Scan connected cloud accounts to discover infrastructure and populate the graph.
-          Configure credentials in{' '}
-          <a href="/integrations" style={{ color:T.teal, textDecoration:'none' }}>Integrations</a>.
-        </p>
+        <button onClick={refresh} style={{ ...mono, fontSize: 11, color: T.text, background: T.surface2, border: `1px solid ${T.border2}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>
+          Refresh
+        </button>
       </div>
 
-      <SummaryCards summary={summary}/>
+      {error && <div style={{ ...mono, marginBottom: 14, color: T.red }}>Error: {error}</div>}
+      {loading && <div style={{ ...mono, marginBottom: 14, color: T.dim }}>Loading discovery data…</div>}
+
+      <SummaryCards summary={summary} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12, marginBottom: 18 }}>
+        {accounts.length ? accounts.map(ac => (
+          <AccountCard key={ac.id} account={ac} onScanComplete={onScanComplete} />
+        )) : <NoAccounts />}
+      </div>
+
+      <ResourceTable
+        resources={resources}
+        onLink={setLinkResource}
+        onDelete={handleDelete}
+        onBulkDelete={onResourcesChanged}
+      />
+
+      <SuggestionsPanel onMappingApplied={onMappingApplied} />
 
       <SchedulerPanel />
 
-      <SuggestionsPanel onMappingApplied={onScanComplete}/>
-
-      {accounts.length > 0 ? (
-        <>
-          <div style={{ ...mono, fontSize:11, fontWeight:700, color:T.text, marginBottom:10 }}>Connected Accounts</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(340px,1fr))', gap:14, marginBottom:24 }}>
-            {accounts.map(acc => <AccountCard key={acc.id} account={acc} onScanComplete={onScanComplete}/>)}
-          </div>
-        </>
-      ) : <div style={{ marginBottom:24 }}><NoAccounts/></div>}
-
-      <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, overflow:'hidden' }}>
-        <div style={{ padding:'12px 16px', borderBottom:`1px solid ${T.border}`,
-          display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ ...mono, fontSize:12, fontWeight:700, color:T.text }}>
-            Discovered Resources{resources.length ? ` (${resources.length})` : ''}
-          </div>
-          <button onClick={loadResources} style={{ ...mono9, color:T.dim, background:'transparent',
-            border:`1px solid ${T.border}`, borderRadius:5, padding:'3px 9px', cursor:'pointer' }}>↻ Refresh</button>
-        </div>
-        <div style={{ padding:'14px 16px' }}>
-          {loadingRes
-            ? <div style={{ textAlign:'center', padding:'24px 0' }}><Spinner/></div>
-            : <ResourceTable resources={resources} onLink={r=>setLinkTarget(r)} onDelete={deleteResource}/>}
-        </div>
-      </div>
-
-      {linkTarget && (
-        <LinkModal resource={linkTarget} onClose={()=>setLinkTarget(null)}
-          onLinked={()=>{ loadResources(); loadSummary() }}/>
+      {linkResource && (
+        <LinkModal
+          resource={linkResource}
+          onClose={() => setLinkResource(null)}
+          onLinked={() => { setLinkResource(null); onResourcesChanged() }}
+        />
       )}
     </div>
   )
