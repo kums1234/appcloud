@@ -1,0 +1,40 @@
+# docker-compose.dev.yml
+# Development override for docker-compose.yml
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  # ── Fastify API (Development Mode) ──────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./api/src:/app/src:ro
+      - ./api/__tests__:/app/__tests__:ro
+      - ./api/package.json:/app/package.json:ro
+      - ./api/package-lock.json:/app/package-lock.json:ro
+      - /app/node_modules  # Named volume to avoid host node_modules conflicts
+    environment:
+      - NODE_ENV=development
+      - JWT_SECRET=dev-jwt-secret-for-local-development
+    command: ["npm", "run", "dev"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ── Neo4j (Development Mode) ────────────────────────────────────────────────
+  db:
+    environment:
+      - NEO4J_dbms_memory_pagecache_size=256M
+      - NEO4J_dbms_memory_heap_max__size=256M
+
+  # ── PostgreSQL (Development Mode) ───────────────────────────────────────────
+  postgres:
+    environment:
+      - POSTGRES_DB=appcloud_dev
