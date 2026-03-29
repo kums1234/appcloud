@@ -866,6 +866,29 @@ async function scanGCP({ credentials, projectId, write, log }) {
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
 export default async function discoveryRoutes(fastify) {
+  async function enrichWithAI(fastify, suggestions) {
+    // Only enrich if local AI is available — never block the response
+    if (!fastify.ai?.localAvailable) return suggestions
+  
+    // Enrich top suggestion for the highest-scoring resources (up to 10)
+    const toEnrich = suggestions.slice(0, 10)
+  
+    return Promise.all(suggestions.map(async (item, idx) => {
+      if (idx >= 10 || !item.suggestions?.[0]) return item
+  
+      try {
+        const top = item.suggestions[0]
+        const explanation = await fastify.ai.explainMapping(item.infra, top)
+        return {
+          ...item,
+          suggestions: item.suggestions.map((s, i) => i === 0 ? { ...s, aiExplanation: explanation } : s),
+          aiEnriched: true,
+        }
+      } catch {
+        return item  // never fail the whole response
+      }
+    }))
+  }
   const { write, query } = fastify.neo4j
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = (req) => req.user?.name || req.user?.id || 'system'
@@ -1145,7 +1168,11 @@ export default async function discoveryRoutes(fastify) {
     audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
       { providers, results, errors })
     await runAutoCreateIfEnabled(fastify)
-    return { results, errors, completedAt: new Date().toISOString() }
+    let driftPlan = null
+    if (fastify.ai?.cloudAvailable) {
+      driftPlan = await fastify.ai.planDriftRemediation([]).catch(() => null)
+    }
+    return { results, errors, completedAt: new Date().toISOString(), driftPlan }
   })
 
   // ── GET /discovery/schedule ─────────────────────────────────────────────
@@ -1423,9 +1450,24 @@ export default async function discoveryRoutes(fastify) {
           })
         }
       }
+      const { enrich } = req.query   // ?enrich=true to opt-in to AI enrichment
+      const finalSuggestions = enrich === 'true'
+        ? await enrichWithAI(fastify, suggestions)
+        : suggestions
+
       return {
-        suggestions,
-        diagnostic: fallback.diagnostic || { mode: 'bootstrap', unmappedInfra: infraRecords.length }
+        suggestions: finalSuggestions,
+        diagnostic: {
+          unmappedInfra:    infraRecords.length,
+          applications:     apps.length,
+          withSuggestions:  finalSuggestions.length,
+          belowThreshold:   infraRecords.length - finalSuggestions.length,
+          minScore:         parseInt(minScore),
+          aiEnriched:       enrich === 'true' && fastify.ai?.localAvailable,
+          message: finalSuggestions.length === 0
+            ? `Found ${infraRecords.length} unmapped resource(s) and ${apps.length} application(s) but no matches above score ${minScore}.`
+            : `Found ${finalSuggestions.length} suggestion(s) from ${infraRecords.length} unmapped resource(s)`
+        }
       }
     }
 

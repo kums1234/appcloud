@@ -115,3 +115,22 @@ patches:
     target:
       kind: Deployment
       name: ui
+
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: standard
+    target:
+      kind: PersistentVolumeClaim
+      name: ollama-models
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "5Gi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "250m"
+    target:
+      kind: Deployment
+      name: ollama

@@ -36,6 +36,10 @@ spec:
               value: "0.0.0.0"
             - name: JWT_EXPIRES_IN
               value: "8h"
+            - name: OLLAMA_BASE_URL
+              value: http://ollama:11434
+            - name: OLLAMA_MODEL
+              value: llama3
             - name: DB_USERNAME_FILE
               value: /run/secrets/db_username
             - name: DB_PASSWORD_FILE

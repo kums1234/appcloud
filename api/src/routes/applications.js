@@ -21,15 +21,27 @@ export default async function applicationRoutes(fastify) {
     }))
   })
 
+  const resolveApplicationId = async (key) => {
+    const appRecords = await query(`
+      MATCH (a:Application)
+      WHERE a.id = $key OR a.name = $key
+      RETURN a.id AS id
+      LIMIT 1
+    `, { key })
+    return appRecords[0]?.get('id')
+  }
+
   // GET /applications/:id
   fastify.get('/:id', async (req, reply) => {
+    const appId = await resolveApplicationId(req.params.id)
+    if (!appId) return reply.notFound('Application not found')
+
     const records = await query(`
       MATCH (a:Application {id: $id})
       OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
       OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
       RETURN a, collect(DISTINCT c) AS components, collect(DISTINCT i) AS infra
-    `, { id: req.params.id })
-    if (!records.length) return reply.notFound('Application not found')
+    `, { id: appId })
     const r = records[0]
     return {
       ...props(r.get('a')),
@@ -61,6 +73,9 @@ export default async function applicationRoutes(fastify) {
 
   // PATCH /applications/:id
   fastify.patch('/:id', { ...auth }, async (req, reply) => {
+    const appId = await resolveApplicationId(req.params.id)
+    if (!appId) return reply.notFound('Application not found')
+
     const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       MATCH (a:Application {id: $id})
@@ -72,7 +87,7 @@ export default async function applicationRoutes(fastify) {
           a.confidentiality  = coalesce($confidentiality, a.confidentiality),
           a.domain           = coalesce($domain, a.domain)
       RETURN a
-    `, { id: req.params.id, name, tier: tier ? parseInt(tier) : null,
+    `, { id: appId, name, tier: tier ? parseInt(tier) : null,
          owner, environment, availability, confidentiality, domain })
     if (!records.length) return reply.notFound('Application not found')
     const result = props(records[0].get('a'))
@@ -83,16 +98,68 @@ export default async function applicationRoutes(fastify) {
 
   // DELETE /applications/:id
   fastify.delete('/:id', { ...auth }, async (req, reply) => {
-    const pre = await query('MATCH (a:Application {id: $id}) RETURN a.name AS name',
-      { id: req.params.id })
+    const appId = await resolveApplicationId(req.params.id)
+    if (!appId) return reply.notFound('Application not found')
+
+    // Fetch the app name first (non-destructive)
+    const pre = await query('MATCH (a:Application {id: $id}) RETURN a.name AS name', { id: appId })
     const name = pre[0]?.get('name') || req.params.id
+
+    // Components that belong only to this app (not shared with another app)
+    const appComponents = await query(`
+      MATCH (a:Application {id: $id})-[:CONTAINS]->(c:Component)
+      WHERE NOT EXISTS {
+        MATCH (c)<-[:CONTAINS]-(other:Application)
+        WHERE other.id <> $id
+      }
+      RETURN collect(DISTINCT c.id) AS componentIds
+    `, { id: appId })
+
+    const componentIds = appComponents[0]?.get('componentIds') || []
+
+    // Infra exclusively used by the components we will remove (not by any outside component)
+    const appInfra = await query(`
+      MATCH (i:Infra)<-[:DEPLOYED_ON]-(c:Component)
+      WHERE c.id IN $componentIds
+        AND NOT EXISTS {
+          MATCH (i)<-[:DEPLOYED_ON]-(other:Component)
+          WHERE NOT other.id IN $componentIds
+        }
+      RETURN collect(DISTINCT i.id) AS infraIds
+    `, { componentIds })
+
+    const infraIds = appInfra[0]?.get('infraIds') || []
+
+    // Delete exclusively-owned components first
+    if (componentIds.length > 0) {
+      await write(`
+        MATCH (c:Component)
+        WHERE c.id IN $componentIds
+        DETACH DELETE c
+      `, { componentIds })
+    }
+
+    // Delete exclusively-owned infra next
+    if (infraIds.length > 0) {
+      await write(`
+        MATCH (i)
+        WHERE i.id IN $infraIds
+        DETACH DELETE i
+      `, { infraIds })
+    }
+
+    // Finally delete the application itself (DETACH removes CONTAINS relations)
     await write(`MATCH (a:Application {id: $id}) DETACH DELETE a`, { id: req.params.id })
+
     fastify.pg.audit(actor(req), 'delete', 'Application', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 
   // GET /applications/:id/topology
   fastify.get('/:id/topology', async (req, reply) => {
+    const appId = await resolveApplicationId(req.params.id)
+    if (!appId) return reply.notFound('Application not found')
+
     const records = await query(`
       MATCH (a:Application {id: $id})
       OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
@@ -102,7 +169,7 @@ export default async function applicationRoutes(fastify) {
         collect(DISTINCT c)    AS components,
         collect(DISTINCT i)    AS infra,
         collect(DISTINCT {from: c.id, to: c2.id, protocol: conn.protocol, port: conn.port}) AS connections
-    `, { id: req.params.id })
+    `, { id: appId })
     if (!records.length) return reply.notFound('Application not found')
     const r = records[0]
     return {
@@ -115,12 +182,15 @@ export default async function applicationRoutes(fastify) {
 
   // GET /applications/:id/dependencies
   fastify.get('/:id/dependencies', async (req, reply) => {
+    const appId = await resolveApplicationId(req.params.id)
+    if (!appId) return reply.notFound('Application not found')
+
     const records = await query(`
       MATCH (a:Application {id: $id})-[:CONTAINS]->(c:Component)
       OPTIONAL MATCH (c)-[:CONNECTS_TO]->(dep:Component)<-[:CONTAINS]-(depApp:Application)
       WHERE depApp.id <> $id
       RETURN collect(DISTINCT {app: depApp.name, component: dep.name}) AS deps
-    `, { id: req.params.id })
+    `, { id: appId })
     return { dependencies: serialize(records[0]?.get('deps') ?? []) }
   })
 }

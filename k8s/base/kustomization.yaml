@@ -16,6 +16,9 @@ resources:
   - api-service.yaml
   - ui-deployment.yaml
   - ui-service.yaml
+  - ollama-deployment.yaml
+  - ollama-service.yaml
+  - ollama-pvc.yaml
 
 # Postgres init SQL lives here so kustomize security rules are satisfied
 # (files must be within or below the kustomization directory)

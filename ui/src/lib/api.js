@@ -1,6 +1,8 @@
 // All requests go to /api/* on the same origin.
 // Next.js rewrites /api/* → the Fastify API container server-side,
 // so the browser never needs a direct connection to the API.
+import { buildCloudOverrideForApi } from './ai-client-config'
+
 const BASE = '/api'
 
 function getToken() {
@@ -14,12 +16,12 @@ function getToken() {
 async function req(path, options = {}) {
   const token = getToken()
   const res = await fetch(`${BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
     ...options,
+    headers: {
+      ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
   })
   // Token expired / revoked — redirect to login
   if (res.status === 401) {
@@ -113,6 +115,19 @@ export const api = {
     drift:             () => req('/workflows/drift'),
     driftAnalysis:     () => req('/workflows/drift/analysis'),
     createDriftChanges:(data) => req('/workflows/drift/create-changes', { method:'POST', body:JSON.stringify(data) }),
+  },
+
+  ai: {
+    status: (useLocal=false) => req(`/ai/status${useLocal ? '?local=1' : ''}`),
+    chat: (messages, useLocal=false) =>
+      req('/ai/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          messages,
+          useLocal,
+          cloudOverride: useLocal ? null : buildCloudOverrideForApi(),
+        }),
+      }),
   },
 
   governance: {

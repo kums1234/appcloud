@@ -2,6 +2,7 @@ import { props } from '../utils/serialize.js'
 
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
+  const auth = { preHandler: fastify.authenticate }
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = (req) => req.user?.name || req.user?.id || 'system'
 
@@ -38,13 +39,14 @@ export default async function componentRoutes(fastify) {
     const r = records[0]
     return {
       ...props(r.get('c')),
-      application: props(r.get('a')),
+      // FIX 5: Guard against null — component may not belong to an application
+      application: r.get('a') ? props(r.get('a')) : null,
       infra: r.get('infra').map(props),
     }
   })
 
   // POST /components
-  fastify.post('/', async (req, reply) => {
+  fastify.post('/', { ...auth }, async (req, reply) => {
     const { name, type, runtime } = req.body
     // Accept both applicationId (sent by ComponentForm) and appId
     const appId = req.body.appId || req.body.applicationId || null
@@ -64,8 +66,8 @@ export default async function componentRoutes(fastify) {
     return result
   })
 
-  // PATCH /components/:id
-  fastify.patch('/:id', async (req, reply) => {
+  // PATCH /components/:id — FIX 4: added auth guard
+  fastify.patch('/:id', { ...auth }, async (req, reply) => {
     const { name, type, runtime } = req.body
     const records = await write(`
       MATCH (c:Component {id: $id})
@@ -81,19 +83,20 @@ export default async function componentRoutes(fastify) {
     return result
   })
 
-  // DELETE /components/:id
-  fastify.delete('/:id', async (req, reply) => {
+  // DELETE /components/:id — FIX 4: added auth guard
+  fastify.delete('/:id', { ...auth }, async (req, reply) => {
     const pre = await query(
       `MATCH (c:Component {id:$id}) RETURN c.name AS name`, { id: req.params.id }
     )
-    const name = pre[0]?.get('name') || req.params.id
+    if (!pre.length) return reply.notFound('Component not found')
+    const name = pre[0].get('name') || req.params.id
     await write(`MATCH (c:Component {id: $id}) DETACH DELETE c`, { id: req.params.id })
     audit(actor(req), 'delete', 'Component', req.params.id, name)
     reply.code(204)
   })
 
-  // POST /components/:id/connections
-  fastify.post('/:id/connections', async (req, reply) => {
+  // POST /components/:id/connections — FIX 4: added auth guard
+  fastify.post('/:id/connections', { ...auth }, async (req, reply) => {
     const { targetId, protocol, port } = req.body
     await write(`
       MATCH (c1:Component {id: $id}), (c2:Component {id: $targetId})
@@ -106,8 +109,8 @@ export default async function componentRoutes(fastify) {
     return { connected: true }
   })
 
-  // POST /components/:id/deploy
-  fastify.post('/:id/deploy', async (req, reply) => {
+  // POST /components/:id/deploy — FIX 4: added auth guard
+  fastify.post('/:id/deploy', { ...auth }, async (req, reply) => {
     const { infraId } = req.body
     await write(`
       MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})

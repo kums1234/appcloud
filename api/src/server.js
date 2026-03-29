@@ -19,6 +19,8 @@ import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
 import discoveryRoutes from './routes/discovery.js'
 import auditRoutes from './routes/audit.js'
+import { aiPlugin } from './plugins/ai.js'
+import aiRoutes from './routes/ai.js'
 
 const fastify = Fastify({ logger: true })
 
@@ -64,6 +66,11 @@ await fastify.register(governanceRoutes,    { prefix: '/governance' })
 await fastify.register(workflowRoutes,      { prefix: '/workflows' })
 await fastify.register(discoveryRoutes,     { prefix: '/discovery' })
 await fastify.register(auditRoutes,         { prefix: '/audit' })
+// AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
+// and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.
+await aiPlugin(fastify)
+// Next.js rewrites /api/* → API host without a second /api prefix (see ui/next.config.js).
+await fastify.register(aiRoutes, { prefix: '/ai' })
 
 fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 fastify.get('/', async () => ({ name: 'AppCloud API', version: '1.1.0' }))

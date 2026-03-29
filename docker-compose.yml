@@ -56,6 +56,26 @@ services:
       - pg_password
     restart: unless-stopped
 
+  # ── Ollama — local LLM for AI assistant (same pattern as k8s api → ollama:11434)
+  # First run: docker compose exec ollama ollama pull llama3
+  ollama:
+    image: ollama/ollama:latest
+    container_name: appcloud-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      # Official image has no curl/wget; ollama CLI talks to the local daemon.
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    restart: unless-stopped
+
   # ── Fastify API ──────────────────────────────────────────────────────────────
   api:
     build: ./api
@@ -68,6 +88,8 @@ services:
       - POSTGRES_DB=appcloud
       - PORT=3000
       - HOST=0.0.0.0
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3
       - DB_USERNAME_FILE=/run/secrets/db_username
       - DB_PASSWORD_FILE=/run/secrets/db_password
       - PG_USERNAME_FILE=/run/secrets/pg_username
@@ -85,6 +107,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
 
   # ── Next.js UI ───────────────────────────────────────────────────────────────
@@ -98,6 +122,9 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  ollama-data:
 
 secrets:
   db_username:

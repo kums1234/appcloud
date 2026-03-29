@@ -3,6 +3,11 @@
 export const dynamic = 'force-dynamic'
 import { useState, useEffect } from 'react'
 import { useTheme, getT } from '@/lib/theme'
+import {
+  AiAssistantIntegrationCard,
+  AiAssistantConfigModal,
+} from '@/components/integrations/AiAssistantIntegration'
+import { readAiClientConfig } from '@/lib/ai-client-config'
 
 // Module-level fallback — satisfies sub-component defaults and constants.
 // The default export re-derives T from useTheme() for live theme switching.
@@ -15,6 +20,7 @@ const mono = { fontFamily:'monospace' }
 // ── Integration definitions ───────────────────────────────────────────────────
 const CATEGORIES = [
   { id:'iac',      label:'Infrastructure as Code', icon:'⬡' },
+  { id:'ai',       label:'AI',                      icon:'🤖' },
   { id:'cloud',    label:'Cloud Providers',         icon:'◈' },
   { id:'k8s',      label:'Kubernetes',              icon:'◎' },
   { id:'itsm',     label:'ITSM & Ticketing',        icon:'◫' },
@@ -22,6 +28,17 @@ const CATEGORIES = [
 ]
 
 const INTEGRATIONS = [
+  // ── AI ───────────────────────────────────────────────────────────────────
+  {
+    id:'ai-assistant', category:'ai',
+    name:'AI assistant', vendor:'Ollama & cloud LLMs',
+    tagline:'Side-panel chat — local Ollama or hosted models; set cloud credentials here or use API env vars',
+    color:'#f472b6', secondaryColor:'#ec4899',
+    logo:'AI',
+    capabilities:['Side chat','Ollama','Anthropic · OpenAI · Gemini · Azure'],
+    badge:'AI',
+  },
+
   // ── IaC ──────────────────────────────────────────────────────────────────
   {
     id:'terraform', category:'iac',
@@ -171,9 +188,10 @@ const INTEGRATIONS = [
 ]
 
 const BADGE_COLOR = {
-  Discovery:   { bg: T.teal+'18',   border: T.teal+'44',   text: T.teal   },
-  ITSM:        { bg: T.green+'18',  border: T.green+'44',  text: T.green  },
+  Discovery:    { bg: T.teal+'18',   border: T.teal+'44',   text: T.teal   },
+  ITSM:         { bg: T.green+'18',  border: T.green+'44',  text: T.green  },
   Notifications:{ bg: T.purple+'18', border: T.purple+'44', text: T.purple },
+  AI:           { bg: '#f472b618',   border: '#f472b644',   text: '#f472b6' },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -875,7 +893,7 @@ function IntegrationCard({ intg, connected, accountCount, onConfigure }) {
 
 // ── Sync status banner ────────────────────────────────────────────────────────
 function SyncBanner({ connections }) {
-  const connectedList = INTEGRATIONS.filter(i => connections[i.id])
+  const connectedList = INTEGRATIONS.filter(i => i.id !== 'ai-assistant' && connections[i.id])
   if(!connectedList.length) return null
 
   return (
@@ -911,12 +929,23 @@ export default function IntegrationsPage() {
   const [activeCategory, setActiveCategory] = useState('all')
   const [configuring,    setConfiguring]    = useState(null) // integration id
   const [editAccount,    setEditAccount]    = useState(null) // { id, name, config } for editing existing
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiCfgTick, setAiCfgTick] = useState(0)
+  const [aiHasSaved, setAiHasSaved] = useState(() =>
+    typeof window !== 'undefined' && !!readAiClientConfig()?.savedAt)
 
   const filtered = activeCategory==='all'
     ? INTEGRATIONS
     : INTEGRATIONS.filter(i=>i.category===activeCategory)
 
-  const connectedCount = INTEGRATIONS.filter(i=>connections[i.id]).length
+  useEffect(() => {
+    setAiHasSaved(!!readAiClientConfig()?.savedAt)
+  }, [aiCfgTick])
+
+  const connectedCount = INTEGRATIONS.filter(i => {
+    if (i.id === 'ai-assistant') return aiHasSaved
+    return connections[i.id]
+  }).length
 
   const intgBeingConfigured = INTEGRATIONS.find(i=>i.id===configuring)
 
@@ -924,6 +953,18 @@ export default function IntegrationsPage() {
   const providerAccounts = intgBeingConfigured
     ? cloudAccounts.filter(a => a.provider === intgBeingConfigured.id)
     : []
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.location.hash !== '#ai-assistant') return
+    const scroll = () => document.getElementById('ai-assistant')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const raf = requestAnimationFrame(scroll)
+    const t = window.setTimeout(scroll, 180)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(t)
+    }
+  }, [])
 
   return (
     <div style={{ minHeight:'100vh',
@@ -992,18 +1033,26 @@ export default function IntegrationsPage() {
         {filtered.map((intg,i)=>(
           <div key={intg.id} className="int-card"
             style={{ animationDelay:`${i*40}ms` }}>
-            <IntegrationCard
-              intg={intg}
-              connected={
-                CLOUD_IDS.includes(intg.id)
-                  ? cloudAccounts.some(a => a.provider === intg.id)
-                  : !!connections[intg.id]
-              }
-              accountCount={CLOUD_IDS.includes(intg.id)
-                ? cloudAccounts.filter(a => a.provider === intg.id).length
-                : undefined}
-              onConfigure={()=>setConfiguring(intg.id)}
-            />
+            {intg.id === 'ai-assistant' ? (
+              <AiAssistantIntegrationCard
+                intg={intg}
+                connected={aiHasSaved}
+                onConfigure={()=>setAiModalOpen(true)}
+              />
+            ) : (
+              <IntegrationCard
+                intg={intg}
+                connected={
+                  CLOUD_IDS.includes(intg.id)
+                    ? cloudAccounts.some(a => a.provider === intg.id)
+                    : !!connections[intg.id]
+                }
+                accountCount={CLOUD_IDS.includes(intg.id)
+                  ? cloudAccounts.filter(a => a.provider === intg.id).length
+                  : undefined}
+                onConfigure={()=>setConfiguring(intg.id)}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -1075,7 +1124,7 @@ export default function IntegrationsPage() {
       )}
 
       {/* Config modal — new account or editing existing */}
-      {intgBeingConfigured && (
+      {intgBeingConfigured && intgBeingConfigured.id !== 'ai-assistant' && (
         (editAccount || !['aws','azure','gcp'].includes(intgBeingConfigured.id) || providerAccounts.length === 0) && (
         <ConfigModal
           integration={intgBeingConfigured}
@@ -1103,6 +1152,14 @@ export default function IntegrationsPage() {
           onClose={() => { setEditAccount(null); setConfiguring(null) }}
         />
       ))}
+
+      {aiModalOpen && (
+        <AiAssistantConfigModal
+          intg={INTEGRATIONS.find(x => x.id === 'ai-assistant')}
+          onClose={() => setAiModalOpen(false)}
+          onSaved={() => setAiCfgTick(t => t + 1)}
+        />
+      )}
     </div>
   )
 }

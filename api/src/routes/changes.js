@@ -134,14 +134,24 @@ export default async function changeRoutes(fastify) {
     `, { id: req.params.id })
     if (!records.length) return reply.notFound('Change not found')
     const r = records[0]
-    return {
+    const blastRadius = {
       change:             r.get('change'),
       riskScore:          serialize(r.get('riskScore')),
       directlyModified:   r.get('directlyModified'),
       directlyAffected:   r.get('directlyAffected'),
       indirectlyAffected: [...new Set(r.get('indirectlyAffected').flat())],
     }
-  })
+
+    // Enrich with AI risk narrative if local AI available
+    if (fastify.ai?.localAvailable) {
+      try {
+        const changeData = { title: blastRadius.change, riskScore: blastRadius.riskScore }
+        blastRadius.aiNarrative = await fastify.ai.explainRisk(changeData, blastRadius)
+      } catch { /* non-fatal */ }
+    }
+
+    return blastRadius
+    })
 
   // POST /changes/impact-preview
   fastify.post('/impact-preview', async (req, reply) => {

@@ -1,6 +1,7 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState, useCallback, Fragment } from 'react'
 import Sidebar from '@/components/layout/Sidebar'
+import AiAssistantPanel from '@/components/ai/AiAssistantPanel'
 import { AuthProvider, useAuth } from '@/lib/auth-context'
 import { ThemeProvider, useTheme, getT } from '@/lib/theme'
 
@@ -20,7 +21,7 @@ function AuthGuard({ children }) {
   return children
 }
 
-function TopBar() {
+function TopBar({ rightInset = 0 }) {
   const { user, logout }  = useAuth()
   const { theme, toggle } = useTheme()
   const T = getT(theme)
@@ -33,12 +34,12 @@ function TopBar() {
 
   return (
     <div style={{
-      position:'fixed', top:0, left:220, right:0, height:48, zIndex:40,
+      position:'fixed', top:0, left:220, right:rightInset, height:48, zIndex:40,
       background:`${T.bg}ee`, backdropFilter:'blur(8px)',
       borderBottom:`1px solid ${T.border}`,
       display:'flex', alignItems:'center',
       justifyContent:'flex-end', padding:'0 24px', gap:12,
-      transition:'background 0.2s ease, border-color 0.2s ease',
+      transition:'background 0.2s ease, border-color 0.2s ease, right 0.18s ease',
     }}>
       {/* User pill */}
       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -94,19 +95,28 @@ function TopBar() {
 function ShellInner({ children }) {
   const { theme } = useTheme()
   const T = getT(theme)
+  const [aiAsideW, setAiAsideW] = useState(44)
+  const onReserveRight = useCallback((px) => setAiAsideW(px), [])
   return (
     <AuthGuard>
-      <div style={{ display:'flex', minHeight:'100vh', background:T.bg,
-        transition:'background 0.2s ease' }}>
-        <Sidebar/>
-        <div style={{ marginLeft:220, flex:1, minHeight:'100vh',
-          display:'flex', flexDirection:'column' }}>
-          <TopBar/>
-          <main style={{ flex:1, overflowX:'hidden', marginTop:48 }}>
-            {children}
-          </main>
+      <Fragment>
+        <div style={{ display:'flex', minHeight:'100vh', background:T.bg,
+          transition:'background 0.2s ease' }}>
+          <Sidebar/>
+          <div style={{ marginLeft:220, flex:1, minHeight:'100vh',
+            display:'flex', flexDirection:'column' }}>
+            <TopBar rightInset={aiAsideW}/>
+            <main style={{
+              flex:1, overflowX:'hidden', marginTop:48,
+              paddingRight: aiAsideW,
+              transition: 'padding-right 0.18s ease',
+            }}>
+              {children}
+            </main>
+          </div>
         </div>
-      </div>
+        <AiAssistantPanel onReserveRight={onReserveRight} />
+      </Fragment>
     </AuthGuard>
   )
 }

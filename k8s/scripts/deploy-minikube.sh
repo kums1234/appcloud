@@ -4,7 +4,9 @@
 set -euo pipefail
 
 SKIP_BUILD=false
+SKIP_IMAGE_LOAD=false
 for arg in "$@"; do [[ "$arg" == "--skip-build" ]] && SKIP_BUILD=true; done
+for arg in "$@"; do [[ "$arg" == "--skip-image-load" ]] && SKIP_IMAGE_LOAD=true; done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -50,11 +52,14 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
 else
   echo "► Skipping image build (--skip-build)"
 fi
-
-echo "► Loading images into minikube (this may take a minute)..."
-minikube image load appcloud-api:latest --profile=appcloud
-minikube image load appcloud-ui:latest --profile=appcloud
-echo "  ✓ Images loaded"
+if [[ "$SKIP_IMAGE_LOAD" == "false" ]]; then
+  echo "► Loading images into minikube (this may take a minute)..."
+  minikube image load appcloud-api:latest --profile=appcloud
+  minikube image load appcloud-ui:latest --profile=appcloud
+  echo "  ✓ Images loaded"
+else
+  echo "► Skipping image load (--skip-image-load)"
+fi
 
 # ── Secrets ────────────────────────────────────────────────────────────────────
 echo "► Creating namespace and secrets..."
