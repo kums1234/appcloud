@@ -31,7 +31,7 @@ if ! minikube status --profile=appcloud &>/dev/null; then
     --cpus=4 \
     --memory=6g \
     --disk-size=30g \
-    --container-runtime=containerd
+    --container-runtime=docker
 fi
 
 echo "► Enabling required addons..."

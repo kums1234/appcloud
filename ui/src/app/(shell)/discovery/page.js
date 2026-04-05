@@ -97,55 +97,14 @@ function SummaryCards({ summary }) {
   )
 }
 
-function AccountCard({ account, onScanComplete }) {
+function AccountCard({ account }) {
   const pm = PROVIDER_META[account.provider] || { color:T.muted, label:account.provider, capabilities:'' }
-  const [scanning,    setScanning]    = useState(false)
-  const [result,      setResult]      = useState(null)
-  const [regions,     setRegions]     = useState(['us-east-1'])
-  const [showRegions, setShowRegions] = useState(false)
-
-  const runScan = async () => {
-    setScanning(true); setResult(null)
-    try {
-      const body = {}, cfg = account.config || {}
-      if (account.provider === 'aws') {
-        body.regions = regions
-        // Support both secretKey (stored name) and secretAccessKey (AWS SDK name)
-        const secret = cfg.secretAccessKey || cfg.secretKey
-        if (cfg.accessKeyId && secret)
-          body.credentials = { accessKeyId: cfg.accessKeyId, secretAccessKey: secret }
-      }
-      if (account.provider === 'azure') {
-        body.subscriptionId = cfg.subscriptionId
-        // clientSecret is stored in config — if missing, prompt the user
-        let secret = cfg.clientSecret
-        if (cfg.tenantId && cfg.clientId && !secret) {
-          secret = window.prompt(
-            `Enter Client Secret for ${account.name}\n(It was not saved — paste it here to scan):`
-          )
-        }
-        if (cfg.tenantId && cfg.clientId && secret)
-          body.credentials = { tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:secret }
-      }
-      if (account.provider === 'gcp') {
-        body.projectId = cfg.projectId
-        if (cfg.serviceAccount) { try { body.credentials = JSON.parse(cfg.serviceAccount) } catch {} }
-      }
-      const res  = await fetch(`/api/discovery/scan/${account.provider}`, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message || 'Scan failed')
-      setResult({ ok:true, ...data }); onScanComplete?.()
-    } catch (e) { setResult({ ok:false, error:e.message }) }
-    finally { setScanning(false) }
-  }
 
   return (
     <div style={{ background:T.surface, border:`1px solid ${pm.color}44`, borderRadius:12, overflow:'hidden' }}>
       <div style={{ height:1, background:`linear-gradient(90deg,transparent,${pm.color}66,transparent)` }}/>
       <div style={{ padding:'14px 16px' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ width:34, height:34, borderRadius:8, background:pm.color+'20',
             border:`1.5px solid ${pm.color}55`, display:'flex', alignItems:'center',
             justifyContent:'center', fontSize:15, color:pm.color, flexShrink:0 }}>{pm.icon}</div>
@@ -159,65 +118,22 @@ function AccountCard({ account, onScanComplete }) {
           </div>
         </div>
         {account.config && (
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:12 }}>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:10 }}>
             {account.provider==='aws' && account.config.accountId &&
               <span style={{ ...mono9, color:T.dim, background:T.surface2, border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 7px' }}>Account: {account.config.accountId}</span>}
+            {account.provider==='aws' && account.config.regions &&
+              <span style={{ ...mono9, color:T.dim, background:T.surface2, border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 7px' }}>Regions: {account.config.regions}</span>}
             {account.provider==='azure' && account.config.subscriptionId &&
               <span style={{ ...mono9, color:T.dim, background:T.surface2, border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 7px' }}>Sub: {account.config.subscriptionId?.slice(0,8)}…</span>}
             {account.provider==='gcp' && account.config.projectId &&
               <span style={{ ...mono9, color:T.dim, background:T.surface2, border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 7px' }}>Project: {account.config.projectId}</span>}
-          </div>
-        )}
-        {account.provider === 'aws' && (
-          <div style={{ marginBottom:12 }}>
-            <button onClick={() => setShowRegions(s => !s)} style={{ ...mono9, color:T.dim, background:'transparent',
-              border:`1px solid ${T.border}`, borderRadius:5, padding:'3px 8px', cursor:'pointer', marginBottom: showRegions ? 8 : 0 }}>
-              {showRegions ? '▲' : '▼'} Regions ({regions.length} selected)
-            </button>
-            {showRegions && (
-              <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
-                {AWS_REGIONS.map(r => {
-                  const active = regions.includes(r)
-                  return (
-                    <button key={r} onClick={() => setRegions(rs => rs.includes(r) ? rs.filter(x=>x!==r) : [...rs,r])}
-                      style={{ ...mono9, padding:'3px 7px', borderRadius:3, cursor:'pointer', border:'1px solid',
-                        background: active ? pm.color+'22' : 'transparent',
-                        color: active ? pm.color : T.muted,
-                        borderColor: active ? pm.color+'55' : T.border }}>{r}</button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-        <button onClick={runScan} disabled={scanning}
-          style={{ ...mono, fontSize:12, fontWeight:700, width:'100%', padding:'9px 0', borderRadius:8,
-            cursor:'pointer', background:pm.color+'22', border:`1px solid ${pm.color}66`,
-            color:pm.color, opacity:scanning?.6:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-          {scanning ? <><Spinner color={pm.color} size={14}/> Scanning…</> : `▶ Run ${pm.label} Discovery`}
-        </button>
-        {result && (
-          <div style={{ marginTop:10, padding:'9px 12px', borderRadius:7,
-            background: result.ok ? T.green+'0a' : T.red+'0a',
-            border:`1px solid ${result.ok ? T.green+'44' : T.red+'44'}` }}>
-            {result.ok ? (
-              <>
-                <div style={{ ...mono, fontSize:10, fontWeight:700, color:T.green, marginBottom:5 }}>
-                  ✓ {result.total} resources in {(result.duration/1000).toFixed(1)}s
-                </div>
-                <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
-                  {Object.entries(result.breakdown||{}).filter(([k])=>k!=='errors').map(([k,v]) => v > 0 && (
-                    <span key={k} style={{ ...mono9, color:T.dim, background:T.surface2,
-                      border:`1px solid ${T.border}`, borderRadius:3, padding:'1px 5px' }}>{k}: {v}</span>
-                  ))}
-                </div>
-                {result.breakdown?.errors?.length > 0 && (
-                  <div style={{ marginTop:5 }}>
-                    {result.breakdown.errors.map((e,i) => <div key={i} style={{ ...mono9, color:T.amber }}>⚠ {e}</div>)}
-                  </div>
-                )}
-              </>
-            ) : <div style={{ ...mono9, color:T.red }}>✗ {result.error}</div>}
+            {account.last_scan_status &&
+              <span style={{ ...mono9, color: account.last_scan_status === 'success' ? T.green : T.amber,
+                background: (account.last_scan_status === 'success' ? T.green : T.amber) + '15',
+                border:`1px solid ${(account.last_scan_status === 'success' ? T.green : T.amber)}33`,
+                borderRadius:3, padding:'1px 7px' }}>
+                {account.last_scan_status === 'success' ? '✓' : '⚠'} Last scan: {account.last_scan_status}
+              </span>}
           </div>
         )}
       </div>
@@ -814,21 +730,18 @@ function SuggestionsPanel({ onMappingApplied }) {
 }
 
 
-function SchedulerPanel() {
+function AutoDiscoveryBar({ onScanTriggered }) {
   const { theme } = useTheme()
   const T = getT(theme)
   const mono = { fontFamily:'monospace' }
   const mono9 = { ...mono, fontSize:9 }
 
-  const [schedule,       setSchedule]       = useState(null)
-  const [saving,         setSaving]         = useState(false)
-  const [running,        setRunning]        = useState(false)
-  const [hours,          setHours]          = useState(0)
-  const [minutes,        setMinutes]        = useState(15)
-  const [enabled,        setEnabled]        = useState(false)
-  const [autoCreate,     setAutoCreate]     = useState(false)
-  const [autoMinScore,   setAutoMinScore]   = useState(70)
-  const [msg,            setMsg]            = useState(null)
+  const [schedule,  setSchedule]  = useState(null)
+  const [saving,    setSaving]    = useState(false)
+  const [hours,     setHours]     = useState(0)
+  const [minutes,   setMinutes]   = useState(15)
+  const [enabled,   setEnabled]   = useState(false)
+  const [msg,       setMsg]       = useState(null)
 
   const load = () => {
     fetch('/api/discovery/schedule')
@@ -837,8 +750,6 @@ function SchedulerPanel() {
         if (!s) return
         setSchedule(s)
         setEnabled(s.enabled || false)
-        setAutoCreate(s.auto_create || false)
-        setAutoMinScore(s.auto_create_min_score ?? 70)
         const h = Math.floor((s.interval_mins || 15) / 60)
         const m = (s.interval_mins || 15) % 60
         setHours(h)
@@ -848,7 +759,6 @@ function SchedulerPanel() {
   }
 
   useEffect(() => { load() }, [])
-
   useEffect(() => {
     if (!enabled) return
     const t = setInterval(load, 30000)
@@ -864,37 +774,17 @@ function SchedulerPanel() {
       const res = await fetch('/api/discovery/schedule', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          enabled, hours, minutes,
-          auto_create: autoCreate,
-          auto_create_min_score: autoMinScore,
-        }),
+        body: JSON.stringify({ enabled, hours, minutes }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Save failed')
       setSchedule(data)
-      const parts = []
-      if (enabled) parts.push(`scan every ${totalMins}m`)
-      if (autoCreate) parts.push(`auto-create at ${autoMinScore}% confidence`)
-      setMsg({ ok:true, text: parts.length ? parts.join(' + ') + ' enabled' : 'Settings saved (disabled)' })
-      setTimeout(() => setMsg(null), 4000)
+      setMsg({ ok:true, text: enabled ? `Auto-scan every ${totalMins}m` : 'Auto-scan disabled' })
+      setTimeout(() => setMsg(null), 3000)
     } catch (e) {
       setMsg({ ok:false, text: e.message })
     } finally {
       setSaving(false)
-    }
-  }
-
-  const runNow = async () => {
-    setRunning(true); setMsg(null)
-    try {
-      await fetch('/api/discovery/schedule/run-now', { method:'POST' })
-      setMsg({ ok:true, text:'Scan triggered — running in background' })
-      setTimeout(() => { setMsg(null); load() }, 4000)
-    } catch (e) {
-      setMsg({ ok:false, text: e.message })
-    } finally {
-      setRunning(false)
     }
   }
 
@@ -907,226 +797,95 @@ function SchedulerPanel() {
     ? new Date(schedule.next_run_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
     : null
 
-  const Toggle = ({ value, onChange, color }) => (
-    <button onClick={() => onChange(!value)}
-      style={{ position:'relative', width:40, height:22, borderRadius:11, border:'none',
-        cursor:'pointer', transition:'background .2s', flexShrink:0,
-        background: value ? (color || T.teal) : T.border2 }}>
-      <div style={{ position:'absolute', top:3, left: value ? 21 : 3,
-        width:16, height:16, borderRadius:'50%', background:'white',
-        transition:'left .2s', boxShadow:'0 1px 3px #0004' }} />
-    </button>
-  )
-
   return (
-    <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14,
-      padding:'18px 20px', marginBottom:24 }}>
+    <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:10,
+      padding:'10px 16px', marginBottom:18, display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
 
-      {/* ── Section: Auto Scan ─────────────────────────────────────────── */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <div style={{ width:32, height:32, borderRadius:8, background:T.teal+'18',
-            border:`1.5px solid ${T.teal}44`, display:'flex', alignItems:'center',
-            justifyContent:'center', fontSize:16 }}>⏱</div>
-          <div>
-            <div style={{ ...mono, fontSize:13, fontWeight:700, color:T.text }}>Auto Discovery</div>
-            <div style={{ ...mono9, color:T.dim, marginTop:1 }}>
-              Automatically scan all configured cloud accounts on a schedule
-            </div>
-          </div>
-        </div>
-        <Toggle value={enabled} onChange={setEnabled} color={T.teal}/>
+      {/* Toggle */}
+      <button onClick={() => setEnabled(e => !e)}
+        style={{ position:'relative', width:36, height:20, borderRadius:10, border:'none',
+          cursor:'pointer', transition:'background .2s', flexShrink:0,
+          background: enabled ? T.teal : T.border2 }}>
+        <div style={{ position:'absolute', top:2, left: enabled ? 18 : 2,
+          width:16, height:16, borderRadius:'50%', background:'white',
+          transition:'left .2s', boxShadow:'0 1px 3px #0004' }} />
+      </button>
+
+      <span style={{ ...mono, fontSize:11, fontWeight:700, color: enabled ? T.teal : T.muted, flexShrink:0 }}>
+        Auto Discovery
+      </span>
+
+      {/* Interval presets */}
+      <div style={{ display:'flex', gap:4, opacity: enabled ? 1 : 0.4 }}>
+        {[[0,15,'15m'],[0,30,'30m'],[1,0,'1h'],[4,0,'4h'],[12,0,'12h']].map(([h,m,label]) => {
+          const active = hours===h && minutes===m
+          return (
+            <button key={label} onClick={() => { if(enabled){ setHours(h); setMinutes(m) }}}
+              style={{ ...mono9, padding:'3px 9px', borderRadius:5, cursor: enabled?'pointer':'default',
+                border:`1px solid ${active?T.teal+'66':T.border}`,
+                background:active?T.teal+'18':'transparent',
+                color:active?T.teal:T.muted, fontWeight:active?700:400 }}>
+              {label}
+            </button>
+          )
+        })}
       </div>
 
-      {/* Interval picker */}
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20,
-        padding:'12px 14px', borderRadius:10, background:T.surface2,
-        border:`1px solid ${enabled ? T.teal+'33' : T.border}`,
-        opacity: enabled ? 1 : 0.5 }}>
-        <span style={{ ...mono9, color:T.muted, letterSpacing:'0.1em' }}>SCAN EVERY</span>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <button onClick={() => setHours(h => Math.max(0, h - 1))} disabled={!enabled}
-            style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>−</button>
-          <div style={{ ...mono, fontSize:20, fontWeight:700, color:T.text, minWidth:28, textAlign:'center' }}>
-            {hours}
-          </div>
-          <button onClick={() => setHours(h => Math.min(23, h + 1))} disabled={!enabled}
-            style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>+</button>
-          <span style={{ ...mono9, color:T.muted }}>hr</span>
-        </div>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <button onClick={() => setMinutes(m => { const n = m-5; return n<0?(hours>0?55:5):n })} disabled={!enabled}
-            style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>−</button>
-          <div style={{ ...mono, fontSize:20, fontWeight:700, color:T.text, minWidth:28, textAlign:'center' }}>
-            {String(minutes).padStart(2,'0')}
-          </div>
-          <button onClick={() => setMinutes(m => (m+5)%60)} disabled={!enabled}
-            style={{ ...mono, width:24, height:24, borderRadius:6, border:`1px solid ${T.border2}`,
-              background:T.surface, color:T.text, cursor:'pointer', fontSize:14, lineHeight:1 }}>+</button>
-          <span style={{ ...mono9, color:T.muted }}>min</span>
-        </div>
-        <div style={{ display:'flex', gap:5, marginLeft:4 }}>
-          {[[0,15,'15m'],[0,30,'30m'],[1,0,'1h'],[4,0,'4h'],[12,0,'12h']].map(([h,m,label]) => {
-            const active = hours===h && minutes===m
-            return (
-              <button key={label} onClick={() => { setHours(h); setMinutes(m) }} disabled={!enabled}
-                style={{ ...mono9, padding:'4px 10px', borderRadius:6, cursor:'pointer',
-                  border:`1px solid ${active?T.teal+'66':T.border}`,
-                  background:active?T.teal+'18':T.surface,
-                  color:active?T.teal:T.muted, fontWeight:active?700:400 }}>
-                {label}
-              </button>
-            )
-          })}
-        </div>
-        <div style={{ ...mono9, color: totalMins<5?T.red:T.muted, marginLeft:'auto' }}>
-          {totalMins<5 ? 'Min 5 minutes' : `Every ${totalMins} min`}
-        </div>
+      {/* Custom interval */}
+      <div style={{ display:'flex', alignItems:'center', gap:4, opacity: enabled ? 1 : 0.4 }}>
+        <button onClick={() => enabled && setHours(h => Math.max(0, h - 1))}
+          style={{ ...mono9, width:20, height:20, borderRadius:4, border:`1px solid ${T.border2}`,
+            background:'transparent', color:T.text, cursor: enabled?'pointer':'default', lineHeight:1 }}>−</button>
+        <span style={{ ...mono, fontSize:12, fontWeight:700, color:T.text, minWidth:18, textAlign:'center' }}>{hours}</span>
+        <button onClick={() => enabled && setHours(h => Math.min(23, h + 1))}
+          style={{ ...mono9, width:20, height:20, borderRadius:4, border:`1px solid ${T.border2}`,
+            background:'transparent', color:T.text, cursor: enabled?'pointer':'default', lineHeight:1 }}>+</button>
+        <span style={{ ...mono9, color:T.muted }}>h</span>
+        <button onClick={() => enabled && setMinutes(m => { const n = m-5; return n<0?(hours>0?55:5):n })}
+          style={{ ...mono9, width:20, height:20, borderRadius:4, border:`1px solid ${T.border2}`,
+            background:'transparent', color:T.text, cursor: enabled?'pointer':'default', lineHeight:1, marginLeft:4 }}>−</button>
+        <span style={{ ...mono, fontSize:12, fontWeight:700, color:T.text, minWidth:18, textAlign:'center' }}>{String(minutes).padStart(2,'0')}</span>
+        <button onClick={() => enabled && setMinutes(m => (m+5)%60)}
+          style={{ ...mono9, width:20, height:20, borderRadius:4, border:`1px solid ${T.border2}`,
+            background:'transparent', color:T.text, cursor: enabled?'pointer':'default', lineHeight:1 }}>+</button>
+        <span style={{ ...mono9, color:T.muted }}>m</span>
       </div>
 
-      {/* ── Section: Auto Create ───────────────────────────────────────── */}
-      <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:16, marginBottom:16 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ width:32, height:32, borderRadius:8,
-              background: autoCreate ? T.purple+'18' : T.surface2,
-              border:`1.5px solid ${autoCreate ? T.purple+'44' : T.border}`,
-              display:'flex', alignItems:'center', justifyContent:'center', fontSize:16,
-              transition:'all .2s' }}>✦</div>
-            <div>
-              <div style={{ ...mono, fontSize:13, fontWeight:700, color:T.text }}>
-                Auto Create & Map
-                <span style={{ ...mono9, marginLeft:8, padding:'2px 8px', borderRadius:4,
-                  background: autoCreate ? T.purple+'18' : T.surface2,
-                  border:`1px solid ${autoCreate ? T.purple+'44' : T.border}`,
-                  color: autoCreate ? T.purple : T.muted, fontWeight:700 }}>
-                  {autoCreate ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <div style={{ ...mono9, color:T.dim, marginTop:1 }}>
-                After each scan, automatically create applications, components and link resources using tag suggestions
-              </div>
-            </div>
-          </div>
-          <Toggle value={autoCreate} onChange={setAutoCreate} color={T.purple}/>
-        </div>
+      {/* Save button */}
+      <button onClick={save} disabled={saving}
+        style={{ ...mono, fontSize:10, fontWeight:700, padding:'5px 14px', borderRadius:6,
+          cursor:'pointer', border:'none', transition:'all .2s',
+          background: enabled ? T.teal : T.surface2,
+          color: enabled ? 'white' : T.muted,
+          opacity: saving ? .6 : 1 }}>
+        {saving ? '…' : 'Save'}
+      </button>
 
-        {/* Auto-create settings — shown when enabled */}
-        <div style={{ padding:'12px 14px', borderRadius:10,
-          background: autoCreate ? T.purple+'08' : T.surface2,
-          border:`1px solid ${autoCreate ? T.purple+'33' : T.border}`,
-          opacity: autoCreate ? 1 : 0.5, transition:'all .2s' }}>
-
-          {/* Min score selector */}
-          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:10 }}>
-            <span style={{ ...mono9, color:T.muted, letterSpacing:'0.1em', minWidth:120 }}>
-              MIN CONFIDENCE
-            </span>
-            <div style={{ display:'flex', gap:6 }}>
-              {[
-                [50, 'Medium (50%)', T.amber],
-                [70, 'High (70%)',   T.green],
-                [85, 'Very High (85%)', '#22c55e'],
-              ].map(([score, label, color]) => {
-                const active = autoMinScore === score
-                return (
-                  <button key={score}
-                    onClick={() => autoCreate && setAutoMinScore(score)}
-                    disabled={!autoCreate}
-                    style={{ ...mono9, padding:'5px 12px', borderRadius:6, cursor: autoCreate ? 'pointer' : 'default',
-                      border:`1px solid ${active ? color+'66' : T.border}`,
-                      background: active ? color+'18' : T.surface,
-                      color: active ? color : T.muted, fontWeight: active ? 700 : 400 }}>
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
-            <input
-              type="range" min="50" max="95" step="5"
-              value={autoMinScore}
-              onChange={e => autoCreate && setAutoMinScore(parseInt(e.target.value))}
-              disabled={!autoCreate}
-              style={{ flex:1, accentColor:T.purple }}
-            />
-            <span style={{ ...mono, fontSize:14, fontWeight:700, color:T.purple, minWidth:40, textAlign:'right' }}>
-              {autoMinScore}%
-            </span>
-          </div>
-
-          {/* Warning about auto-create */}
-          <div style={{ display:'flex', gap:8, padding:'8px 10px', borderRadius:7,
-            background: T.amber+'0a', border:`1px solid ${T.amber}33` }}>
-            <span style={{ color:T.amber, flexShrink:0 }}>⚠</span>
-            <span style={{ ...mono9, color:T.amber, lineHeight:1.6 }}>
-              Auto Create will automatically create Applications and Components in AppCloud
-              based on resource tags. Only suggestions at or above {autoMinScore}% confidence
-              will be applied. Review the Analyse panel to preview what will be created before enabling.
-            </span>
-          </div>
-
-          {/* Last auto-create result */}
-          {schedule?.last_auto_create_total > 0 && (
-            <div style={{ marginTop:8, ...mono9, color:T.green }}>
-              ✓ Last run created/linked {schedule.last_auto_create_total} item(s)
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Status row ────────────────────────────────────────────────── */}
-      <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:14,
-        padding:'10px 14px', borderRadius:8, background:T.surface2, border:`1px solid ${T.border}` }}>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <div style={{ width:7, height:7, borderRadius:'50%', background:statusColor,
-            boxShadow:`0 0 6px ${statusColor}` }} />
-          <span style={{ ...mono9, color:statusColor, fontWeight:700 }}>
-            {schedule?.last_run_status?.toUpperCase() || 'NEVER RUN'}
-          </span>
-        </div>
+      {/* Status */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto', flexShrink:0 }}>
         {schedule?.last_run_at && (
           <span style={{ ...mono9, color:T.muted }}>
-            Last: {new Date(schedule.last_run_at).toLocaleString()} · {schedule.last_run_total||0} resources
+            Last: {new Date(schedule.last_run_at).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}
           </span>
         )}
-        {schedule?.last_auto_create_total > 0 && (
-          <span style={{ ...mono9, color:T.purple }}>✦ {schedule.last_auto_create_total} auto-created</span>
-        )}
-        {nextRun && (
-          <span style={{ ...mono9, color:T.teal, marginLeft:'auto' }}>⏰ Next at {nextRun}</span>
-        )}
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          <div style={{ width:6, height:6, borderRadius:'50%', background:statusColor,
+            boxShadow:`0 0 5px ${statusColor}` }} />
+          <span style={{ ...mono9, color:statusColor, fontWeight:700 }}>
+            {schedule?.last_run_status?.toUpperCase() || 'IDLE'}
+          </span>
+        </div>
+        {nextRun && <span style={{ ...mono9, color:T.teal }}>Next {nextRun}</span>}
       </div>
 
-      {/* Message */}
+      {/* Feedback message */}
       {msg && (
-        <div style={{ padding:'8px 12px', borderRadius:7, marginBottom:12,
+        <div style={{ width:'100%', padding:'5px 10px', borderRadius:5, marginTop:2,
           background: msg.ok?T.green+'0a':T.red+'0a',
-          border:`1px solid ${msg.ok?T.green+'44':T.red+'44'}` }}>
+          border:`1px solid ${msg.ok?T.green+'33':T.red+'33'}` }}>
           <span style={{ ...mono9, color: msg.ok?T.green:T.red }}>{msg.ok?'✓':'✗'} {msg.text}</span>
         </div>
       )}
-
-      {/* Action buttons */}
-      <div style={{ display:'flex', gap:8 }}>
-        <button onClick={save} disabled={saving}
-          style={{ ...mono, fontSize:12, fontWeight:700, padding:'9px 20px', borderRadius:8,
-            cursor:'pointer', border:'none', transition:'all .2s',
-            background: enabled || autoCreate ? T.teal : T.surface2,
-            color: enabled || autoCreate ? 'white' : T.muted,
-            opacity: saving ? .6 : 1 }}>
-          {saving ? 'Saving…' : 'Save Settings'}
-        </button>
-        <button onClick={runNow} disabled={running}
-          style={{ ...mono, fontSize:12, fontWeight:700, padding:'9px 20px', borderRadius:8,
-            cursor:'pointer', background:T.surface2, border:`1px solid ${T.border2}`,
-            color:T.text, opacity:running?.6:1,
-            display:'flex', alignItems:'center', gap:7 }}>
-          {running ? <><Spinner size={12} color={T.teal}/> Running…</> : '▶ Run Now'}
-        </button>
-      </div>
     </div>
   )
 }
@@ -1142,6 +901,9 @@ export default function DiscoveryPage() {
   const [error, setError] = useState('')
   const [linkResource, setLinkResource] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [scanning, setScanning] = useState(false)
+  const [scanResult, setScanResult] = useState(null)
+  const [suggestKey, setSuggestKey] = useState(0)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -1175,9 +937,26 @@ export default function DiscoveryPage() {
   useEffect(() => { loadData() }, [loadData])
 
   const refresh = () => setRefreshKey(k => k + 1)
-  const onScanComplete = () => refresh()
+  const onScanComplete = () => { refresh(); setSuggestKey(k => k + 1) }
   const onMappingApplied = () => refresh()
   const onResourcesChanged = () => refresh()
+
+  // Single "Run Discovery" — scans all configured accounts
+  const runAllDiscovery = async () => {
+    setScanning(true); setScanResult(null)
+    try {
+      const res = await fetch('/api/discovery/scan/all', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Scan failed')
+      setScanResult({ ok:true, ...data })
+      onScanComplete()
+      setTimeout(() => setScanResult(null), 6000)
+    } catch (e) {
+      setScanResult({ ok:false, error:e.message })
+    } finally {
+      setScanning(false)
+    }
+  }
 
   const handleDelete = async (id) => {
     try {
@@ -1194,14 +973,30 @@ export default function DiscoveryPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: `radial-gradient(ellipse at 10% 20%, #0a1628 0%, ${T.bg} 60%)`, padding: '28px 32px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+      {/* Header with Run Discovery button */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <div>
-          <h1 style={{ ...mono, fontSize: 20, fontWeight: 800, color: T.text, letterSpacing: '-0.02em', margin: '0 0 6px' }}>Discovery</h1>
-          <p style={{ ...mono, fontSize: 11, color: T.muted, letterSpacing: '0.05em' }}>Live cloud inventory, mapping suggestions and auto-scan scheduling</p>
+          <h1 style={{ ...mono, fontSize: 20, fontWeight: 800, color: T.text, letterSpacing: '-0.02em', margin: '0 0 4px' }}>Discovery</h1>
+          <p style={{ ...mono, fontSize: 11, color: T.muted, letterSpacing: '0.05em', margin:0 }}>Live cloud inventory and mapping suggestions</p>
         </div>
-        <button onClick={refresh} style={{ ...mono, fontSize: 11, color: T.text, background: T.surface2, border: `1px solid ${T.border2}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>
-          Refresh
-        </button>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          {scanResult && (
+            <span style={{ ...mono, fontSize:10, color: scanResult.ok ? T.green : T.red }}>
+              {scanResult.ok ? `✓ ${scanResult.total || 0} resources` : `✗ ${scanResult.error}`}
+            </span>
+          )}
+          <button onClick={runAllDiscovery} disabled={scanning || !accounts.length}
+            style={{ ...mono, fontSize:12, fontWeight:700, padding:'9px 20px', borderRadius:8,
+              cursor: accounts.length ? 'pointer' : 'not-allowed',
+              background:T.teal+'22', border:`1px solid ${T.teal}66`,
+              color:T.teal, opacity:scanning?.6:1,
+              display:'flex', alignItems:'center', gap:7 }}>
+            {scanning ? <><Spinner color={T.teal} size={13}/> Scanning…</> : '▶ Run Discovery'}
+          </button>
+          <button onClick={refresh} style={{ ...mono, fontSize: 11, color: T.muted, background: T.surface2, border: `1px solid ${T.border2}`, borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>
+            ↻
+          </button>
+        </div>
       </div>
 
       {error && <div style={{ ...mono, marginBottom: 14, color: T.red }}>Error: {error}</div>}
@@ -1209,9 +1004,13 @@ export default function DiscoveryPage() {
 
       <SummaryCards summary={summary} />
 
+      {/* Compact auto-discovery bar */}
+      <AutoDiscoveryBar onScanTriggered={onScanComplete} />
+
+      {/* Cloud account cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12, marginBottom: 18 }}>
         {accounts.length ? accounts.map(ac => (
-          <AccountCard key={ac.id} account={ac} onScanComplete={onScanComplete} />
+          <AccountCard key={ac.id} account={ac} />
         )) : <NoAccounts />}
       </div>
 
@@ -1222,9 +1021,7 @@ export default function DiscoveryPage() {
         onBulkDelete={onResourcesChanged}
       />
 
-      <SuggestionsPanel onMappingApplied={onMappingApplied} />
-
-      <SchedulerPanel />
+      <SuggestionsPanel key={suggestKey} onMappingApplied={onMappingApplied} />
 
       {linkResource && (
         <LinkModal
