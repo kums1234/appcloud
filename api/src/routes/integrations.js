@@ -1,4 +1,6 @@
 // routes/integrations.js — Terraform state file import + integration management
+import { buildLabelSetClause } from './discovery.schema.js'
+
 // ── Terraform resource type → AppCloud schema mapping ────────────────────────
 // Maps terraform resource types to { provider, resourceType } for Infra nodes,
 // or 'component' for things that become Component nodes.
@@ -202,10 +204,12 @@ export default async function integrationRoutes(fastify) {
 
     for (const res of resources) {
       try {
+        const now = Date.now()
         const records = await write(`
           MERGE (i:Infra {terraform_id: $terraformId})
           ON CREATE SET
             i.id            = randomUUID(),
+            i.firstseen     = $now,
             i.name          = $name,
             i.provider      = $provider,
             i.resource_type = $resourceType,
@@ -221,6 +225,7 @@ export default async function integrationRoutes(fastify) {
             i.resource_type = $resourceType,
             i.region        = $region,
             i.public        = $public,
+            i.lastupdated   = $now,
             i.updated_at    = datetime()
           RETURN i, i.id AS nodeId,
                  CASE WHEN i.imported_at = i.updated_at THEN 'created' ELSE 'updated' END AS action
@@ -233,6 +238,7 @@ export default async function integrationRoutes(fastify) {
           public:        res.public,
           terraformType: res.terraformType,
           terraformName: res.terraformName,
+          now,
         })
 
         if (records.length) {
@@ -240,6 +246,13 @@ export default async function integrationRoutes(fastify) {
           if (action === 'created') created++
           else updated++
           importedNames.push(res.name)
+
+          // Add typed labels (best-effort)
+          const nodeId = records[0].get('nodeId')
+          const labelClause = buildLabelSetClause(res.provider, res.resourceType)
+          if (nodeId && labelClause) {
+            await write(`MATCH (i:Infra {id: $nodeId}) ${labelClause}`, { nodeId }).catch(() => {})
+          }
         }
       } catch (err) {
         fastify.log.warn(`Failed to import ${res.terraformType}.${res.terraformName}: ${err.message}`)

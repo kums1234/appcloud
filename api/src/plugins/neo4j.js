@@ -61,4 +61,47 @@ export async function neo4jPlugin(fastify) {
 
   fastify.decorate('neo4j', { driver, query, write })
   fastify.addHook('onClose', async () => { await driver.close() })
+
+  // ── Ensure indexes on startup ──────────────────────────────────────────
+  // Creates indexes for core Infra properties and typed labels.
+  // CREATE INDEX IF NOT EXISTS is idempotent — safe to run every startup.
+  const indexes = [
+    // Core Infra indexes
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.cloud_id)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.provider)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.resource_type)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.lastupdated)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.firstseen)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.source)',
+    // Promoted field indexes
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.resource_group)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.server_farm_id)',
+    'CREATE INDEX IF NOT EXISTS FOR (i:Infra) ON (i.private_ip)',
+    // Typed label indexes (ontology categories)
+    'CREATE INDEX IF NOT EXISTS FOR (n:ComputeInstance) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:DatabaseInstance) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:ContainerCluster) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:WebService) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:ServerlessFunction) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:CacheInstance) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:ObjectStorage) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:NetworkDevice) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:MessageBroker) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:MonitoringService) ON (n.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (n:SecretsManager) ON (n.id)',
+    // Application & Component indexes
+    'CREATE INDEX IF NOT EXISTS FOR (a:Application) ON (a.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (a:Application) ON (a.name)',
+    'CREATE INDEX IF NOT EXISTS FOR (c:Component) ON (c.id)',
+    'CREATE INDEX IF NOT EXISTS FOR (c:Component) ON (c.name)',
+  ]
+
+  // Run index creation in parallel, best-effort (never block startup)
+  try {
+    await Promise.allSettled(indexes.map(idx => write(idx)))
+    fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes)`)
+  } catch (err) {
+    fastify.log.warn(`Neo4j index creation: ${err.message}`)
+  }
 }
