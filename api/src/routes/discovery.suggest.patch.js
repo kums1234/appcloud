@@ -1,3 +1,5 @@
+import { INFRA_ONLY_TYPES, PLATFORM_TYPES, hasExplicitAppTag } from './discovery.schema.js'
+
 export function bootstrapSuggestFallback(infraRecords, props) {
   const grouped = {}
 
@@ -9,6 +11,12 @@ export function bootstrapSuggestFallback(infraRecords, props) {
     const infra = props(ir.get('i'))
     const tags = parse(infra.tags)
     const name = (infra.name || '').toLowerCase()
+    const rtype = (infra.resource_type || '').toLowerCase()
+
+    // Infrastructure plumbing should never suggest creating its own
+    // application — skip so it remains unmapped and gets linked once
+    // a workload application exists.
+    if (INFRA_ONLY_TYPES.has(rtype) && !hasExplicitAppTag(tags)) continue
 
     const app = tags.app || tags.application || tags.project || name.split('-')[0] || 'default-app'
 

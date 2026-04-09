@@ -47,6 +47,8 @@
  * decide whether to auto-apply or surface them as suggestions.
  */
 
+import { getTypedRel } from './discovery.schema.js'
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function rgFromId(id = '') {
@@ -120,12 +122,25 @@ async function discoverFromResourceGraph({ cred, subId, write, query, log }) {
   async function link(fromNid, toNid, via, source = 'azure-resource-graph') {
     if (!fromNid || !toNid || fromNid === toNid) return
     try {
+      // Legacy CONNECTED_TO edge (backward compat)
       await write(`
         MATCH (a:Infra {id: $from}), (b:Infra {id: $to})
         MERGE (a)-[r:CONNECTED_TO {via: $via}]->(b)
         ON CREATE SET r.discovered_at = datetime(), r.source = $source
         ON MATCH  SET r.last_seen = datetime()
       `, { from: fromNid, to: toNid, via, source })
+
+      // Typed relationship (dual-write)
+      const typedRel = getTypedRel(via)
+      if (typedRel) {
+        await write(`
+          MATCH (a:Infra {id: $from}), (b:Infra {id: $to})
+          MERGE (a)-[r:${typedRel} {via: $via}]->(b)
+          ON CREATE SET r.discovered_at = datetime(), r.source = $source
+          ON MATCH  SET r.last_seen = datetime()
+        `, { from: fromNid, to: toNid, via, source }).catch(() => {})
+      }
+
       stats.relationships++
     } catch (err) {
       stats.errors.push(`link ${fromNid}→${toNid}: ${err.message}`)
@@ -306,12 +321,23 @@ async function discoverFromNetworkWatcher({ cred, subId, write, query, log }) {
         if (!toNid || toNid === fromNid) continue
         const via = (assoc.associationType || 'associated').toLowerCase()
         try {
+          // Legacy CONNECTED_TO
           await write(`
             MATCH (a:Infra {id: $from}), (b:Infra {id: $to})
             MERGE (a)-[r:CONNECTED_TO {via: $via}]->(b)
             ON CREATE SET r.discovered_at = datetime(), r.source = 'azure-network-watcher'
             ON MATCH  SET r.last_seen = datetime()
           `, { from: fromNid, to: toNid, via })
+          // Typed relationship (dual-write)
+          const typedRel = getTypedRel(via)
+          if (typedRel) {
+            await write(`
+              MATCH (a:Infra {id: $from}), (b:Infra {id: $to})
+              MERGE (a)-[r:${typedRel} {via: $via}]->(b)
+              ON CREATE SET r.discovered_at = datetime(), r.source = 'azure-network-watcher'
+              ON MATCH  SET r.last_seen = datetime()
+            `, { from: fromNid, to: toNid, via }).catch(() => {})
+          }
           stats.relationships++
         } catch (err) {
           stats.errors.push(`topology link: ${err.message}`)
@@ -373,6 +399,14 @@ async function discoverFromVMInsights({ cred, workspaceId, write, query, log }) 
     const toNid   = ipToNid[destIp]
     if (!fromNid || !toNid || fromNid === toNid) continue
     try {
+      const params = {
+        from:    fromNid,
+        to:      toNid,
+        count:   typeof connectionCount === 'object' ? connectionCount.toNumber?.() ?? 0 : connectionCount ?? 0,
+        ports:   JSON.stringify(ports || []),
+        process: processName || '',
+      }
+      // Legacy CONNECTED_TO
       await write(`
         MATCH (a:Infra {id: $from}), (b:Infra {id: $to})
         MERGE (a)-[r:CONNECTED_TO {via: 'observed-tcp'}]->(b)
@@ -381,13 +415,17 @@ async function discoverFromVMInsights({ cred, workspaceId, write, query, log }) 
             r.connection_count = $count,
             r.ports   = $ports,
             r.process = $process
-      `, {
-        from:    fromNid,
-        to:      toNid,
-        count:   typeof connectionCount === 'object' ? connectionCount.toNumber?.() ?? 0 : connectionCount ?? 0,
-        ports:   JSON.stringify(ports || []),
-        process: processName || '',
-      })
+      `, params)
+      // Typed relationship (dual-write)
+      await write(`
+        MATCH (a:Infra {id: $from}), (b:Infra {id: $to})
+        MERGE (a)-[r:OBSERVED_CONNECTION {via: 'observed-tcp'}]->(b)
+        ON CREATE SET r.discovered_at = datetime(), r.source = 'azure-vm-insights'
+        SET r.last_seen = datetime(),
+            r.connection_count = $count,
+            r.ports   = $ports,
+            r.process = $process
+      `, params).catch(() => {})
       stats.matched++
     } catch (err) {
       stats.errors.push(`vm-insights link: ${err.message}`)
