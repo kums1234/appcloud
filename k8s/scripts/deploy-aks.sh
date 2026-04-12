@@ -22,6 +22,8 @@ K8S_DIR="$ROOT_DIR/k8s"
 SECRETS_DIR="$ROOT_DIR/secrets"
 ACR_SERVER="$ACR_NAME.azurecr.io"
 
+AKS_NODE_VM_SIZE="${AKS_NODE_VM_SIZE:-standard_b2s_v2}"
+
 echo "══════════════════════════════════════════════════"
 echo "  AppCloud → AKS Deploy"
 echo "  Cluster: $AKS_CLUSTER  ACR: $ACR_SERVER"
@@ -31,7 +33,20 @@ for cmd in az kubectl docker; do
   command -v "$cmd" &>/dev/null || { echo "ERROR: $cmd not found"; exit 1; }
 done
 
+# ── Check resource group ───────────────────────────────────────────────────────
+echo "► Checking resource group..."
+if ! az group show --name "$RESOURCE_GROUP" --query "name" -o tsv >/dev/null 2>&1; then
+  echo "► Creating resource group '$RESOURCE_GROUP'..."
+  az group create --name "$RESOURCE_GROUP" --location "East US"
+fi
+
 # ── ACR login ──────────────────────────────────────────────────────────────────
+echo "► Checking ACR..."
+if ! az acr show --name "$ACR_NAME" --query "name" -o tsv >/dev/null 2>&1; then
+  echo "► Creating ACR '$ACR_NAME'..."
+  az acr create --resource-group "$RESOURCE_GROUP" --name "$ACR_NAME" --sku Basic
+fi
+
 echo "► Logging into ACR..."
 az acr login --name "$ACR_NAME"
 
@@ -39,7 +54,7 @@ az acr login --name "$ACR_NAME"
 if [[ "$SKIP_BUILD" == "false" ]]; then
   for svc in api ui; do
     echo "► Building and pushing appcloud-$svc..."
-    docker build -t "$ACR_SERVER/appcloud-$svc:latest" "$ROOT_DIR/$svc"
+    docker build --platform linux/amd64 -t "$ACR_SERVER/appcloud-$svc:latest" "$ROOT_DIR/$svc"
     docker push "$ACR_SERVER/appcloud-$svc:latest"
   done
 fi
@@ -49,6 +64,12 @@ sed -i.bak "s|myregistry.azurecr.io|$ACR_SERVER|g" \
   "$K8S_DIR/overlays/aks/kustomization.yaml"
 
 # ── Get AKS credentials ────────────────────────────────────────────────────────
+echo "► Checking AKS cluster..."
+if ! az aks show --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER" --query "name" -o tsv >/dev/null 2>&1; then
+  echo "► Creating AKS cluster '$AKS_CLUSTER' with node size '$AKS_NODE_VM_SIZE'..."
+  az aks create --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER" --node-count 2 --node-vm-size "$AKS_NODE_VM_SIZE" --enable-addons monitoring --generate-ssh-keys
+fi
+
 echo "► Getting AKS credentials..."
 az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER" --overwrite-existing
 

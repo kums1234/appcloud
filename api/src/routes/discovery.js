@@ -723,20 +723,22 @@ async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch })
     }
   } catch (e) { handleScanError("AzureSQL", e) }
 
-  // ── App Services ──────────────────────────────────────────────────────
+  // ── App Services & Function Apps ───────────────────────────────────────
   try {
     const web = new WebSiteManagementClient(cred, subId)
     for await (const app of web.webApps.list()) {
+      const isFunctionApp = (app.kind || '').toLowerCase().includes('functionapp')
       await upsert({
         cloudId:      app.id,
         name:         app.name,
         provider:     'azure',
-        resourceType: 'app_service',
+        resourceType: isFunctionApp ? 'function_app' : 'app_service',
         region:       app.location,
         status:       app.state || 'unknown',
-        public:       true,  // App Services are typically internet-facing
+        public:       !isFunctionApp,  // App Services are internet-facing; Function Apps vary
         tags:         app.tags || {},
         raw: {
+          type:              'microsoft.web/sites',
           kind:              app.kind,
           defaultHostName:   app.defaultHostName,
           httpsOnly:         app.httpsOnly,
@@ -748,7 +750,8 @@ async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch })
           vnetSubnetId:      app.virtualNetworkSubnetId || '',
         },
       })
-      stats.appService++
+      if (isFunctionApp) stats.functionApp = (stats.functionApp || 0) + 1
+      else stats.appService++
     }
   } catch (e) { handleScanError("AzureAppService", e) }
 
@@ -824,24 +827,30 @@ async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch })
 
     // Resource type → AppCloud resourceType mapping
     const ARM_TYPE_MAP = {
-      'microsoft.insights/components':              'app_insights',
-      'microsoft.storage/storageaccounts':          'storage_account',
-      'microsoft.servicebus/namespaces':            'service_bus',
-      'microsoft.keyvault/vaults':                  'key_vault',
-      'microsoft.web/sites':                        'app_service',
-      'microsoft.web/serverfarms':                  'app_service_plan',
-      'microsoft.containerservice/managedclusters': 'aks_cluster',
-      'microsoft.sql/servers':                      'sql_server',
-      'microsoft.dbforpostgresql/servers':          'postgresql',
-      'microsoft.dbformysql/servers':               'mysql',
-      'microsoft.cache/redis':                      'redis',
-      'microsoft.network/virtualnetworks':          'vnet',
-      'microsoft.compute/virtualmachines':          'vm',
-      'microsoft.logic/workflows':                  'logic_app',
-      'microsoft.eventgrid/topics':                 'event_grid',
-      'microsoft.eventhub/namespaces':              'event_hub',
-      'microsoft.cdn/profiles':                     'cdn',
-      'microsoft.apimanagement/service':            'api_management',
+      'microsoft.insights/components':                'app_insights',
+      'microsoft.storage/storageaccounts':            'storage_account',
+      'microsoft.servicebus/namespaces':              'service_bus',
+      'microsoft.keyvault/vaults':                    'key_vault',
+      'microsoft.web/sites':                          'app_service',
+      'microsoft.web/serverfarms':                    'app_service_plan',
+      'microsoft.containerservice/managedclusters':   'aks_cluster',
+      'microsoft.sql/servers':                        'sql_server',
+      'microsoft.dbforpostgresql/servers':            'postgresql',
+      'microsoft.dbformysql/servers':                 'mysql',
+      'microsoft.cache/redis':                        'redis',
+      'microsoft.network/virtualnetworks':            'vnet',
+      'microsoft.compute/virtualmachines':            'vm',
+      'microsoft.logic/workflows':                    'logic_app',
+      'microsoft.eventgrid/topics':                   'event_grid',
+      'microsoft.eventhub/namespaces':                'event_hub',
+      'microsoft.cdn/profiles':                       'cdn',
+      'microsoft.apimanagement/service':              'api_management',
+      'microsoft.documentdb/databaseaccounts':        'cosmos_db',
+      'microsoft.containerregistry/registries':       'container_registry',
+      'microsoft.network/networksecuritygroups':      'nsg',
+      'microsoft.network/privatednszones':            'private_dns',
+      'microsoft.operationalinsights/workspaces':     'log_analytics',
+      'microsoft.web/staticsites':                    'static_web_app',
     }
 
     for await (const resource of genericClient.resources.list()) {
@@ -1750,6 +1759,28 @@ export default async function discoveryRoutes(fastify) {
           const infra = match.infra || {}
           const score = parseInt(match.score || 0)
           const confidence = score >= 70 ? 'high' : score >= 45 ? 'medium' : 'low'
+
+          // Extract component name from tags (normalised) — prefer tag over infra name
+          const matchTags = match.infra?.tags || {}
+          let compFromTag = ''
+          for (const [k, v] of Object.entries(matchTags)) {
+            const nk = k.toLowerCase().replace(/^appcloud[:-]/, '').replace(/^app[:-]/, '').replace(/-/g, '_').trim()
+            if ((nk === 'component' || nk === 'service' || nk === 'component_name') && v) {
+              compFromTag = String(v); break
+            }
+          }
+          // Extract owner, env, tier from tags
+          let tagOwner = '', tagEnv = '', tagTier = ''
+          for (const [k, v] of Object.entries(matchTags)) {
+            const nk = k.toLowerCase().replace(/^appcloud[:-]/, '').replace(/^app[:-]/, '').replace(/-/g, '_').trim()
+            if ((nk === 'owner' || nk === 'team') && v && !tagOwner) tagOwner = String(v)
+            if ((nk === 'env' || nk === 'environment') && v && !tagEnv) tagEnv = String(v)
+            if ((nk === 'tier' || nk === 'criticality') && v && !tagTier) tagTier = String(v)
+          }
+
+          const compName = compFromTag || infra.name || 'component'
+          const appName = appSuggestion.application?.name || infra.name || 'default-app'
+
           suggestions.push({
             infra,
             suggestions: [{
@@ -1757,14 +1788,17 @@ export default async function discoveryRoutes(fastify) {
               componentId: null,
               componentName: null,
               applicationId: null,
-              applicationName: appSuggestion.application?.name || 'unknown',
+              applicationName: appName,
               score,
               confidence,
               reasons: match.reasons || [],
               action: 'create_application',
-              actionLabel: `Create application "${appSuggestion.application?.name || 'app'}" with component "${infra.name || 'component'}"`,
-              newAppName: appSuggestion.application?.name || infra.name || 'default-app',
-              newCompName: infra.name || 'component',
+              actionLabel: `Create application "${appName}" with component "${compName}"`,
+              newAppName: appName,
+              newCompName: compName,
+              suggestedTier:  tagTier ? parseInt(tagTier) || 1 : 1,
+              suggestedEnv:   tagEnv  || 'production',
+              suggestedOwner: tagOwner || '',
             }],
             topScore: score,
             topConfidence: confidence,
@@ -1903,23 +1937,28 @@ export default async function discoveryRoutes(fastify) {
       const isPlatformUntagged = PLATFORM_TYPES.has(infraType) && !tagApp
 
       const TYPE_MAP = {
-        ec2_instance:    ['api','worker','app','server'],
-        function:        ['api','worker','function','lambda'],
-        rds_instance:    ['db','database','datastore'],
-        app_service:     ['api','web','ui','frontend'],
-        vm:              ['api','worker','app','server'],
-        compute_instance:['api','worker','app','server'],
-        cloud_run:       ['api','worker','service'],
-        cloud_function:  ['api','worker','function'],
-        app_insights:    ['monitoring','insights','observability','telemetry'],
-        storage_account: ['storage','assets','datastore','blob'],
-        service_bus:     ['queue','eventbus','messaging','bus'],
-        key_vault:       ['secrets','security','vault'],
-        s3_bucket:       ['storage','assets','datastore'],
-        dynamodb:        ['db','database','datastore'],
-        eks_cluster:     ['kubernetes','k8s','cluster'],
-        aks_cluster:     ['kubernetes','k8s','cluster'],
-        gke_cluster:     ['kubernetes','k8s','cluster'],
+        ec2_instance:       ['api','worker','app','server'],
+        function:           ['api','worker','function','lambda'],
+        function_app:       ['api','worker','function','lambda'],
+        rds_instance:       ['db','database','datastore'],
+        app_service:        ['api','web','ui','frontend'],
+        vm:                 ['api','worker','app','server'],
+        compute_instance:   ['api','worker','app','server'],
+        cloud_run:          ['api','worker','service'],
+        cloud_function:     ['api','worker','function'],
+        app_insights:       ['monitoring','insights','observability','telemetry'],
+        storage_account:    ['storage','assets','datastore','blob'],
+        service_bus:        ['queue','eventbus','messaging','bus'],
+        key_vault:          ['secrets','security','vault'],
+        s3_bucket:          ['storage','assets','datastore'],
+        dynamodb:           ['db','database','datastore'],
+        eks_cluster:        ['kubernetes','k8s','cluster'],
+        aks_cluster:        ['kubernetes','k8s','cluster'],
+        gke_cluster:        ['kubernetes','k8s','cluster'],
+        cosmos_db:          ['db','database','datastore'],
+        container_registry: ['registry','container','docker'],
+        log_analytics:      ['monitoring','observability','logging'],
+        static_web_app:     ['web','frontend','static'],
       }
       const likelyCompTypes = TYPE_MAP[infraType] || []
 
@@ -2386,6 +2425,100 @@ export default async function discoveryRoutes(fastify) {
         results.errors.push(`${action.infraId}: ${err.message}`)
       }
     }
+
+    // ── Phase 2: Tag-based auto-link for remaining unmapped resources ────────
+    // After Phase 1 created applications and components, sweep all still-unmapped
+    // infra that has appcloud-app / appcloud-component tags and link them to the
+    // matching Application → Component. Creates components if they don't exist.
+    try {
+      const stillUnmapped = await query(`
+        MATCH (i:Infra)
+        WHERE i.source = 'discovery'
+          AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+        RETURN i
+      `)
+
+      if (stillUnmapped.length) {
+        // Load all apps + components for matching
+        const allApps = await query(`
+          MATCH (a:Application)
+          OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
+          RETURN a.id AS appId, a.name AS appName,
+                 collect(DISTINCT { id: c.id, name: c.name }) AS components
+        `)
+        const appLookup = {}  // lowercase name → { appId, appName, components: [{ id, name }] }
+        for (const r of allApps) {
+          const name = (r.get('appName') || '').toLowerCase()
+          appLookup[name] = {
+            appId:      r.get('appId'),
+            appName:    r.get('appName'),
+            components: (r.get('components') || []).filter(c => c.id),
+          }
+        }
+
+        results.phase2Linked = 0
+        results.phase2ComponentsCreated = 0
+
+        for (const ir of stillUnmapped) {
+          const i = ir.get('i').properties
+          let tags = {}
+          try { tags = typeof i.tags === 'string' ? JSON.parse(i.tags) : i.tags || {} } catch {}
+
+          // Normalize tags
+          const nt = {}
+          for (const [k, v] of Object.entries(tags)) {
+            const nk = k.toLowerCase().replace(/^appcloud[:-]/, '').replace(/^app[:-]/, '').replace(/-/g, '_').trim()
+            if (!nt[nk]) nt[nk] = String(v || '').trim()
+          }
+
+          const tagApp  = nt.app || nt.application || nt.app_name || ''
+          const tagComp = nt.component || nt.service || nt.component_name || ''
+          if (!tagApp) continue
+
+          const appEntry = appLookup[tagApp.toLowerCase()]
+          if (!appEntry) continue
+
+          const { appId, appName } = appEntry
+          const existingComp = tagComp
+            ? appEntry.components.find(c => c.name.toLowerCase() === tagComp.toLowerCase())
+            : null
+
+          try {
+            if (existingComp) {
+              // Component exists — just link
+              await write(`
+                MATCH (c:Component {id: $compId}), (i:Infra {id: $infraId})
+                MERGE (c)-[rel:DEPLOYED_ON]->(i)
+                ON CREATE SET rel.source = 'auto-mapped-phase2', rel.mappedAt = datetime()
+              `, { compId: existingComp.id, infraId: i.id })
+              results.phase2Linked++
+            } else if (tagComp) {
+              // Component doesn't exist — create under app + link
+              const r = await write(`
+                MATCH (a:Application {id: $appId}), (i:Infra {id: $infraId})
+                MERGE (a)-[:CONTAINS]->(c:Component {name: $compName})
+                ON CREATE SET c.id = randomUUID(), c.type = 'service', c.createdAt = datetime()
+                MERGE (c)-[rel:DEPLOYED_ON]->(i)
+                ON CREATE SET rel.source = 'auto-mapped-phase2', rel.mappedAt = datetime()
+                RETURN c.id AS compId
+              `, { appId, infraId: i.id, compName: tagComp })
+              if (r.length) {
+                results.phase2ComponentsCreated++
+                results.phase2Linked++
+                // Update local lookup so subsequent resources can find this component
+                const newCompId = r[0].get('compId')
+                appEntry.components.push({ id: newCompId, name: tagComp })
+              }
+            }
+          } catch (err) {
+            results.errors.push(`phase2 ${i.id}: ${err.message}`)
+          }
+        }
+      }
+    } catch (err) {
+      results.errors.push(`phase2: ${err.message}`)
+    }
+
     return results
   })
 

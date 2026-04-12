@@ -48,6 +48,7 @@ build/Release
 .idea/
 .vscode/
 .DS_Store
+**/.DS_Store
 Thumbs.db
 
 # PostgreSQL specific files and directories

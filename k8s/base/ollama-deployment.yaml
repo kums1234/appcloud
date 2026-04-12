@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: appcloud
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: ollama
+          image: ollama/ollama
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 11434
+          env:
+            - name: OLLAMA_MODELS
+              value: /models
+            - name: OLLAMA_HOST
+              value: "0.0.0.0"
+            - name: OLLAMA_ORIGINS
+              value: "*" 
+          # postStart runs alongside the container entrypoint (ollama serve). Do not run
+          # `ollama serve` here — it blocks and breaks the hook. Only wait + pull.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do
+                      ollama list >/dev/null 2>&1 && break
+                      sleep 5
+                    done
+                    ollama list | grep -q "llama3" || ollama pull llama3
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /models
+          # Until startup succeeds, readiness/liveness are deferred — avoids removing the
+          # Service endpoint while `ollama pull` runs (can exceed 2–10+ minutes).
+          startupProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            initialDelaySeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            # CPU-only inference — adequate for async AI enrichment tasks
+            requests:
+              memory: "4Gi"
+              cpu: "2000m"
+            limits:
+              memory: "5Gi"
+              cpu: "2000m"
+          # ── GPU (optional) ─────────────────────────────────────────────────
+          # Uncomment if your node has an NVIDIA GPU and the device plugin installed:
+          # resources:
+          #   limits:
+          #     nvidia.com/gpu: "1"
+      volumes:
+        - name: ollama-models
+          persistentVolumeClaim:
+            claimName: ollama-models
+      # ── GPU node scheduling (optional) ─────────────────────────────────────
+      # nodeSelector:
+      #   accelerator: nvidia-tesla-t4
+      # tolerations:
+      #   - key: nvidia.com/gpu
+      #     operator: Exists
+      #     effect: NoSchedule

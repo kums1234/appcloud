@@ -30,9 +30,12 @@ const RESOURCE_ICONS = {
   ec2_instance:'⬡',    rds_instance:'◎',     function:'λ',         eks_cluster:'⎔',
   ecs_cluster:'⬡',     load_balancer:'⇌',    elasticache:'⚡',      s3_bucket:'◫',
   vm:'⬡',              aks_cluster:'⎔',       sql_server:'◎',       app_service:'◈',
-  redis:'⚡',           vnet:'⊕',              compute_instance:'⬡', gke_cluster:'⎔',
-  cloud_sql:'◎',       cloud_run:'◈',         app_insights:'◉',     storage_account:'◫',
-  service_bus:'⇌',     key_vault:'🔐',        dynamodb:'◎',         cloud_function:'λ',
+  function_app:'λ',    redis:'⚡',             vnet:'⊕',              compute_instance:'⬡',
+  gke_cluster:'⎔',    cloud_sql:'◎',         cloud_run:'◈',         app_insights:'◉',
+  storage_account:'◫', service_bus:'⇌',      key_vault:'🔐',        dynamodb:'◎',
+  cloud_function:'λ',  cosmos_db:'◎',         event_hub:'⇌',        logic_app:'λ',
+  container_app:'⬡',   api_management:'⇌',   app_service_plan:'⎔', nsg:'⊘',
+  container_registry:'⬡', private_dns:'⊕',   log_analytics:'◉',    static_web_app:'◈',
 }
 
 function Spinner({ color = T.teal, size = 20 }) {

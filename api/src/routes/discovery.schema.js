@@ -45,6 +45,11 @@ export const RESOURCE_TYPE_LABELS = {
   'azure:cosmos_db':           ['AzureCosmosDB',      'DatabaseInstance'],
   'azure:postgres_server':     ['AzurePostgres',      'DatabaseInstance'],
   'azure:mysql_server':        ['AzureMySQL',         'DatabaseInstance'],
+  'azure:container_registry':  ['AzureACR',           'ContainerRegistry'],
+  'azure:nsg':                 ['AzureNSG',           'NetworkDevice'],
+  'azure:private_dns':         ['AzurePrivateDNS',    'DNSService'],
+  'azure:log_analytics':       ['AzureLogAnalytics',  'MonitoringService'],
+  'azure:static_web_app':      ['AzureStaticWebApp',  'WebService'],
   // Arc resources
   'azure:arc_server':          ['AzureArcServer',     'ComputeInstance'],
   'azure:arc_kubernetes':      ['AzureArcK8s',        'ContainerCluster'],
@@ -202,7 +207,7 @@ export function buildLabelSetClause(provider, resourceType, alias = 'i') {
  */
 export const INFRA_ONLY_TYPES = new Set([
   // Azure network plumbing
-  'vnet', 'app_service_plan',
+  'vnet', 'app_service_plan', 'nsg', 'private_dns',
   // AWS network plumbing
   'vpc', 'subnet', 'security_group',
   // Generic (may arrive via Terraform import)

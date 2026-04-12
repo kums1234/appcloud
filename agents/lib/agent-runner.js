@@ -217,8 +217,22 @@ export async function runAgent({ name, systemPrompt, tools, toolHandler, userMes
     try {
       response = await callModel(systemPrompt, tools, messages);
     } catch (err) {
-      log.error(`Model call failed: ${err.message}`);
-      return `Agent ${name} failed: ${err.message}`;
+      // Retry on rate limit (429) — parse wait time from error, back off, and retry
+      if (err.message.includes('429') || err.message.toLowerCase().includes('rate limit')) {
+        const waitMatch = err.message.match(/wait\s+(\d+)\s*seconds?/i);
+        const waitSec = waitMatch ? parseInt(waitMatch[1]) + 3 : 30;  // +3s buffer
+        log.info(`Rate limited — waiting ${waitSec}s before retry...`);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        try {
+          response = await callModel(systemPrompt, tools, messages);
+        } catch (retryErr) {
+          log.error(`Retry failed: ${retryErr.message}`);
+          return `Agent ${name} failed after retry: ${retryErr.message}`;
+        }
+      } else {
+        log.error(`Model call failed: ${err.message}`);
+        return `Agent ${name} failed: ${err.message}`;
+      }
     }
 
     if (response.text) {

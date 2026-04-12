@@ -8,21 +8,39 @@ export async function bootstrapDiscovery(fastify) {
   }
 
   /**
+   * Normalize cloud-provider tag keys so that namespaced tags like
+   * `appcloud:app`, `appcloud-app`, `app:component` all resolve to
+   * their bare key (`app`, `component`, `env`, etc.).
+   */
+  function normalizeTags(tags) {
+    if (!tags || typeof tags !== 'object') return {}
+    const out = {}
+    for (const [k, v] of Object.entries(tags)) {
+      const norm = k.toLowerCase()
+        .replace(/^appcloud[:-]/, '')
+        .replace(/^app[:-]/, '')
+        .replace(/-/g, '_')
+        .trim()
+      if (!out[norm]) out[norm] = v
+    }
+    return out
+  }
+
+  /**
    * Resolve the application name for an infra node.
    *
    * Priority:
    *   1. Explicit tags  (app / application / workload / project)
    *   2. Azure Resource Group — stored in raw.resourceGroup at scan time
-   *      for every Azure resource type (VM, AKS, SQL, App Service, Redis,
-   *      VNet, and all generic ARM resources)
    *   3. First hyphen-segment of the resource name — last resort for AWS/GCP
    */
   function resolveAppName(tags = {}, name = '', raw = {}) {
+    const nt = normalizeTags(tags)
     return (
-      tags.app          ||
-      tags.application  ||
-      tags.workload     ||
-      tags.project      ||
+      nt.app          ||
+      nt.application  ||
+      nt.workload     ||
+      nt.project      ||
       (raw.resourceGroup ? raw.resourceGroup.toLowerCase() : null) ||
       name.split('-')[0] ||
       'default-app'
@@ -34,27 +52,65 @@ export async function bootstrapDiscovery(fastify) {
    *
    * Priority:
    *   1. Explicit tags  (component / role / service / tier)
-   *   2. Full Azure resource type string
-   *   3. AWS / GCP resource type keywords
-   *   4. Resource name keywords
+   *   2. Short AppCloud resource type (vm, app_service, etc.)
+   *   3. Full Azure ARM resource type string
+   *   4. AWS / GCP resource type keywords
+   *   5. Resource name keywords
    */
-  function inferComponent(type = '', name = '', tags = {}) {
-    if (tags.component) return tags.component.toLowerCase()
-    if (tags.role)      return tags.role.toLowerCase()
-    if (tags.service)   return tags.service.toLowerCase()
-    if (tags.tier)      return tags.tier.toLowerCase()
+  function inferComponent(type = '', name = '', tags = {}, raw = {}) {
+    const nt = normalizeTags(tags)
+    if (nt.component) return nt.component.toLowerCase()
+    if (nt.role)      return nt.role.toLowerCase()
+    if (nt.service)   return nt.service.toLowerCase()
 
     const t = type.toLowerCase()
     const n = name.toLowerCase()
+    const kind = (raw.kind || '').toLowerCase()
 
-    // Azure
+    // Short AppCloud resource types (stored in i.resource_type by discovery)
+    if (t === 'sql_server' || t === 'sql_database'
+        || t === 'postgresql' || t === 'mysql')                      return 'database'
+    if (t === 'cosmos_db')                                           return 'database'
+    if (t === 'redis')                                               return 'cache'
+    if (t === 'function_app')                                        return 'function'
+    if (t === 'logic_app')                                           return 'function'
+    if (t === 'app_service' && (kind.includes('functionapp') || n.includes('func')))
+                                                                     return 'function'
+    if (t === 'app_service')                                         return n.includes('api') ? 'api' : 'frontend'
+    if (t === 'api_management')                                      return 'api-gateway'
+    if (t === 'aks_cluster')                                         return 'platform'
+    if (t === 'container_app')                                       return 'service'
+    if (t === 'application_gateway' || t === 'load_balancer'
+        || t === 'front_door' || t === 'cdn')                        return 'gateway'
+    if (t === 'vnet')                                                return 'network'
+    if (t === 'service_bus' || t === 'event_hub' || t === 'event_grid') return 'queue'
+    if (t === 'storage_account')                                     return 'storage'
+    if (t === 'app_insights')                                        return 'observability'
+    if (t === 'key_vault')                                           return 'secrets'
+    if (t === 'vm') {
+      if (n.includes('api'))                                         return 'api'
+      if (n.includes('worker'))                                      return 'worker'
+      if (n.includes('web'))                                         return 'frontend'
+      if (n.includes('db') || n.includes('sql') || n.includes('mongo')) return 'database'
+      if (n.includes('cache') || n.includes('redis'))                return 'cache'
+      return 'service'
+    }
+    if (t === 'app_service_plan')                                    return 'platform'
+    if (t === 'container_registry')                                  return 'registry'
+    if (t === 'nsg')                                                 return 'network'
+    if (t === 'private_dns')                                         return 'network'
+    if (t === 'log_analytics')                                       return 'observability'
+    if (t === 'static_web_app')                                      return 'frontend'
+
+    // Full Azure ARM type strings (for raw.type fallback)
     if (t === 'microsoft.sql/servers')                               return 'database'
     if (t === 'microsoft.sql/servers/databases')                     return 'database'
     if (t === 'microsoft.dbforpostgresql/servers')                   return 'database'
     if (t === 'microsoft.dbformysql/servers')                        return 'database'
     if (t === 'microsoft.documentdb/databaseaccounts')               return 'database'
     if (t === 'microsoft.cache/redis')                               return 'cache'
-    if (t === 'microsoft.web/sites' && n.includes('func'))           return 'function'
+    if (t === 'microsoft.web/sites' && (kind.includes('functionapp') || n.includes('func')))
+                                                                     return 'function'
     if (t === 'microsoft.logic/workflows')                           return 'function'
     if (t === 'microsoft.web/sites')                                 return n.includes('api') ? 'api' : 'frontend'
     if (t === 'microsoft.apimanagement/service')                     return 'api-gateway'
@@ -129,7 +185,7 @@ export async function bootstrapDiscovery(fastify) {
     }
 
     const appName       = resolveAppName(tags, name, raw)
-    const componentName = inferComponent(i.resource_type, name, tags)
+    const componentName = inferComponent(i.resource_type, name, tags, raw)
 
     if (!groups[appName]) groups[appName] = []
     groups[appName].push({ infra: i, componentName })
@@ -141,11 +197,18 @@ export async function bootstrapDiscovery(fastify) {
   const skipped         = []
 
   for (const [appName, items] of Object.entries(groups)) {
+    // Extract tier, owner, and environment from the first tagged resource
+    const firstTags = normalizeTags(parse(items[0]?.infra?.tags))
+    const appTier   = parseInt(firstTags.tier) || 3
+    const appOwner  = firstTags.owner || null
+    const appEnv    = firstTags.env || firstTags.environment || null
+
     const appRes = await write(`
       MERGE (a:Application {name: $appName})
-      ON CREATE SET a.id = randomUUID(), a.tier = 3
+      ON CREATE SET a.id = randomUUID(), a.tier = toInteger($appTier),
+                    a.owner = $appOwner, a.environment = $appEnv
       RETURN a, (a.createdAt IS NULL) AS isNew
-    `, { appName })
+    `, { appName, appTier, appOwner, appEnv })
 
     const appNode  = appRes[0].get('a').properties
     const appId    = appNode.id
