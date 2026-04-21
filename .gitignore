@@ -86,3 +86,5 @@ secrets/
 /coverage/
 # Local env overrides — root .gitignore covers .env* but be explicit
 .env*.local
+
+.claude/
