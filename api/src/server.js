@@ -14,6 +14,9 @@ import userRoutes from './routes/users.js'
 import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
 import cloudAccountRoutes from './routes/integrations-cloud.js'
+import integrationManagementRoutes, { connectorsRegistryRoutes } from './routes/integrations.management.js'
+import { connectorsPlugin } from './plugins/connectors.js'
+import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
 import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
@@ -45,6 +48,15 @@ await postgresPlugin(fastify)
 // Auth plugin — must come after DB plugins (uses User nodes) and before routes
 await authPlugin(fastify)
 
+// Connector framework — loads registry, applies integrations-table evolution
+// DDL, and registers push-style receivers (e.g. OTel ingest). Must come after
+// pg + neo4j plugins and before routes that reference fastify.connectors.
+await connectorsPlugin(fastify)
+
+// OTel aggregator — periodic worker that drains otel_spans_raw into Neo4j.
+// Tick interval via OTEL_AGG_INTERVAL_MS (default 60_000).
+await otelAggregatorPlugin(fastify)
+
 // Scheduler — starts after server ready, requires pg to be initialised
 await schedulerPlugin(fastify)
 
@@ -60,8 +72,13 @@ await fastify.register(infraRoutes,        { prefix: '/infra' })
 await fastify.register(changeRoutes,       { prefix: '/changes' })
 await fastify.register(userRoutes,         { prefix: '/users' })
 await fastify.register(graphRoutes,        { prefix: '/graph' })
-await fastify.register(integrationRoutes,   { prefix: '/integrations' })
-await fastify.register(cloudAccountRoutes,  { prefix: '/integrations' })
+await fastify.register(integrationRoutes,        { prefix: '/integrations' })
+await fastify.register(cloudAccountRoutes,        { prefix: '/integrations' })
+// Generic integrations CRUD — registered after the above so static paths
+// (/terraform/*, /cloud/*) keep their priority over :id. Also exposes
+// /connectors for the connector registry listing.
+await fastify.register(integrationManagementRoutes, { prefix: '/integrations' })
+await fastify.register(connectorsRegistryRoutes,    { prefix: '/connectors' })
 await fastify.register(governanceRoutes,    { prefix: '/governance' })
 await fastify.register(workflowRoutes,      { prefix: '/workflows' })
 await fastify.register(discoveryRoutes,     { prefix: '/discovery' })

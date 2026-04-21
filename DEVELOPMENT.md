@@ -203,6 +203,134 @@ npx jest __tests__/specific.test.js
 sudo chown -R $USER:$USER api/
 ```
 
+## Connector framework
+
+The API's third-party integrations (IaC state sources, cloud accounts, APM
+vendors, OpenTelemetry ingest) all plug in as **connectors** registered at
+boot. A connector is a folder under `api/src/connectors/<id>/` that exports a
+default `ConnectorSpec` object.
+
+```
+api/src/
+  connectors/
+    iac-state-backend/      # pull — Terraform/OpenTofu state from S3/Azure/GCS/Consul
+      index.js              # ConnectorSpec
+      backends/             # per-backend list/fetch/health
+    terraform-cloud/        # pull — TFC / Terraform Enterprise
+      api.js                # REST client
+      index.js
+    otel-ingest/            # push — OTLP/HTTP receiver
+      index.js
+      parse.js              # pure helpers (unit-testable)
+      routes.js             # Fastify route that stages spans
+  plugins/
+    connectors.js           # loads the registry; applies runtime DDL
+    otel-aggregator.js      # periodic worker: otel_spans_raw → Neo4j graph
+  utils/
+    terraform-state-parser.js
+    iac-ingest.js           # shared MERGE path for all IaC writes
+    encrypt.js              # AES-256-GCM — extend SECRET_FIELDS for new auth
+  routes/
+    integrations.management.js   # generic CRUD: /integrations, /connectors
+    integrations.js              # legacy TF upload (now uses shared parser)
+```
+
+### Spec shape
+
+```js
+{
+  id:          'my-connector',          // must match the directory name
+  category:    'iac'|'apm'|'cloud'|'telemetry-ingest'|'upload',
+  displayName: 'Human-readable',
+  authSchema:  { type:'object', required:[...], properties:{...} },
+
+  // Credential probe (optional but recommended).
+  healthCheck: async (cfg, ctx) => ({ ok, detail }),
+
+  // Pull-style (scheduled):
+  fetch:     async function* (cfg, ctx) { yield rawBatch },
+  normalize: (raw, cfg)       => normalizedShape,
+  ingest:    async (norm, ctx) => ({ resourcesCreated, ... }),
+
+  // Push-style (receiver):
+  receiver:  { register: async (fastify) => { fastify.post(...) } },
+
+  // Lifecycle hooks (optional):
+  beforeUpsert: async (cfg)        => cfg,        // fill defaults / generate tokens
+  afterUpsert:  async (row, ctx)   => {},         // sync derived rows
+}
+```
+
+### Adding a new connector
+
+1. Create `api/src/connectors/<id>/index.js` exporting a default spec.
+2. If the connector needs new secret fields, add them to `SECRET_FIELDS` in
+   `api/src/utils/encrypt.js` (they'll then be auto-encrypted at rest).
+3. If it needs backing tables, add `postgres-init/NN-<your>.sql`, sync the
+   file to `k8s/base/postgres-init/`, and append it to the
+   `configMapGenerator.files` list in `k8s/base/kustomization.yaml`. Mirror
+   the DDL in an IF-NOT-EXISTS runtime hook so existing installs pick it up
+   without a volume wipe.
+4. Restart the API — `[Connectors] Loaded: <id>` should appear in the log.
+
+Routes wire themselves in via the registry: no server.js changes needed.
+
+## Testing
+
+Jest is the test runner (ESM-compatible via `--experimental-vm-modules`).
+`supertest` is available for HTTP-level tests, **`jest.spyOn(globalThis,
+'fetch')`** for outbound HTTP mocking (nock and undici's `MockAgent` both
+have caveats with Node 18+'s built-in fetch dispatcher — spying on the
+global is simple and portable), and `@testcontainers/postgresql` +
+`@testcontainers/neo4j` for real database integration tests.
+
+```bash
+cd api
+
+# Everything (unit + integration)
+npm test
+
+# Pure unit suite — no Docker required
+npm run test:unit
+
+# Integration suite — boots Postgres + Neo4j containers; skips cleanly if
+# Docker isn't available.
+npm run test:integration
+
+# Coverage report
+npm run test:coverage
+```
+
+### What's covered today
+
+- `utils/terraform-state-parser` — v4 tfstate, `show -json`, module walks, unmapped types
+- `utils/encrypt` — round-trip, SECRET_FIELDS coverage
+- `connectors/base` — `validateRequired`, `withRetry`, `ConnectorError`, `runPullScan` lifecycle + abort
+- `connectors/index` — registry shape contract: every loaded spec has id,
+  displayName, category, and either `fetch` or `receiver.register`
+- `connectors/otel-ingest/parse` — OTLP AnyValue unwrapping, key-value maps,
+  hex-id decoding, full payload flattening incl. legacy
+  `instrumentationLibrarySpans`
+- `connectors/terraform-cloud/api` — JSON:API pagination, 404 tolerance,
+  pre-signed URL download without bearer header, remote-state-ref extraction
+- `plugins/otel-aggregator` — pure helpers + three-sweep aggregator logic
+- **Integration:** end-to-end OTLP → otel_spans_raw → three-sweep →
+  `:Component` + `:CONNECTED_TO` edges in Neo4j
+
+### When writing a new connector test
+
+- Prefer the `jest.spyOn(globalThis, 'fetch')` pattern from
+  `terraform-cloud/__tests__/api.test.js` for REST clients — the default
+  mock implementation throws if an unexpected fetch slips through, which
+  keeps accidental real-network calls out of CI.
+- For cloud SDK clients (S3, Azure Blob, GCS) stub via the SDK's own mock
+  client helpers or a local server; spying on `globalThis.fetch` only
+  intercepts direct fetch calls, which SDK-internal transports may bypass.
+- Pure logic first, framework-bound code last. Move non-trivial functions
+  out of route handlers / plugins into siblings that unit tests can import
+  directly — `otel-ingest/parse.js` and the exported helpers in
+  `otel-aggregator.js` are the pattern.
+
 ## Integration with CI/CD
 
 The development setup mirrors production but with:
