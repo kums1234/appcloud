@@ -67,3 +67,22 @@ data/db
 data/postgres
 api/src/node_modules
 secrets/
+
+ Next.js build + dev artefacts
+/ui/.next/
+/.next/
+/out/
+/build/
+/dist/
+# Compilers / bundlers / caches
+/.swc/
+/.turbo/
+*.tsbuildinfo
+# Next.js TypeScript shim (generated on dev start; re-created as needed)
+/next-env.d.ts
+# Vercel deployment metadata
+/.vercel
+# Jest / Vitest coverage (in addition to root rule)
+/coverage/
+# Local env overrides — root .gitignore covers .env* but be explicit
+.env*.local
