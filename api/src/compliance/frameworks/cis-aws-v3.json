@@ -1,0 +1,276 @@
+{
+  "id": "cis-aws-v3",
+  "name": "CIS AWS Foundations Benchmark",
+  "version": "3.0.0",
+  "provider": "aws",
+  "description": "The Center for Internet Security (CIS) Foundations Benchmark for Amazon Web Services provides prescriptive guidance for configuring AWS services securely. Covers IAM, logging, monitoring, networking, and storage.",
+  "reference": "https://www.cisecurity.org/benchmark/amazon_web_services",
+  "controls": [
+    {
+      "id": "CIS-AWS-1.4",
+      "section": "1",
+      "sectionTitle": "Identity and Access Management",
+      "level": 1,
+      "severity": "HIGH",
+      "rating": 8,
+      "title": "Ensure applications have designated owners (IAM accountability)",
+      "description": "Every application must have a designated owner for incident response, change approvals, and audit accountability.",
+      "rationale": "Without a designated owner, security incidents cannot be triaged efficiently, changes may be deployed without proper review, and audit trails become incomplete. CIS IAM controls require accountability for all managed resources.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Application",
+      "query": "MATCH (a:Application) WHERE (a.owner IS NULL OR a.owner = '') RETURN a.id AS resourceId, a.name AS resourceName, 'Application' AS resourceType, 'No owner assigned' AS evidence",
+      "remediation": {
+        "summary": "Assign an owner to each application via the Applications page.",
+        "steps": [
+          "Navigate to Applications → select the app without an owner",
+          "Set the Owner field to a team or named individual",
+          "Tag the underlying AWS resources with the appcloud:owner tag for future discovery runs",
+          "Document the ownership in your CMDB or team directory"
+        ],
+        "references": [
+          "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_tagging.html"
+        ]
+      }
+    },
+    {
+      "id": "CIS-AWS-2.1.1",
+      "section": "2.1",
+      "sectionTitle": "Storage - S3",
+      "level": 1,
+      "severity": "CRITICAL",
+      "rating": 9,
+      "title": "Ensure S3 buckets are not publicly accessible",
+      "description": "S3 buckets should not allow public read or write access unless explicitly required and justified.",
+      "rationale": "Public S3 buckets have been the source of numerous high-profile data breaches. Objects stored in public buckets are accessible to anyone on the internet, including threat actors scanning for sensitive data.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "aws:s3_bucket",
+      "query": "MATCH (i:S3Bucket) WHERE i.public = true RETURN i.id AS resourceId, i.name AS resourceName, 'S3Bucket' AS resourceType, i.region AS evidence",
+      "remediation": {
+        "summary": "Enable S3 Block Public Access at the account and bucket level.",
+        "steps": [
+          "Open the S3 console and navigate to the affected bucket",
+          "Go to Permissions → Block Public Access settings and enable all four options",
+          "Review and tighten the bucket policy to remove public principals",
+          "Enable S3 Block Public Access at the account level for defence in depth",
+          "Audit existing objects for sensitive data exposure"
+        ],
+        "references": [
+          "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html"
+        ]
+      }
+    },
+    {
+      "id": "CIS-AWS-2.2.1",
+      "section": "2.2",
+      "sectionTitle": "Storage - EBS / RDS",
+      "level": 1,
+      "severity": "HIGH",
+      "rating": 7,
+      "title": "Ensure RDS instances are not publicly accessible",
+      "description": "Relational database instances should not be accessible from the public internet. Use VPC peering, PrivateLink, or bastion hosts for access.",
+      "rationale": "Public RDS instances are exposed to credential-stuffing attacks and zero-day exploits. Databases often contain the crown jewels of an organisation and must be behind defence-in-depth controls.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "aws:rds_instance",
+      "query": "MATCH (i:RDSInstance) WHERE i.public = true RETURN i.id AS resourceId, i.name AS resourceName, 'RDSInstance' AS resourceType, i.region AS evidence",
+      "remediation": {
+        "summary": "Disable public accessibility on the RDS instance and move it to a private subnet.",
+        "steps": [
+          "Open the RDS console and select the affected instance",
+          "Modify → Connectivity → set 'Publicly accessible' to No",
+          "Ensure the instance is in a private subnet with no internet gateway route",
+          "Configure security groups to allow traffic only from application subnets",
+          "For remote access, use a bastion host, Session Manager, or PrivateLink"
+        ],
+        "references": [
+          "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_VPC.Hiding.html"
+        ]
+      }
+    },
+    {
+      "id": "CIS-AWS-3.1",
+      "section": "3",
+      "sectionTitle": "Logging and Monitoring",
+      "level": 1,
+      "severity": "HIGH",
+      "rating": 7,
+      "title": "Ensure Tier-1 applications have deployment records for blast radius analysis",
+      "description": "All Tier-1 applications must have at least one component linked to deployed infrastructure so blast radius and incident impact can be determined.",
+      "rationale": "Without deployment records, the platform cannot determine which infrastructure to protect or which applications to notify during changes. This is foundational for CIS monitoring controls.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Application",
+      "query": "MATCH (a:Application {tier: 1}) WHERE NOT (a)-[:CONTAINS]->(:Component)-[:DEPLOYED_ON]->(:Infra) RETURN a.id AS resourceId, a.name AS resourceName, 'Application' AS resourceType, 'Tier-1 app missing deployment' AS evidence",
+      "remediation": {
+        "summary": "Link the application to its deployed components.",
+        "steps": [
+          "Run the Mapping agent from the Command Center to auto-link by tags",
+          "Add the appcloud:app tag to AWS resources that belong to this application",
+          "Re-run discovery to pick up the tags",
+          "Manually link remaining components via the Applications page if needed"
+        ],
+        "references": []
+      }
+    },
+    {
+      "id": "CIS-AWS-3.2",
+      "section": "3",
+      "sectionTitle": "Logging and Monitoring",
+      "level": 1,
+      "severity": "CRITICAL",
+      "rating": 9,
+      "title": "Ensure Tier-1 application components are not exposed on public infrastructure",
+      "description": "Business-critical (Tier-1) applications must not have components deployed directly onto public-facing infrastructure. Public components must be behind a load balancer, API gateway, or WAF.",
+      "rationale": "Direct public exposure of Tier-1 workloads dramatically increases attack surface. All inbound traffic to critical systems should flow through a layer that provides logging, rate limiting, and threat filtering.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Application",
+      "query": "MATCH (a:Application {tier: 1})-[:CONTAINS]->(c:Component)-[:DEPLOYED_ON]->(i:Infra) WHERE i.public = true RETURN i.id AS resourceId, i.name AS resourceName, 'Infra' AS resourceType, a.name AS evidence",
+      "remediation": {
+        "summary": "Move Tier-1 components behind a managed edge service.",
+        "steps": [
+          "Introduce an Application Load Balancer or API Gateway in front of the component",
+          "Move the component itself to a private subnet",
+          "Attach AWS WAF if the service accepts user input",
+          "Enable detailed access logging with anomaly alerting",
+          "Restrict security groups to accept traffic only from the ALB/APIGW security group"
+        ],
+        "references": [
+          "https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/protecting-networks.html"
+        ]
+      }
+    },
+    {
+      "id": "CIS-AWS-4.1",
+      "section": "4",
+      "sectionTitle": "Change Management",
+      "level": 1,
+      "severity": "CRITICAL",
+      "rating": 10,
+      "title": "Ensure high-risk changes affecting Tier-1 applications are explicitly approved",
+      "description": "Changes with risk score 7 or higher that affect Tier-1 applications must go through explicit approval workflow before deployment.",
+      "rationale": "Unapproved high-risk changes on critical systems bypass change management controls required by SOC 2 CC8.1, ISO 27001 A.12.1.2, and CIS change control guidelines. An unreviewed deployment to a Tier-1 system can cascade into a company-wide outage.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Change",
+      "query": "MATCH (ch:Change {status: 'draft'})-[:AFFECTS]->(a:Application) WHERE ch.riskScore >= 7 AND a.tier = 1 RETURN ch.id AS resourceId, ch.title AS resourceName, 'Change' AS resourceType, 'Risk ' + toString(ch.riskScore) AS evidence",
+      "remediation": {
+        "summary": "Route the change through the approval workflow.",
+        "steps": [
+          "Open the change on the Changes page",
+          "Submit for review by the application owner and on-call engineer",
+          "Obtain explicit approval before scheduling deployment",
+          "Document the rollback plan and deployment window",
+          "Only proceed after the change is in 'approved' status"
+        ],
+        "references": []
+      }
+    },
+    {
+      "id": "CIS-AWS-4.2",
+      "section": "4",
+      "sectionTitle": "Change Management",
+      "level": 1,
+      "severity": "HIGH",
+      "rating": 7,
+      "title": "Ensure segregation of duties in change approvals (no self-approval)",
+      "description": "A user should not be able to submit and approve the same change. This enforces separation of duties and prevents unilateral production changes.",
+      "rationale": "Self-approval bypasses segregation-of-duties controls required by SOX, SOC 2 CC6.1, and PCI-DSS 6.4. It enables insider threats and accidental misconfigurations to reach production unchallenged.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Change",
+      "query": "MATCH (u:User)-[:SUBMITTED]->(ch:Change)<-[:APPROVED]-(u) RETURN ch.id AS resourceId, ch.title AS resourceName, 'Change' AS resourceType, u.name AS evidence",
+      "remediation": {
+        "summary": "Rollback the approval and re-route the change to an independent reviewer.",
+        "steps": [
+          "Void the self-approval on the change",
+          "Require a second reviewer (different from the submitter) before approval",
+          "Update RBAC policy to technically enforce the segregation-of-duties rule at the system level",
+          "Document the corrective action in the audit log"
+        ],
+        "references": []
+      }
+    },
+    {
+      "id": "CIS-AWS-5.1",
+      "section": "5",
+      "sectionTitle": "Networking - Load Balancers",
+      "level": 2,
+      "severity": "MEDIUM",
+      "rating": 5,
+      "title": "Ensure load balancers that front Tier-1 apps are tracked for TLS posture",
+      "description": "Load balancers that serve Tier-1 workloads must be tracked so TLS certificates, cipher suites, and WAF associations can be evaluated. This control verifies that every Tier-1 app with public exposure has a load balancer in front.",
+      "rationale": "Tier-1 applications without a managed edge component (load balancer, CDN, API gateway) cannot enforce consistent TLS policy or WAF rules. CIS encryption-in-transit controls require a consistent TLS termination point.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Application",
+      "query": "MATCH (a:Application {tier: 1})-[:CONTAINS]->(c:Component)-[:DEPLOYED_ON]->(i:Infra) WHERE i.public = true AND NOT (c)-[:CONNECTS_TO|DEPLOYED_ON]->(:AWSLoadBalancer) AND NOT (i:AWSLoadBalancer) RETURN a.id AS resourceId, a.name AS resourceName, 'Application' AS resourceType, 'No LB fronting public Tier-1 component' AS evidence",
+      "remediation": {
+        "summary": "Introduce a managed load balancer or CDN in front of public Tier-1 workloads.",
+        "steps": [
+          "Provision an Application Load Balancer or CloudFront distribution",
+          "Terminate TLS at the load balancer with an ACM-managed certificate",
+          "Configure TLS 1.2+ only and modern cipher suites",
+          "Associate an AWS WAF web ACL for common attack protection",
+          "Update discovery to pick up the new load balancer and re-run mapping"
+        ],
+        "references": [
+          "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/create-https-listener.html"
+        ]
+      }
+    },
+    {
+      "id": "CIS-AWS-5.2",
+      "section": "5",
+      "sectionTitle": "Networking - Security Groups",
+      "level": 1,
+      "severity": "HIGH",
+      "rating": 8,
+      "title": "Ensure confidential data workloads are not on public infrastructure",
+      "description": "Applications classified as 'confidential' or 'restricted' must never be deployed on public-facing infrastructure, regardless of tier.",
+      "rationale": "Confidential or restricted workloads are subject to data-handling regulations (GDPR, HIPAA, PCI-DSS). Public exposure creates direct regulatory violations and data-breach risk.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Application",
+      "query": "MATCH (a:Application)-[:CONTAINS]->(c:Component)-[:DEPLOYED_ON]->(i:Infra) WHERE i.public = true AND a.confidentiality IN ['restricted', 'confidential'] RETURN a.id AS resourceId, a.name AS resourceName, 'Application' AS resourceType, a.confidentiality AS evidence",
+      "remediation": {
+        "summary": "Move the workload to private infrastructure immediately.",
+        "steps": [
+          "Migrate the workload to a private subnet or VPC",
+          "Audit data flow to confirm encryption at rest and in transit",
+          "Notify the security and compliance teams",
+          "Initiate a breach-assessment review if public access was recent",
+          "Review the data-handling policy for the application classification"
+        ],
+        "references": []
+      }
+    },
+    {
+      "id": "CIS-AWS-5.3",
+      "section": "5",
+      "sectionTitle": "Networking - Public Surface",
+      "level": 1,
+      "severity": "MEDIUM",
+      "rating": 5,
+      "title": "Ensure public-facing infrastructure has identifiable owning applications",
+      "description": "Every piece of public-facing infrastructure should be linked to an application so its purpose and owner are known.",
+      "rationale": "Orphan public infrastructure represents unknown attack surface. Resources without an owning application cannot be patched, monitored, or decommissioned safely.",
+      "automated": true,
+      "evaluator": "cypher",
+      "resourceType": "Infra",
+      "query": "MATCH (i:Infra) WHERE i.public = true AND i.provider = 'aws' AND NOT (i)<-[:DEPLOYED_ON]-(:Component) RETURN i.id AS resourceId, i.name AS resourceName, i.resource_type AS resourceType, i.region AS evidence",
+      "remediation": {
+        "summary": "Identify and link orphan public infrastructure to an application.",
+        "steps": [
+          "Investigate the resource — determine its purpose and whether it is still needed",
+          "If no longer needed, raise a decommissioning change",
+          "If needed, add the appcloud:app tag and re-run discovery + mapping",
+          "Review IAM and security group rules to restrict unintended access"
+        ],
+        "references": []
+      }
+    }
+  ]
+}
