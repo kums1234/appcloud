@@ -1,6 +1,7 @@
 // plugins/ai.js
 
-import { createLocalProvider, createCloudProvider } from '../utils/ai-providers.js'
+import { createLocalProvider, createCloudProvider, createCloudProviderFromOptions } from '../utils/ai-providers.js'
+import { decrypt } from '../utils/encrypt.js'
 
 // ─── Prompt library ──────────────────────────────────────────────────────────
 
@@ -222,7 +223,13 @@ function safe(fn) {
 
 export async function aiPlugin(fastify) {
   const local = createLocalProvider(fastify.log)
-  const cloud = createCloudProvider(fastify.log)
+  const cloudEnv = createCloudProvider(fastify.log)   // from env vars (highest priority)
+
+  // DB-sourced cloud provider (fallback when env vars don't provide one)
+  let _cloudDb = null
+
+  // The effective cloud provider: env vars take priority, then DB
+  let cloud = cloudEnv
 
   // Track liveness — re-checked on each availability probe
   let _localAvailable = false
@@ -242,8 +249,49 @@ export async function aiPlugin(fastify) {
     else     fastify.log.warn(`[AI] Ollama not reachable at ${local.baseUrl} — local AI features will return 503 until Ollama is available`)
   })
 
-  if (cloud) fastify.log.info(`[AI] Cloud provider: ${cloud.name} (${cloud.model})`)
-  else       fastify.log.info('[AI] Cloud AI not configured (set AI_CLOUD_PROVIDER + API key to enable)')
+  if (cloudEnv) fastify.log.info(`[AI] Cloud provider (env): ${cloudEnv.name} (${cloudEnv.model})`)
+  else       fastify.log.info('[AI] Cloud AI not configured via env (set AI_CLOUD_PROVIDER + API key, or use Integrations UI)')
+
+  // ── DB fallback — read ai_config table ─────────────────────────────────────
+  const refreshCloudFromDb = async () => {
+    if (!fastify.pg?.pool) return
+    try {
+      const rows = await fastify.pg.query(
+        'SELECT provider, config FROM ai_config WHERE enabled = true LIMIT 1'
+      )
+      if (!rows.length) {
+        _cloudDb = null
+        if (!cloudEnv) cloud = null
+        return
+      }
+      const row = rows[0]
+      const config = row.config || {}
+      // Decrypt the apiKey
+      if (config.apiKey) {
+        try { config.apiKey = decrypt(config.apiKey) } catch {}
+      }
+      _cloudDb = createCloudProviderFromOptions(fastify.log, {
+        provider: row.provider,
+        apiKey: config.apiKey,
+        model: config.model,
+        azureEndpoint: config.azureEndpoint,
+        azureDeployment: config.azureDeployment,
+      })
+      // Only use DB provider if env vars didn't set one
+      if (!cloudEnv && _cloudDb) {
+        cloud = _cloudDb
+        fastify.log.info(`[AI] Cloud provider (DB): ${_cloudDb.name} (${_cloudDb.model})`)
+      }
+    } catch (err) {
+      fastify.log.warn(`[AI] Failed to load cloud config from DB: ${err.message}`)
+      _cloudDb = null
+    }
+  }
+
+  // Load DB config at startup (non-blocking)
+  fastify.addHook('onReady', async () => {
+    await refreshCloudFromDb()
+  })
 
   // ── Provider accessors with proper HTTP errors ────────────────────────────
   // Uses fastify.httpErrors from @fastify/sensible — returns a proper 503 object
@@ -273,10 +321,12 @@ export async function aiPlugin(fastify) {
 
   fastify.decorate('ai', {
     local,
-    cloud,
+    get cloud() { return cloud },
     get localAvailable() { return _localAvailable },
     get cloudAvailable()  { return !!cloud },
+    get cloudDbConfigured() { return !!_cloudDb },
     checkLocal,
+    refreshCloudFromDb,
 
     // Local helpers — throw 503 if Ollama unavailable
     explainMapping: async (infra, suggestion) =>

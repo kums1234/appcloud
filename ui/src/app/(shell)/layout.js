@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useState, useCallback, Fragment } from 'react'
-import Sidebar from '@/components/layout/Sidebar'
-import AiAssistantPanel from '@/components/ai/AiAssistantPanel'
+import { useEffect, Fragment } from 'react'
+import NavRail, { RAIL_W } from '@/components/layout/NavRail'
+import CommandBar from '@/components/ai/CommandBar'
 import { AuthProvider, useAuth } from '@/lib/auth-context'
 import { ThemeProvider, useTheme, getT } from '@/lib/theme'
 
@@ -21,7 +21,7 @@ function AuthGuard({ children }) {
   return children
 }
 
-function TopBar({ rightInset = 0 }) {
+function TopBar() {
   const { user, logout }  = useAuth()
   const { theme, toggle } = useTheme()
   const T = getT(theme)
@@ -34,12 +34,12 @@ function TopBar({ rightInset = 0 }) {
 
   return (
     <div style={{
-      position:'fixed', top:0, left:220, right:rightInset, height:48, zIndex:40,
+      position:'fixed', top:0, left:RAIL_W, right:0, height:48, zIndex:40,
       background:`${T.bg}ee`, backdropFilter:'blur(8px)',
       borderBottom:`1px solid ${T.border}`,
       display:'flex', alignItems:'center',
       justifyContent:'flex-end', padding:'0 24px', gap:12,
-      transition:'background 0.2s ease, border-color 0.2s ease, right 0.18s ease',
+      transition:'background 0.2s ease, border-color 0.2s ease',
     }}>
       {/* User pill */}
       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -64,20 +64,6 @@ function TopBar({ rightInset = 0 }) {
 
       <div style={{ width:1, height:20, background:T.border }}/>
 
-      {/* Theme toggle */}
-      <button onClick={toggle}
-        title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-        style={{ ...mono, fontSize:14, color:T.dim,
-          background:'transparent', border:`1px solid ${T.border}`,
-          borderRadius:6, padding:'4px 9px', cursor:'pointer',
-          transition:'all .15s', lineHeight:1 }}
-        onMouseEnter={e => { e.currentTarget.style.color=T.teal; e.currentTarget.style.borderColor=`${T.teal}44` }}
-        onMouseLeave={e => { e.currentTarget.style.color=T.dim;  e.currentTarget.style.borderColor=T.border }}>
-        {theme === 'dark' ? '☀' : '☽'}
-      </button>
-
-      <div style={{ width:1, height:20, background:T.border }}/>
-
       {/* Sign out */}
       <button onClick={logout}
         style={{ ...mono, fontSize:10, color:T.dim,
@@ -95,27 +81,24 @@ function TopBar({ rightInset = 0 }) {
 function ShellInner({ children }) {
   const { theme } = useTheme()
   const T = getT(theme)
-  const [aiAsideW, setAiAsideW] = useState(44)
-  const onReserveRight = useCallback((px) => setAiAsideW(px), [])
   return (
     <AuthGuard>
       <Fragment>
         <div style={{ display:'flex', minHeight:'100vh', background:T.bg,
           transition:'background 0.2s ease' }}>
-          <Sidebar/>
-          <div style={{ marginLeft:220, flex:1, minHeight:'100vh',
+          <NavRail/>
+          <div style={{ marginLeft:RAIL_W, flex:1, minHeight:'100vh',
             display:'flex', flexDirection:'column' }}>
-            <TopBar rightInset={aiAsideW}/>
+            <TopBar/>
             <main style={{
               flex:1, overflowX:'hidden', marginTop:48,
-              paddingRight: aiAsideW,
-              transition: 'padding-right 0.18s ease',
+              paddingBottom: 64,
             }}>
               {children}
             </main>
           </div>
         </div>
-        <AiAssistantPanel onReserveRight={onReserveRight} />
+        <CommandBar/>
       </Fragment>
     </AuthGuard>
   )

@@ -101,6 +101,7 @@ export const api = {
     scanAll:    (data) => req('/discovery/scan/all',   { method:'POST', body:JSON.stringify(data) }),
     link:       (infraId, componentId) => req('/discovery/link', { method:'POST', body:JSON.stringify({ infraId, componentId }) }),
     deleteResource: (id) => req(`/discovery/resources/${id}`, { method:'DELETE' }),
+    bootstrap:  (data={}) => req('/discovery/bootstrap', { method:'POST', body:JSON.stringify(data) }),
   },
 
   workflows: {
@@ -142,6 +143,35 @@ export const api = {
 
   integrations: {
     terraformHistory: () => req('/integrations/terraform/history'),
+    aiConfig:         () => req('/integrations/ai'),
+    saveAiConfig:     (data) => req('/integrations/ai', { method:'POST', body:JSON.stringify(data) }),
+    deleteAiConfig:   () => req('/integrations/ai', { method:'DELETE' }),
+    testAiConfig:     () => req('/integrations/ai/test', { method:'POST' }),
+  },
+
+  compliance: {
+    frameworks:         () => req('/compliance/frameworks'),
+    framework:          (id) => req(`/compliance/frameworks/${id}`),
+    evaluate:           (id) => req(`/compliance/frameworks/${id}/evaluate`, { method:'POST' }),
+    reseedBuiltins:     () => req('/compliance/frameworks/reseed-builtins', { method:'POST' }),
+    remediationStatus:  (id) => req(`/compliance/frameworks/${id}/remediation-status`),
+    control:            (fwId, ctrlId) => req(`/compliance/controls/${fwId}/${ctrlId}`),
+    blastRadius:        (fwId, ctrlId) => req(`/compliance/controls/${fwId}/${ctrlId}/blast-radius`),
+    createChange:       (fwId, ctrlId, opts={}) => req(`/compliance/controls/${fwId}/${ctrlId}/create-change`, { method:'POST', body:JSON.stringify(opts) }),
+    // Phase B — form builder + CRUD
+    schema:             () => req('/compliance/schema'),
+    createFramework:    (data) => req('/compliance/frameworks', { method:'POST', body:JSON.stringify(data) }),
+    deleteFramework:    (id) => req(`/compliance/frameworks/${id}`, { method:'DELETE' }),
+    createControl:      (fwId, data) => req(`/compliance/frameworks/${fwId}/controls`, { method:'POST', body:JSON.stringify(data) }),
+    updateControl:      (fwId, ctrlId, data) => req(`/compliance/frameworks/${fwId}/controls/${ctrlId}`, { method:'PATCH', body:JSON.stringify(data) }),
+    deleteControl:      (fwId, ctrlId) => req(`/compliance/frameworks/${fwId}/controls/${ctrlId}`, { method:'DELETE' }),
+    setOverride:        (fwId, ctrlId, data) => req(`/compliance/frameworks/${fwId}/controls/${ctrlId}/override`, { method:'PUT', body:JSON.stringify(data) }),
+    clearOverride:      (fwId, ctrlId) => req(`/compliance/frameworks/${fwId}/controls/${ctrlId}/override`, { method:'DELETE' }),
+    // Phase 5 — reporting & scoring
+    history:            (fwId, days=30) => req(`/compliance/frameworks/${fwId}/history?days=${days}`),
+    // Export URLs — trigger download via <a href>/window.open rather than fetch
+    csvUrl:             (fwId) => `${BASE}/compliance/frameworks/${fwId}/export.csv`,
+    pdfUrl:             (fwId) => `${BASE}/compliance/frameworks/${fwId}/export.pdf`,
   },
 
   users: {

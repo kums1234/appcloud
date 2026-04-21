@@ -14,6 +14,9 @@ import userRoutes from './routes/users.js'
 import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
 import cloudAccountRoutes from './routes/integrations-cloud.js'
+import aiConfigRoutes from './routes/integrations-ai.js'
+import complianceRoutes from './routes/compliance.js'
+import { complianceSchedulerPlugin } from './plugins/compliance-scheduler.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
 import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
@@ -47,6 +50,7 @@ await authPlugin(fastify)
 
 // Scheduler — starts after server ready, requires pg to be initialised
 await schedulerPlugin(fastify)
+await complianceSchedulerPlugin(fastify)
 
 // Public routes (no auth required)
 await fastify.register(authRoutes, { prefix: '/auth' })
@@ -62,7 +66,9 @@ await fastify.register(userRoutes,         { prefix: '/users' })
 await fastify.register(graphRoutes,        { prefix: '/graph' })
 await fastify.register(integrationRoutes,   { prefix: '/integrations' })
 await fastify.register(cloudAccountRoutes,  { prefix: '/integrations' })
+await fastify.register(aiConfigRoutes,      { prefix: '/integrations' })
 await fastify.register(governanceRoutes,    { prefix: '/governance' })
+await fastify.register(complianceRoutes,    { prefix: '/compliance' })
 await fastify.register(workflowRoutes,      { prefix: '/workflows' })
 await fastify.register(discoveryRoutes,     { prefix: '/discovery' })
 await fastify.register(auditRoutes,         { prefix: '/audit' })

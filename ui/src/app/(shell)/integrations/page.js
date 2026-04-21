@@ -7,7 +7,12 @@ import {
   AiAssistantIntegrationCard,
   AiAssistantConfigModal,
 } from '@/components/integrations/AiAssistantIntegration'
+import {
+  CloudAiIntegrationCard,
+  CloudAiConfigModal,
+} from '@/components/integrations/CloudAiConfig'
 import { readAiClientConfig } from '@/lib/ai-client-config'
+import { api } from '@/lib/api'
 
 // Module-level fallback — satisfies sub-component defaults and constants.
 // The default export re-derives T from useTheme() for live theme switching.
@@ -36,6 +41,15 @@ const INTEGRATIONS = [
     color:'#f472b6', secondaryColor:'#ec4899',
     logo:'AI',
     capabilities:['Side chat','Ollama','Anthropic · OpenAI · Gemini · Azure'],
+    badge:'AI',
+  },
+  {
+    id:'cloud-ai', category:'ai',
+    name:'Cloud AI Endpoint', vendor:'Server-side LLM',
+    tagline:'Cloud LLM credentials stored encrypted on the server — used by agents and all AI features',
+    color:'#a78bfa', secondaryColor:'#8b5cf6',
+    logo:'☁',
+    capabilities:['Anthropic','OpenAI','Gemini','Azure','Encrypted storage','Agent AI'],
     badge:'AI',
   },
 
@@ -930,9 +944,18 @@ export default function IntegrationsPage() {
   const [configuring,    setConfiguring]    = useState(null) // integration id
   const [editAccount,    setEditAccount]    = useState(null) // { id, name, config } for editing existing
   const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [cloudAiModalOpen, setCloudAiModalOpen] = useState(false)
+  const [cloudAiConfigured, setCloudAiConfigured] = useState(false)
   const [aiCfgTick, setAiCfgTick] = useState(0)
   const [aiHasSaved, setAiHasSaved] = useState(() =>
     typeof window !== 'undefined' && !!readAiClientConfig()?.savedAt)
+
+  // Check server-side Cloud AI config
+  useEffect(() => {
+    api.integrations.aiConfig()
+      .then(cfg => setCloudAiConfigured(cfg?.configured || false))
+      .catch(() => setCloudAiConfigured(false))
+  }, [aiCfgTick])
 
   const filtered = activeCategory==='all'
     ? INTEGRATIONS
@@ -944,6 +967,7 @@ export default function IntegrationsPage() {
 
   const connectedCount = INTEGRATIONS.filter(i => {
     if (i.id === 'ai-assistant') return aiHasSaved
+    if (i.id === 'cloud-ai') return cloudAiConfigured
     return connections[i.id]
   }).length
 
@@ -1038,6 +1062,12 @@ export default function IntegrationsPage() {
                 intg={intg}
                 connected={aiHasSaved}
                 onConfigure={()=>setAiModalOpen(true)}
+              />
+            ) : intg.id === 'cloud-ai' ? (
+              <CloudAiIntegrationCard
+                intg={intg}
+                connected={cloudAiConfigured}
+                onConfigure={()=>setCloudAiModalOpen(true)}
               />
             ) : (
               <IntegrationCard
@@ -1157,6 +1187,14 @@ export default function IntegrationsPage() {
         <AiAssistantConfigModal
           intg={INTEGRATIONS.find(x => x.id === 'ai-assistant')}
           onClose={() => setAiModalOpen(false)}
+          onSaved={() => setAiCfgTick(t => t + 1)}
+        />
+      )}
+
+      {cloudAiModalOpen && (
+        <CloudAiConfigModal
+          intg={INTEGRATIONS.find(x => x.id === 'cloud-ai')}
+          onClose={() => setCloudAiModalOpen(false)}
           onSaved={() => setAiCfgTick(t => t + 1)}
         />
       )}
