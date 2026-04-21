@@ -44,7 +44,27 @@ export function decrypt(encoded) {
   } catch { return encoded }
 }
 
-const SECRET_FIELDS = ['secretAccessKey', 'secretKey', 'clientSecret', 'private_key']
+// Fields whose values are encrypted at rest in the `config` JSONB column of
+// cloud_accounts / integrations. Extend this list when a new connector adds
+// an auth-bearing field. Keep names camelCase to match the JSON-config style
+// used across route handlers.
+const SECRET_FIELDS = [
+  // ── Cloud provider credentials (legacy, still used by cloud_accounts) ──
+  'secretAccessKey', 'secretKey', 'clientSecret', 'private_key',
+  // ── Generic API auth (APM vendors, OpenTofu/Terraform managers, …) ──
+  'apiKey', 'apiToken', 'token', 'bearerToken', 'accessToken',
+  'personalAccessToken',
+  // ── Object-store backends (Terraform/OpenTofu remote state) ──
+  'storageAccountKey', 'accountKey', 'sasToken',
+  // ── Service accounts ──
+  'serviceAccountJson',
+  // ── Consul ──
+  'consulToken',
+  // ── HTTP / Postgres backends and future use ──
+  'password',
+  // ── OTel ingest (per-integration bearer) ──
+  'otelTenantToken',
+]
 
 export function encryptConfig(config) {
   if (!config || typeof config !== 'object') return config

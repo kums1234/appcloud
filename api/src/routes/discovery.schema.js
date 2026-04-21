@@ -105,6 +105,26 @@ export const VIA_TO_REL_TYPE = {
   'monitors':             'MONITORS',
   'contains':             'TOPOLOGY_CONTAINS',
   'associated':           'TOPOLOGY_ASSOCIATED',
+
+  // ── Telemetry-derived service-to-service calls ────────────────────────
+  // All ride the :CONNECTED_TO edge with a `source` property distinguishing
+  // the observability pipeline (otel / datadog / new-relic / mesh / …).
+  // Edge properties (rps, error_rate, p50_ms, p95_ms, window_start/end,
+  // route, protocol) live on the :CONNECTED_TO relationship itself so
+  // queries can MATCH (a)-[r:CONNECTED_TO]-(b) WHERE r.source='otel' …
+  'otel-http':            'OBSERVED_HTTP_CALL',
+  'otel-rpc':             'OBSERVED_RPC_CALL',
+  'otel-messaging':       'OBSERVED_MESSAGING',
+  'otel-db':              'OBSERVED_DB_CALL',
+  'apm-call':             'OBSERVED_APM_CALL',
+  'mesh-call':            'SERVICE_MESH_CALL',
+
+  // ── IaC cross-workspace dependencies ───────────────────────────────────
+  // Terraform's `terraform_remote_state` data source, Pulumi's
+  // `StackReference`. Promoted to graph edges once a workspace is mapped
+  // to a Component/Application; until then the TFC connector surfaces
+  // them as scan warnings (see connectors/terraform-cloud/index.js).
+  'terraform-remote-state': 'STATE_REFERENCE',
 }
 
 // ─── Promoted Raw Fields ─────────────────────────────────────────────────────
@@ -192,6 +212,30 @@ export function buildLabelSetClause(provider, resourceType, alias = 'i') {
   const labels = getLabelsForType(provider, resourceType)
   if (!labels.length) return ''
   return `SET ${alias}:${labels.join(':')}`
+}
+
+// ─── Component Typed Labels (telemetry-derived) ──────────────────────────────
+//
+// Components created from live telemetry (OTel spans, APM vendor service-maps,
+// service-mesh metrics) receive these labels on top of the base :Component.
+// Gives queries a clean way to pick workload-flavoured components out:
+//
+//   MATCH (s:TelemetryService)-[r:CONNECTED_TO]->(t:TelemetryService)
+//   WHERE r.source = 'otel' AND r.error_rate > 0.05
+//   RETURN s.name, t.name, r.p95_ms
+//
+// Manually-defined Components (via the UI or IaC mapping) do not get these
+// labels — keep the :TelemetryService label as a marker of "observed from
+// the outside" rather than "modelled deliberately".
+
+export const TELEMETRY_COMPONENT_LABELS = ['TelemetryService', 'Workload']
+
+/**
+ * Build the Cypher SET clause fragment for telemetry-component labels.
+ * Returns e.g. "SET c:TelemetryService:Workload".
+ */
+export function buildTelemetryComponentLabelClause(alias = 'c') {
+  return `SET ${alias}:${TELEMETRY_COMPONENT_LABELS.join(':')}`
 }
 
 // ─── Resource Classification ─────────────────────────────────────────────────
