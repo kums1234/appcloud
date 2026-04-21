@@ -32,8 +32,12 @@ enforceable; deeper context lives in `DEVELOPMENT.md` and the code.
 - OK to run smoke tests after deploy (`kubectl logs`, `kubectl exec curl …`,
   cypher-shell). Don't `docker rm -f` or `kubectl delete` resources you didn't
   create.
-- Neo4j credentials for smoke tests: `neo4j / appcloudmvp` (from the
-  `appcloud-db-credentials` secret).
+- Neo4j credentials live in the `appcloud-db-credentials` k8s secret. Read
+  them at smoke-test time; do not hard-code:
+  ```
+  kubectl -n appcloud get secret appcloud-db-credentials \
+    -o jsonpath='{.data.db_password}' | base64 -d
+  ```
 
 ## Testing
 
