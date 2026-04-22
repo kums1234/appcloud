@@ -11,6 +11,10 @@ import {
   CloudAiIntegrationCard,
   CloudAiConfigModal,
 } from '@/components/integrations/CloudAiConfig'
+import {
+  DynamicConnectorCard,
+  DynamicConnectorModal,
+} from '@/components/integrations/DynamicConnector'
 import { readAiClientConfig } from '@/lib/ai-client-config'
 import { api } from '@/lib/api'
 
@@ -24,12 +28,13 @@ const mono = { fontFamily:'monospace' }
 
 // ── Integration definitions ───────────────────────────────────────────────────
 const CATEGORIES = [
-  { id:'iac',      label:'Infrastructure as Code', icon:'⬡' },
-  { id:'ai',       label:'AI',                      icon:'🤖' },
-  { id:'cloud',    label:'Cloud Providers',         icon:'◈' },
-  { id:'k8s',      label:'Kubernetes',              icon:'◎' },
-  { id:'itsm',     label:'ITSM & Ticketing',        icon:'◫' },
-  { id:'comms',    label:'Communications',          icon:'◎' },
+  { id:'iac',              label:'Infrastructure as Code', icon:'⬡' },
+  { id:'telemetry-ingest', label:'Telemetry',               icon:'◇' },
+  { id:'ai',               label:'AI',                      icon:'🤖' },
+  { id:'cloud',            label:'Cloud Providers',         icon:'◈' },
+  { id:'k8s',              label:'Kubernetes',              icon:'◎' },
+  { id:'itsm',             label:'ITSM & Ticketing',        icon:'◫' },
+  { id:'comms',            label:'Communications',          icon:'◎' },
 ]
 
 const INTEGRATIONS = [
@@ -950,6 +955,24 @@ export default function IntegrationsPage() {
   const [aiHasSaved, setAiHasSaved] = useState(() =>
     typeof window !== 'undefined' && !!readAiClientConfig()?.savedAt)
 
+  // ── Dynamic connector registry (Option B: sourced from GET /connectors) ──
+  // Every connector exporting a uiMetadata block surfaces automatically.
+  const [connectorSpecs, setConnectorSpecs]       = useState([])   // spec[]
+  const [dynInstances,   setDynInstances]         = useState([])   // integrations-table rows
+  const [dynOpenSpec,    setDynOpenSpec]          = useState(null) // spec currently being configured
+
+  const loadDynamic = async () => {
+    try {
+      const [specs, rows] = await Promise.all([
+        api.connectors.list().catch(() => []),
+        api.integrations.list().catch(() => []),
+      ])
+      setConnectorSpecs(Array.isArray(specs) ? specs : [])
+      setDynInstances(Array.isArray(rows) ? rows : [])
+    } catch {}
+  }
+  useEffect(() => { loadDynamic() }, [])
+
   // Check server-side Cloud AI config
   useEffect(() => {
     api.integrations.aiConfig()
@@ -957,19 +980,34 @@ export default function IntegrationsPage() {
       .catch(() => setCloudAiConfigured(false))
   }, [aiCfgTick])
 
+  // Hide the legacy hardcoded `terraform` card when the new dynamic
+  // connectors are present — they supersede it for remote state sources.
+  // Keep every other legacy card until we migrate them into the framework.
+  const DYN_IDS = new Set(connectorSpecs.map(s => s.id))
+  const SUPERSEDED = DYN_IDS.has('iac-state-backend') || DYN_IDS.has('terraform-cloud')
+    ? new Set(['terraform'])
+    : new Set()
+  const staticForFilter = INTEGRATIONS.filter(i => !SUPERSEDED.has(i.id))
+
   const filtered = activeCategory==='all'
-    ? INTEGRATIONS
-    : INTEGRATIONS.filter(i=>i.category===activeCategory)
+    ? staticForFilter
+    : staticForFilter.filter(i=>i.category===activeCategory)
+
+  const filteredDyn = activeCategory==='all'
+    ? connectorSpecs
+    : connectorSpecs.filter(s => s.category === activeCategory)
 
   useEffect(() => {
     setAiHasSaved(!!readAiClientConfig()?.savedAt)
   }, [aiCfgTick])
 
-  const connectedCount = INTEGRATIONS.filter(i => {
+  const connectedCount = staticForFilter.filter(i => {
     if (i.id === 'ai-assistant') return aiHasSaved
     if (i.id === 'cloud-ai') return cloudAiConfigured
     return connections[i.id]
-  }).length
+  }).length + connectorSpecs.filter(s =>
+    dynInstances.some(r => r.type === s.id)
+  ).length
 
   const intgBeingConfigured = INTEGRATIONS.find(i=>i.id===configuring)
 
@@ -1013,8 +1051,8 @@ export default function IntegrationsPage() {
           {/* Summary chips */}
           <div style={{ display:'flex',gap:1 }}>
             {[
-              [connectedCount,      'CONNECTED', T.green],
-              [INTEGRATIONS.length-connectedCount,'AVAILABLE',T.muted],
+              [connectedCount, 'CONNECTED', T.green],
+              [staticForFilter.length + connectorSpecs.length - connectedCount, 'AVAILABLE', T.muted],
             ].map(([v,label,color],i,arr)=>(
               <div key={label} style={{ padding:'8px 16px',background:T.surface,
                 border:`1px solid ${T.border}`,
@@ -1085,10 +1123,26 @@ export default function IntegrationsPage() {
             )}
           </div>
         ))}
+
+        {/* Dynamic cards from GET /connectors */}
+        {filteredDyn.map((spec, i) => {
+          const instances = dynInstances.filter(r => r.type === spec.id)
+          return (
+            <div key={'dyn-' + spec.id} className="int-card"
+              style={{ animationDelay:`${(filtered.length + i) * 40}ms` }}>
+              <DynamicConnectorCard
+                spec={spec}
+                instanceCount={instances.length}
+                T={T}
+                onOpen={() => setDynOpenSpec(spec)}
+              />
+            </div>
+          )
+        })}
       </div>
 
       {/* Empty state */}
-      {filtered.length===0&&(
+      {filtered.length===0 && filteredDyn.length===0 && (
         <div style={{ textAlign:'center',padding:'60px 0' }}>
           <div style={{ ...mono,fontSize:12,color:T.muted }}>
             No integrations in this category
@@ -1196,6 +1250,15 @@ export default function IntegrationsPage() {
           intg={INTEGRATIONS.find(x => x.id === 'cloud-ai')}
           onClose={() => setCloudAiModalOpen(false)}
           onSaved={() => setAiCfgTick(t => t + 1)}
+        />
+      )}
+
+      {dynOpenSpec && (
+        <DynamicConnectorModal
+          spec={dynOpenSpec}
+          instances={dynInstances.filter(r => r.type === dynOpenSpec.id)}
+          onClose={() => setDynOpenSpec(null)}
+          onChanged={loadDynamic}
         />
       )}
     </div>

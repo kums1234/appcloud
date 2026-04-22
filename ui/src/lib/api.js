@@ -147,6 +147,21 @@ export const api = {
     saveAiConfig:     (data) => req('/integrations/ai', { method:'POST', body:JSON.stringify(data) }),
     deleteAiConfig:   () => req('/integrations/ai', { method:'DELETE' }),
     testAiConfig:     () => req('/integrations/ai/test', { method:'POST' }),
+    // Connector-framework CRUD (backing store: `integrations` table)
+    list:    () => req('/integrations'),
+    get:     (id) => req(`/integrations/${id}`),
+    create:  (data) => req('/integrations', { method:'POST', body:JSON.stringify(data) }),
+    update:  (id, data) => req(`/integrations/${id}`, { method:'PATCH', body:JSON.stringify(data) }),
+    delete:  (id) => req(`/integrations/${id}`, { method:'DELETE' }),
+    test:    (id) => req(`/integrations/${id}/test`, { method:'POST' }),
+    scan:    (id) => req(`/integrations/${id}/scan`, { method:'POST' }),
+    history: (id) => req(`/integrations/${id}/history`),
+  },
+
+  connectors: {
+    // Connector registry — drives the UI's dynamic card/form builder.
+    list: () => req('/connectors'),
+    get:  (id) => req(`/connectors/${id}`),
   },
 
   compliance: {

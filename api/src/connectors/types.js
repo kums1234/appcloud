@@ -46,6 +46,10 @@
  *                                         config. May mutate and return the
  *                                         effective config (e.g. auto-generate
  *                                         secrets on first create, fill defaults).
+ * @property {UiMetadata} [uiMetadata]     Presentation hints for the Integrations
+ *                                         UI. When present, the generic card +
+ *                                         config modal render from these
+ *                                         without per-connector UI code.
  * @property {(row: object, ctx: ConnectorCtx) => Promise<void>} [afterUpsert]
  *                                         Called after a POST / PATCH commits.
  *                                         Lets push-style connectors sync
@@ -63,6 +67,43 @@
  * @typedef {Object} HealthResult
  * @property {boolean} ok
  * @property {string}  [detail]
+ */
+
+/**
+ * @typedef {Object} UiMetadata
+ * @property {string}   [vendor]           e.g. 'HashiCorp', 'AWS'.
+ * @property {string}   [tagline]          One-line description for the card.
+ * @property {string}   [logo]             Short 2–4 char label rendered in the
+ *                                         icon tile (e.g. 'TF', 'OTel').
+ * @property {string}   [color]            Primary brand colour (hex).
+ * @property {string}   [secondaryColor]   Gradient secondary (hex).
+ * @property {string[]} [capabilities]     Short tags rendered as pills.
+ * @property {string}   [badge]            'Discovery' | 'Telemetry' | 'ITSM' |
+ *                                         'Notifications'. Unknown values fall
+ *                                         back to Discovery styling.
+ * @property {UiField[]} [fields]          Ordered presentation of config fields.
+ *                                         authSchema is still the contract
+ *                                         (required, enum, type); this supplies
+ *                                         labels, placeholders, conditional
+ *                                         visibility.
+ */
+
+/**
+ * @typedef {Object} UiField
+ * @property {string} key                 Config field name; must match a
+ *                                        property in authSchema.
+ * @property {string} label
+ * @property {'text'|'password'|'select'|'textarea'|'number'|'boolean'} type
+ * @property {string[]} [options]         Enum options for `select` type.
+ * @property {string} [placeholder]
+ * @property {string} [help]
+ * @property {boolean} [readonly]         Rendered non-editable (e.g. auto-
+ *                                        generated tokens shown after save).
+ * @property {Record<string, string|string[]>} [visibleWhen]
+ *                                        Show this field only when every key
+ *                                        in this map matches the current form
+ *                                        value. String → equals; array →
+ *                                        includes.
  */
 
 /**

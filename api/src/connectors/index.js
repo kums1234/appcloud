@@ -79,12 +79,13 @@ export function hasConnector(id)  { return registry.has(id) }
 export function serializeSpec(spec) {
   if (!spec) return null
   return {
-    id:          spec.id,
-    category:    spec.category,
-    displayName: spec.displayName,
-    description: spec.description || null,
-    authSchema:  spec.authSchema  || null,
+    id:           spec.id,
+    category:     spec.category,
+    displayName:  spec.displayName,
+    description:  spec.description || null,
+    authSchema:   spec.authSchema  || null,
     configSchema: spec.configSchema || null,
-    style:       spec.receiver ? 'push' : 'pull',
+    uiMetadata:   spec.uiMetadata  || null,
+    style:        spec.receiver ? 'push' : 'pull',
   }
 }

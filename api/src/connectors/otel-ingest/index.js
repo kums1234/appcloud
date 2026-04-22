@@ -117,6 +117,32 @@ const authSchema = {
   },
 }
 
+/** @type {import('../types.js').UiMetadata} */
+const uiMetadata = {
+  vendor:         'OpenTelemetry',
+  tagline:        'Receive OTLP/HTTP traces from your OTel Collector and derive a service dependency graph in Neo4j.',
+  logo:           'OTel',
+  color:          '#F5A800',
+  secondaryColor: '#4F62AD',
+  badge:          'Telemetry',
+  capabilities: [
+    'OTLP/HTTP JSON',
+    'Bearer-token auth',
+    ':Component + :CONNECTED_TO edges',
+    'Three-sweep aggregator',
+  ],
+  fields: [
+    { key: 'otelTenantToken', label: 'TENANT TOKEN (auto-generated)', type: 'password',
+      readonly: true,
+      help: 'Generated on first save; copy into your OTel Collector otlphttp exporter as Authorization: Bearer.' },
+    { key: 'ingestPath',      label: 'INGEST BASE PATH',              type: 'text',
+      readonly: true,
+      help: 'POST OTLP traces to this path + /v1/traces. Endpoint is fixed.' },
+    { key: 'generatedAt',     label: 'TOKEN GENERATED AT',            type: 'text',
+      readonly: true },
+  ],
+}
+
 /** @type {import('../types.js').ConnectorSpec} */
 const spec = {
   id:          'otel-ingest',
@@ -124,6 +150,7 @@ const spec = {
   displayName: 'OpenTelemetry Collector (OTLP/HTTP)',
   description: 'Receives OTLP/HTTP JSON traces from a customer-run OpenTelemetry Collector. Tenant-scoped bearer-token auth, spans staged to Postgres, aggregation worker derives :Component / :CONNECTED_TO edges in Neo4j. Configure the Collector otlphttp exporter with `encoding: json` and this integration\'s token as Authorization: Bearer.',
   authSchema,
+  uiMetadata,
   beforeUpsert,
   afterUpsert,
   healthCheck,

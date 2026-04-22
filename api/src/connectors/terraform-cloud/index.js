@@ -168,6 +168,39 @@ async function ingest(normalized, ctx) {
   return result
 }
 
+/** @type {import('../types.js').UiMetadata} */
+const uiMetadata = {
+  vendor:         'HashiCorp',
+  tagline:        'Poll state versions from Terraform Cloud or Enterprise, scoped by workspace IDs, tags, or name prefix.',
+  logo:           'TFC',
+  color:          '#5C4EE5',
+  secondaryColor: '#7B70F0',
+  badge:          'Discovery',
+  capabilities: [
+    'Workspace state import',
+    'Tag / prefix filters',
+    'Cross-workspace refs',
+    'Recent runs',
+  ],
+  fields: [
+    { key: 'hostname',            label: 'HOSTNAME',               type: 'text',
+      placeholder: 'app.terraform.io',
+      help: 'For Terraform Enterprise self-hosted, e.g. tfe.example.com.' },
+    { key: 'organization',        label: 'ORGANIZATION',           type: 'text',
+      placeholder: 'my-org' },
+    { key: 'apiToken',            label: 'API TOKEN',              type: 'password',
+      placeholder: 'xxxxxx.atlasv1.yyyyyy' },
+    { key: 'workspaceNamePrefix', label: 'WORKSPACE NAME PREFIX',  type: 'text',
+      placeholder: 'prod-',
+      help: 'Scope scan to workspaces whose names start with this prefix (optional).' },
+    { key: 'workspaceTags',       label: 'WORKSPACE TAGS (comma-separated)', type: 'text',
+      placeholder: 'prod, web',
+      help: 'Scope scan to workspaces with all listed tags (optional).' },
+    { key: 'maxWorkspaces',       label: 'MAX WORKSPACES TO SCAN', type: 'number',
+      placeholder: '200' },
+  ],
+}
+
 /** @type {import('../types.js').ConnectorSpec} */
 const spec = {
   id:          'terraform-cloud',
@@ -175,6 +208,7 @@ const spec = {
   displayName: 'Terraform Cloud / Enterprise',
   description: 'Polls state versions from Terraform Cloud (app.terraform.io) or a self-hosted Terraform Enterprise. Supports explicit workspace IDs, tag filters, or name-prefix filters; extracts cross-workspace terraform_remote_state references as provenance.',
   authSchema,
+  uiMetadata,
   healthCheck,
   fetch,
   normalize,
