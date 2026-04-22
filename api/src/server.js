@@ -24,6 +24,7 @@ import { schedulerPlugin } from './plugins/scheduler.js'
 import governanceRoutes from './routes/governance.js'
 import workflowRoutes from './routes/workflows.js'
 import discoveryRoutes from './routes/discovery.js'
+import discoveryMetadataRoutes from './routes/discovery.metadata.js'
 import auditRoutes from './routes/audit.js'
 import { aiPlugin } from './plugins/ai.js'
 import aiRoutes from './routes/ai.js'
@@ -87,7 +88,10 @@ await fastify.register(connectorsRegistryRoutes,    { prefix: '/connectors' })
 await fastify.register(governanceRoutes,    { prefix: '/governance' })
 await fastify.register(complianceRoutes,    { prefix: '/compliance' })
 await fastify.register(workflowRoutes,      { prefix: '/workflows' })
-await fastify.register(discoveryRoutes,     { prefix: '/discovery' })
+await fastify.register(discoveryRoutes,         { prefix: '/discovery' })
+// Read-only metadata endpoints (providers, resource-types). Register after
+// discoveryRoutes so static paths under /discovery don't shadow dynamic ones.
+await fastify.register(discoveryMetadataRoutes, { prefix: '/discovery' })
 await fastify.register(auditRoutes,         { prefix: '/audit' })
 // AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
 // and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.

@@ -284,7 +284,7 @@ async function cleanupStaleNodes(write, query, log, provider, scanEpoch) {
 
 // ─── AWS Scanner ──────────────────────────────────────────────────────────────
 
-async function scanAWS({ credentials, regions, write, log, scanEpoch }) {
+export async function scanAWS({ credentials, regions, write, log, scanEpoch }) {
   scanEpoch = scanEpoch || Date.now()
   const {
     EC2Client, DescribeInstancesCommand,
@@ -571,7 +571,7 @@ async function scanAWS({ credentials, regions, write, log, scanEpoch }) {
 
 // ─── Azure Scanner ────────────────────────────────────────────────────────────
 
-async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch }) {
+export async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch }) {
   scanEpoch = scanEpoch || Date.now()
   const { DefaultAzureCredential, ClientSecretCredential } = await import('@azure/identity')
   const { ComputeManagementClient }      = await import('@azure/arm-compute')
@@ -899,7 +899,7 @@ async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch })
 
 // ─── GCP Scanner ──────────────────────────────────────────────────────────────
 
-async function scanGCP({ credentials, projectId, write, log, scanEpoch }) {
+export async function scanGCP({ credentials, projectId, write, log, scanEpoch }) {
   scanEpoch = scanEpoch || Date.now()
   const { InstancesClient, ZonesClient } = await import('@google-cloud/compute')
   const { ClusterManagerClient }         = await import('@google-cloud/container')

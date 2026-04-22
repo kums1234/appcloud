@@ -60,6 +60,10 @@ export const api = {
   },
 
   components: {
+    // Taxonomy — replaces the Applications/Components pages' hardcoded
+    // component-type / tier / environment / SLA / confidentiality maps.
+    metadata: () => req('/components/metadata'),
+
     list:    (type) => req(`/components${type ? `?type=${type}` : ''}`),
     get:     (id) => req(`/components/${id}`),
     create:  (data) => req('/components', { method:'POST', body:JSON.stringify(data) }),
@@ -90,6 +94,11 @@ export const api = {
   },
 
   discovery: {
+    // Metadata (read-only catalogues — replaces the UI's hardcoded PROVIDER_META
+    // and RESOURCE_ICONS maps; offline fallback is acceptable if these fail).
+    providers:     () => req('/discovery/providers'),
+    resourceTypes: () => req('/discovery/resource-types'),
+
     summary:    () => req('/discovery/summary'),
     resources:  (params = {}) => { const q = new URLSearchParams(params).toString(); return req(`/discovery/resources${q ? `?${q}` : ''}`) },
     accounts:   () => req('/discovery/accounts'),

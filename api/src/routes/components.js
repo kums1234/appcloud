@@ -1,10 +1,54 @@
 import { props } from '../utils/serialize.js'
 
+// ── Component taxonomy — single source of truth shared with the UI ──────────
+// The Applications + Components + Infra pages previously each carried copies
+// of these enums. GET /components/metadata exposes them so the UI hydrates
+// once and renders consistently. Adding a new component subtype here
+// surfaces in the UI without a React code change.
+const COMPONENT_TYPES = [
+  { id: 'api',    label: 'API',    color: '#38bdf8', icon: '⚡' },  // T.blue
+  { id: 'db',     label: 'DB',     color: '#f59e0b', icon: '▤' },  // T.amber
+  { id: 'worker', label: 'Worker', color: '#a78bfa', icon: '◐' },  // T.purple
+  { id: 'ui',     label: 'UI',     color: '#ef4444', icon: '◈' },  // T.red
+]
+
+const TIERS = [
+  { id: 1, label: 'Tier 1 — Mission critical', color: '#ef4444' },
+  { id: 2, label: 'Tier 2 — Business critical', color: '#f59e0b' },
+  { id: 3, label: 'Tier 3 — Important',         color: '#22c55e' },
+  { id: 4, label: 'Tier 4 — Non-critical',      color: '#6b7280' },
+]
+
+const ENVIRONMENTS = ['production', 'staging', 'dev']
+
+const AVAILABILITY_SLAS = [
+  { id: '99.999', label: '99.999% (five nines, < 5 min/yr downtime)' },
+  { id: '99.99',  label: '99.99% (four nines, < 53 min/yr)'           },
+  { id: '99.9',   label: '99.9% (three nines, < 8.8 hr/yr)'           },
+  { id: '99',     label: '99% (two nines, < 3.65 d/yr)'               },
+]
+
+const CONFIDENTIALITY = [
+  { id: 'public',       label: 'Public',       color: '#22c55e' },
+  { id: 'internal',     label: 'Internal',     color: '#38bdf8' },
+  { id: 'confidential', label: 'Confidential', color: '#f59e0b' },
+  { id: 'restricted',   label: 'Restricted',   color: '#ef4444' },
+]
+
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const auth = { preHandler: fastify.authenticate }
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = (req) => req.user?.name || req.user?.id || 'system'
+
+  // GET /components/metadata — taxonomy + enums for form builders
+  fastify.get('/metadata', async () => ({
+    componentTypes:   COMPONENT_TYPES,
+    tiers:            TIERS,
+    environments:     ENVIRONMENTS,
+    availabilitySlas: AVAILABILITY_SLAS,
+    confidentiality:  CONFIDENTIALITY,
+  }))
 
   // GET /components
   fastify.get('/', async (req) => {

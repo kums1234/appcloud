@@ -86,10 +86,16 @@ spec:
             periodSeconds: 15
           resources:
             requests:
-              memory: "256Mi"
+              memory: "384Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
+              # Bumped from 512Mi: Node.js API carries AWS + Azure + GCP SDKs
+              # plus the IaC connector framework (S3/Azure-Blob/GCS SDKs) and
+              # the OTel aggregator — 512Mi was tripping the OOM killer during
+              # cold boot once the full stack loaded. 1Gi was over the
+              # minikube node's headroom (with Neo4j/Postgres/Ollama/UI also
+              # scheduled); 768Mi is the middle ground.
+              memory: "768Mi"
               cpu: "500m"
       volumes:
         - name: db-username

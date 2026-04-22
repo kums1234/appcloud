@@ -980,13 +980,19 @@ export default function IntegrationsPage() {
       .catch(() => setCloudAiConfigured(false))
   }, [aiCfgTick])
 
-  // Hide the legacy hardcoded `terraform` card when the new dynamic
-  // connectors are present — they supersede it for remote state sources.
-  // Keep every other legacy card until we migrate them into the framework.
+  // Hide legacy hardcoded cards when the equivalent dynamic connector
+  // registers. The dynamic AWS/Azure/GCP cards write to the `integrations`
+  // table and drive scans through the new /integrations/:id/scan endpoint
+  // rather than the legacy /integrations/cloud + /discovery/scan/* pair.
+  // The legacy HTTP endpoints are still live for backward compat with any
+  // external callers (and for existing cloud_accounts rows — users with
+  // credentials in that table will re-enter them via the new card).
   const DYN_IDS = new Set(connectorSpecs.map(s => s.id))
-  const SUPERSEDED = DYN_IDS.has('iac-state-backend') || DYN_IDS.has('terraform-cloud')
-    ? new Set(['terraform'])
-    : new Set()
+  const SUPERSEDED = new Set()
+  if (DYN_IDS.has('iac-state-backend') || DYN_IDS.has('terraform-cloud')) SUPERSEDED.add('terraform')
+  if (DYN_IDS.has('aws'))   SUPERSEDED.add('aws')
+  if (DYN_IDS.has('azure')) SUPERSEDED.add('azure')
+  if (DYN_IDS.has('gcp'))   SUPERSEDED.add('gcp')
   const staticForFilter = INTEGRATIONS.filter(i => !SUPERSEDED.has(i.id))
 
   const filtered = activeCategory==='all'
