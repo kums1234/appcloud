@@ -9,20 +9,15 @@ import authRoutes from './routes/auth.js'
 import applicationRoutes from './routes/applications.js'
 import componentRoutes from './routes/components.js'
 import infraRoutes from './routes/infra.js'
-import changeRoutes from './routes/changes.js'
 import userRoutes from './routes/users.js'
 import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
 import cloudAccountRoutes from './routes/integrations-cloud.js'
 import aiConfigRoutes from './routes/integrations-ai.js'
 import integrationManagementRoutes, { connectorsRegistryRoutes } from './routes/integrations.management.js'
-import complianceRoutes from './routes/compliance.js'
-import { complianceSchedulerPlugin } from './plugins/compliance-scheduler.js'
 import { connectorsPlugin } from './plugins/connectors.js'
 import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
-import governanceRoutes from './routes/governance.js'
-import workflowRoutes from './routes/workflows.js'
 import discoveryRoutes from './routes/discovery.js'
 import discoveryMetadataRoutes from './routes/discovery.metadata.js'
 import auditRoutes from './routes/audit.js'
@@ -63,7 +58,6 @@ await otelAggregatorPlugin(fastify)
 
 // Scheduler — starts after server ready, requires pg to be initialised
 await schedulerPlugin(fastify)
-await complianceSchedulerPlugin(fastify)
 
 // Public routes (no auth required)
 await fastify.register(authRoutes, { prefix: '/auth' })
@@ -74,7 +68,6 @@ await fastify.register(authRoutes, { prefix: '/auth' })
 await fastify.register(applicationRoutes,  { prefix: '/applications' })
 await fastify.register(componentRoutes,    { prefix: '/components' })
 await fastify.register(infraRoutes,        { prefix: '/infra' })
-await fastify.register(changeRoutes,       { prefix: '/changes' })
 await fastify.register(userRoutes,         { prefix: '/users' })
 await fastify.register(graphRoutes,        { prefix: '/graph' })
 await fastify.register(integrationRoutes,          { prefix: '/integrations' })
@@ -85,9 +78,6 @@ await fastify.register(aiConfigRoutes,             { prefix: '/integrations' })
 // /connectors for the connector registry listing.
 await fastify.register(integrationManagementRoutes, { prefix: '/integrations' })
 await fastify.register(connectorsRegistryRoutes,    { prefix: '/connectors' })
-await fastify.register(governanceRoutes,    { prefix: '/governance' })
-await fastify.register(complianceRoutes,    { prefix: '/compliance' })
-await fastify.register(workflowRoutes,      { prefix: '/workflows' })
 await fastify.register(discoveryRoutes,         { prefix: '/discovery' })
 // Read-only metadata endpoints (providers, resource-types). Register after
 // discoveryRoutes so static paths under /discovery don't shadow dynamic ones.
@@ -96,7 +86,6 @@ await fastify.register(auditRoutes,         { prefix: '/audit' })
 // AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
 // and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.
 await aiPlugin(fastify)
-// Next.js rewrites /api/* → API host without a second /api prefix (see ui/next.config.js).
 await fastify.register(aiRoutes, { prefix: '/ai' })
 
 fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

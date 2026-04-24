@@ -3,16 +3,12 @@
 // All prompt templates for AppCloud's AI features.
 //
 // LOCAL (Ollama / llama3.2:3b):
-//   promptTagNormalise     — clean and classify tags from a cloud resource
-//   promptInferMapping     — decide app + component assignment for unmapped infra
-//   promptClassifyDrift    — decide if a config change is drift or expected
+//   promptTagNormalise       — clean and classify tags from a cloud resource
+//   promptInferMapping       — decide app + component assignment for unmapped infra
 //   promptExplainBlastRadius — short plain-English explanation of a risk score
 //
 // CLOUD (Anthropic / OpenAI):
 //   promptPlanDecommission — decommissioning impact plan for an application
-//   promptPlanChange       — change advisory for a proposed modification
-//   promptGovernanceAdvice — policy gap analysis against governance rules
-//   promptDriftReport      — summary report across multiple drift events
 
 export const LOCAL_SYSTEM = `You are AppCloud, an infrastructure intelligence engine.
 You reason about cloud resources, applications, and their relationships.
@@ -88,30 +84,6 @@ Respond with ONLY this JSON object:
   }
 }
 
-export function promptClassifyDrift({ resource, before, after, changeType }) {
-  return {
-    system: LOCAL_SYSTEM,
-    json: true,
-    temperature: 0.0,
-    prompt: `Classify whether this infrastructure change represents unexpected drift or a legitimate expected change.
-
-Resource    : ${resource.name} (${resource.resource_type} / ${resource.provider})
-Change type : ${changeType}
-Before      : ${JSON.stringify(before, null, 2)}
-After       : ${JSON.stringify(after, null, 2)}
-
-Drift classification:
-- "configuration_drift": unplanned config change (security group, tags, instance type)
-- "state_drift": resource added or removed outside of managed workflows
-- "tag_drift": tags changed or removed (could indicate ownership changes)
-- "expected_change": change was likely planned (version bump, scaling event)
-- "unknown": insufficient data to classify
-
-Respond with ONLY this JSON object:
-{"classification":"unknown","severity":"low","explanation":"","recommendation":"","requiresReview":false}`
-  }
-}
-
 export function promptExplainBlastRadius({ application, riskScore, tier, components, connectedApps, infraCount }) {
   return {
     system: LOCAL_SYSTEM,
@@ -170,85 +142,3 @@ Format as a clear plan an operations team can execute.`
   }
 }
 
-export function promptPlanChange({ application, component, proposedChange, connectedApps, riskScore, tier }) {
-  return {
-    system: CLOUD_SYSTEM,
-    temperature: 0.3,
-    prompt: `Provide a change advisory for the following proposed infrastructure change in AppCloud.
-
-Application  : ${application}
-Component    : ${component}
-Risk score   : ${riskScore}/100
-Tier         : ${tier} (1=most critical)
-Proposed change: ${proposedChange}
-
-Connected applications that may be affected:
-${connectedApps.map(a => `- ${a.name} [${a.direction}]`).join('\n') || '  none'}
-
-Provide:
-1. Impact assessment — what could break and for which downstream systems
-2. Recommended change window (business hours vs maintenance window)
-3. Rollback plan
-4. Pre-change verification steps
-5. Post-change validation steps
-6. Overall recommendation: PROCEED | PROCEED_WITH_CAUTION | DEFER | REJECT
-
-Be specific to the application context. Call out Tier 1 risks explicitly.`
-  }
-}
-
-export function promptGovernanceAdvice({ application, policies, violations, components }) {
-  return {
-    system: CLOUD_SYSTEM,
-    temperature: 0.3,
-    prompt: `Analyse this application's compliance with AppCloud governance policies.
-
-Application : ${application.name} (Tier ${application.tier || '?'})
-Environment : ${application.environment || 'unknown'}
-
-Active governance policies:
-${policies.map(p => `- ${p.name}: ${p.description}`).join('\n') || '  none'}
-
-Current violations:
-${violations.length ? violations.map(v => `- [${v.severity}] ${v.policy}: ${v.message}`).join('\n') : '  none - fully compliant'}
-
-Components:
-${components.map(c => `- ${c.name} (${c.type || 'service'})`).join('\n') || '  none'}
-
-Provide:
-1. Summary of compliance posture
-2. Explanation of each violation and its risk
-3. Specific remediation steps ordered by severity
-4. Any policy gaps — areas not currently covered by policies that present risk
-5. Recommended policy additions for this application type
-
-Be concrete. Reference specific component names where relevant.`
-  }
-}
-
-export function promptDriftReport({ driftEvents, timeWindow, affectedApps }) {
-  return {
-    system: CLOUD_SYSTEM,
-    temperature: 0.3,
-    prompt: `Produce a drift detection summary report for AppCloud.
-
-Time window      : ${timeWindow}
-Drift events     : ${driftEvents.length}
-Affected applications: ${affectedApps.join(', ') || 'none'}
-
-Events:
-${driftEvents.slice(0, 30).map(e =>
-  `- [${e.severity}] ${e.resourceName} (${e.resourceType}): ${e.classification} — ${e.explanation}`
-).join('\n')}
-${driftEvents.length > 30 ? `...and ${driftEvents.length - 30} more events` : ''}
-
-Produce an executive drift report covering:
-1. Overall drift health summary (1 paragraph)
-2. Top 3 most significant drift patterns observed
-3. Applications requiring immediate attention
-4. Root cause hypotheses for recurring patterns
-5. Recommended actions to reduce drift going forward
-
-Suitable for an engineering lead or platform team review.`
-  }
-}

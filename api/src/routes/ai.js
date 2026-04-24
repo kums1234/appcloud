@@ -85,38 +85,6 @@ export default async function aiRoutes(fastify) {
     }
   })
 
-  // ── GET /ai/changes/:id/risk-explain ───────────────────────────────────────
-  fastify.get('/changes/:id/risk-explain', async (req, reply) => {
-    const { id } = req.params
-
-    const changeRecords = await query(`MATCH (ch:Change {id: $id}) RETURN ch`, { id })
-    if (!changeRecords.length) return reply.notFound('Change not found')
-    const change = props(changeRecords[0].get('ch'))
-
-    const brRecords = await query(`
-      MATCH (ch:Change {id: $id})-[:MODIFIES]->(n)
-      OPTIONAL MATCH (a:Application)-[:CONTAINS]->(:Component)-[:DEPLOYED_ON]->(n)
-      WITH ch, n, collect(DISTINCT a) AS indirectApps
-      OPTIONAL MATCH (ch)-[:AFFECTS]->(directApp:Application)
-      RETURN collect(DISTINCT {label: labels(n)[0], name: n.name}) AS directlyModified,
-             collect(DISTINCT directApp.name)  AS directlyAffected,
-             collect(DISTINCT [app IN indirectApps | app.name]) AS indirectlyAffected
-    `, { id })
-
-    const br = brRecords[0] ? {
-      directlyModified:   brRecords[0].get('directlyModified') || [],
-      directlyAffected:   brRecords[0].get('directlyAffected') || [],
-      indirectlyAffected: [...new Set((brRecords[0].get('indirectlyAffected') || []).flat())],
-    } : {}
-
-    try {
-      const explanation = await ai.explainRisk(change, br)
-      return { changeId: id, explanation, riskScore: change.riskScore, provider: 'ollama', model: ai.local?.model }
-    } catch (err) {
-      return handleAIError(err, reply)
-    }
-  })
-
   // ── GET /ai/infra/:id/impact ────────────────────────────────────────────────
   fastify.get('/infra/:id/impact', async (req, reply) => {
     const { id } = req.params
@@ -236,42 +204,6 @@ export default async function aiRoutes(fastify) {
     }
   })
 
-  // ── GET /ai/compliance/narrative ────────────────────────────────────────────
-  fastify.get('/compliance/narrative', async (req, reply) => {
-    if (!ai.cloudAvailable) {
-      return reply.send(fastify.httpErrors.serviceUnavailable(
-        'Cloud AI is not configured. Set AI_CLOUD_PROVIDER and the corresponding API key.'
-      ))
-    }
-
-    const [summaryRes, violationsRes] = await Promise.all([
-      fastify.inject({ method: 'GET', url: '/governance/summary' }),
-      fastify.inject({ method: 'GET', url: '/governance/policy-violations' }),
-    ])
-
-    const report = {
-      summary:          JSON.parse(summaryRes.body),
-      policyViolations: JSON.parse(violationsRes.body),
-    }
-    const v = report.policyViolations || []
-    const c = report.summary?.changes || {}
-    let score = 100
-    score -= v.filter(x => x.severity === 'CRITICAL').length * 15
-    score -= v.filter(x => x.severity === 'HIGH').length     * 8
-    score -= v.filter(x => x.severity === 'MEDIUM').length   * 3
-    if ((c.approvalRate || 0) < 80)        score -= 10
-    if ((c.highRiskUnapproved || 0) > 0)   score -= 5 * c.highRiskUnapproved
-    if ((report.summary?.applications?.unowned || 0) > 0) score -= 5
-    report.complianceScore = Math.max(0, Math.min(100, score))
-
-    try {
-      const result = await ai.generateComplianceNarrative(report)
-      return { ...result, complianceScore: report.complianceScore }
-    } catch (err) {
-      return handleAIError(err, reply)
-    }
-  })
-
   // ── GET /ai/dependencies/analysis ──────────────────────────────────────────
   fastify.get('/dependencies/analysis', async (req, reply) => {
     if (!ai.cloudAvailable) {
@@ -294,14 +226,13 @@ export default async function aiRoutes(fastify) {
   // ── POST /ai/chat ───────────────────────────────────────────────────────────
   //
   // Enriched chat: fetches a live context snapshot from Neo4j (applications,
-  // infrastructure, recent changes, violations, drift) and injects it into the
-  // system prompt so the LLM can give informed, data-rich answers — similar to
-  // the quality achieved by the agent pipeline tools.
+  // infrastructure, unmapped resources, cross-app dependencies) and injects it
+  // into the system prompt so the LLM can give informed, data-rich answers.
   //
 
   async function buildContextSnapshot() {
     try {
-      const [appRecs, infraRecs, changeRecs, violationRecs, driftRecs, connRecs] = await Promise.all([
+      const [appRecs, infraRecs, driftRecs, connRecs] = await Promise.all([
         // Applications with tier, owner, component count
         query(`
           MATCH (a:Application)
@@ -321,31 +252,7 @@ export default async function aiRoutes(fastify) {
           ORDER BY provider, count DESC
         `).catch(() => []),
 
-        // Recent changes with risk scores
-        query(`
-          MATCH (ch:Change)
-          OPTIONAL MATCH (ch)-[:MODIFIES]->(target)
-          OPTIONAL MATCH (ch)-[:AFFECTS]->(app:Application)
-          RETURN ch.id AS id, ch.title AS title, ch.status AS status,
-                 ch.riskScore AS riskScore, ch.type AS type,
-                 ch.submittedBy AS submittedBy, ch.createdAt AS createdAt,
-                 collect(DISTINCT target.name)[..3] AS targets,
-                 collect(DISTINCT app.name)[..3] AS affectedApps
-          ORDER BY ch.riskScore DESC, ch.createdAt DESC LIMIT 15
-        `).catch(() => []),
-
-        // Policy violations
-        query(`
-          MATCH (v:Violation)
-          RETURN v.policy AS policy, v.severity AS severity,
-                 v.resource AS resource, v.detail AS detail
-          ORDER BY CASE v.severity
-            WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1
-            WHEN 'MEDIUM' THEN 2 ELSE 3 END
-          LIMIT 20
-        `).catch(() => []),
-
-        // Drift / unmapped resources
+        // Unmapped resources
         query(`
           MATCH (i:Infra)
           WHERE NOT (:Component)-[:DEPLOYED_ON]->(i)
@@ -375,17 +282,6 @@ export default async function aiRoutes(fastify) {
         mapped: (r.get('mapped') ?? 0).toString(),
       }))
 
-      const changes = changeRecs.map(r => ({
-        title: r.get('title'), status: r.get('status'),
-        risk: r.get('riskScore'), submittedBy: r.get('submittedBy'),
-        targets: r.get('targets') || [], affectedApps: r.get('affectedApps') || [],
-      }))
-
-      const violations = violationRecs.map(r => ({
-        policy: r.get('policy'), severity: r.get('severity'),
-        resource: r.get('resource'),
-      }))
-
       const unmapped = driftRecs.map(r => ({
         provider: r.get('provider'), type: r.get('type'),
         name: r.get('name'), region: r.get('region'),
@@ -396,7 +292,7 @@ export default async function aiRoutes(fastify) {
         connections: (r.get('connections') ?? 0).toString(),
       }))
 
-      return { apps, infra, changes, violations, unmapped, crossApp }
+      return { apps, infra, unmapped, crossApp }
     } catch (err) {
       fastify.log.warn(`[AI Chat] Context snapshot failed: ${err.message}`)
       return null
@@ -457,55 +353,9 @@ export default async function aiRoutes(fastify) {
       sections.push(s)
     }
 
-    // ── Changes ───────────────────────────────────────────────────────────────
-    if (ctx.changes.length) {
-      const highRisk = ctx.changes.filter(c => (c.risk || 0) >= 7)
-      const byStatus = {}
-      for (const c of ctx.changes) {
-        byStatus[c.status || 'unknown'] = (byStatus[c.status || 'unknown'] || 0) + 1
-      }
-      const statusLine = Object.entries(byStatus).map(([st, c]) => `${st}: **${c}**`).join(' | ')
-
-      let s = `## Changes — ${ctx.changes.length} recent\n\n`
-      s += `${statusLine}\n\n`
-      if (highRisk.length) {
-        s += `> **Alert:** ${highRisk.length} high-risk change(s) with risk score 7+\n\n`
-      }
-      s += `| Risk | Title | Status | Submitted by | Affected apps |\n`
-      s += `|------|-------|--------|--------------|---------------|\n`
-      for (const c of ctx.changes) {
-        const apps = c.affectedApps?.length ? c.affectedApps.join(', ') : '—'
-        s += `| ${c.risk ?? '?'} | ${c.title} | ${c.status} | ${c.submittedBy || '?'} | ${apps} |\n`
-      }
-      sections.push(s)
-    } else {
-      sections.push('## Changes\n\nNo recent changes.')
-    }
-
-    // ── Violations ────────────────────────────────────────────────────────────
-    if (ctx.violations.length) {
-      const bySev = {}
-      for (const v of ctx.violations) bySev[v.severity || '?'] = (bySev[v.severity || '?'] || 0) + 1
-      const sevLine = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
-        .filter(s => bySev[s]).map(s => `${s}: **${bySev[s]}**`).join(' | ')
-      const crit = bySev['CRITICAL'] || 0
-
-      let s = `## Policy Violations — ${ctx.violations.length} active\n\n`
-      s += `${sevLine}\n\n`
-      if (crit) s += `> **Urgent:** ${crit} CRITICAL violation(s) require immediate attention.\n\n`
-      s += `| Severity | Policy | Resource |\n`
-      s += `|----------|--------|----------|\n`
-      for (const v of ctx.violations) {
-        s += `| ${v.severity} | ${(v.policy || '').replace(/_/g, ' ')} | ${v.resource} |\n`
-      }
-      sections.push(s)
-    } else {
-      sections.push('## Policy Violations\n\nAll clear — no active violations.')
-    }
-
-    // ── Drift ─────────────────────────────────────────────────────────────────
+    // ── Unmapped resources ────────────────────────────────────────────────────
     if (ctx.unmapped.length) {
-      let s = `## Drift — ${ctx.unmapped.length} unmapped resources\n\n`
+      let s = `## Unmapped Resources — ${ctx.unmapped.length}\n\n`
       s += `| Provider / Type | Name | Region |\n`
       s += `|-----------------|------|--------|\n`
       for (const u of ctx.unmapped) {
@@ -514,7 +364,7 @@ export default async function aiRoutes(fastify) {
       s += `\n> **Recommendation:** Run discovery mapping to link these resources to applications.`
       sections.push(s)
     } else {
-      sections.push('## Drift\n\nAll resources mapped. No drift detected.')
+      sections.push('## Unmapped Resources\n\nAll resources mapped.')
     }
 
     // ── Cross-app dependencies ────────────────────────────────────────────────
@@ -551,25 +401,8 @@ export default async function aiRoutes(fastify) {
       }
     }
 
-    if (ctx.changes.length) {
-      lines.push(`\nRECENT CHANGES (sorted by risk):`)
-      for (const c of ctx.changes) {
-        const apps = c.affectedApps.length ? ` → affects: ${c.affectedApps.join(', ')}` : ''
-        lines.push(`  - [Risk ${c.risk ?? '?'}] "${c.title}" | status: ${c.status} | by: ${c.submittedBy || '?'}${apps}`)
-      }
-    }
-
-    if (ctx.violations.length) {
-      lines.push(`\nPOLICY VIOLATIONS (${ctx.violations.length}):`)
-      for (const v of ctx.violations) {
-        lines.push(`  - [${v.severity}] ${v.policy?.replace(/_/g, ' ')} — ${v.resource}`)
-      }
-    } else {
-      lines.push('\nPOLICY VIOLATIONS: none — all clear')
-    }
-
     if (ctx.unmapped.length) {
-      lines.push(`\nUNMAPPED RESOURCES (drift — ${ctx.unmapped.length} shown):`)
+      lines.push(`\nUNMAPPED RESOURCES (${ctx.unmapped.length} shown):`)
       for (const u of ctx.unmapped) {
         lines.push(`  - ${u.provider}/${u.type}: ${u.name} (${u.region || 'unknown region'})`)
       }
@@ -691,29 +524,6 @@ export default async function aiRoutes(fastify) {
         report += `Discovery and mapping pipeline completed. `
         if (discRes.ok) report += `${disc.total || 0} resources discovered. `
         if (mapRes.ok) report += `${map.appsCreated ?? 0} apps created, ${map.linked ?? 0} resources linked.`
-        return report
-      },
-    },
-    {
-      id: 'run_drift',
-      patterns: [/run\s+(the\s+)?drift/i, /check\s+(for\s+)?drift/i, /detect\s+drift/i, /drift\s+(detect|analys|scan)/i],
-      description: 'Run drift detection',
-      execute: async () => {
-        const res = await fetch(`http://localhost:${process.env.PORT || 3000}/workflows/drift`, {
-          method: 'GET', headers: { 'Content-Type': 'application/json' },
-        })
-        const data = await res.json()
-        let report = `## Drift Detection Results\n\n`
-        report += `- Total infra in graph: **${data.graphTerraformResources ?? 0}**\n`
-        report += `- Stale/unmapped: **${data.staleResources ?? 0}**\n`
-        const mapped = (data.graphTerraformResources || 0) - (data.staleResources || 0)
-        const pct = data.graphTerraformResources ? Math.round(mapped / data.graphTerraformResources * 100) : 100
-        report += `- Coverage: **${pct}%**\n`
-        if (data.staleResources > 0) {
-          report += `\n> **Action needed:** ${data.staleResources} resources are not linked to any application. Run mapping to resolve.`
-        } else {
-          report += `\nAll resources are mapped. No drift detected.`
-        }
         return report
       },
     },

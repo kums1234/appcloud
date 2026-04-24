@@ -12,16 +12,12 @@ export default async function graphRoutes(fastify) {
         OPTIONAL MATCH (a:Application)
         OPTIONAL MATCH (c:Component)
         OPTIONAL MATCH (i:Infra)
-        OPTIONAL MATCH (ch:Change)
         OPTIONAL MATCH (u:User)
-        OPTIONAL MATCH (ch2:Change {status: "draft"})
         OPTIONAL MATCH (i2:Infra {public: true})
         RETURN count(DISTINCT a)   AS appCount,
                count(DISTINCT c)   AS componentCount,
                count(DISTINCT i)   AS infraCount,
-               count(DISTINCT ch)  AS changeCount,
                count(DISTINCT u)   AS userCount,
-               count(DISTINCT ch2) AS pendingChanges,
                count(DISTINCT i2)  AS publicInfra
       `),
       query(`MATCH (c:Component) RETURN c.type AS type, count(c) AS cnt ORDER BY cnt DESC`),
@@ -33,9 +29,7 @@ export default async function graphRoutes(fastify) {
       applications:     serialize(r.get('appCount')),
       components:       serialize(r.get('componentCount')),
       infraResources:   serialize(r.get('infraCount')),
-      changes:          serialize(r.get('changeCount')),
       users:            serialize(r.get('userCount')),
-      pendingChanges:   serialize(r.get('pendingChanges')),
       publicInfraCount: serialize(r.get('publicInfra')),
       connections:      serialize(connRecords[0]?.get('connCount') ?? 0),
       componentsByType: compTypeRecords.map(r => ({

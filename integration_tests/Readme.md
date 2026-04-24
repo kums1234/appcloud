@@ -11,9 +11,7 @@ integration_tests/
 └── tests/
     ├── package.json
     ├── discovery.test.js  — AWS scan, graph population, idempotency
-    ├── accounts.test.js   — cloud account CRUD, infra→component linking
-    ├── workflows.test.js  — drift detection, change lifecycle, onboarding
-    └── governance.test.js — policy violations, compliance report
+    └── accounts.test.js   — cloud account CRUD, infra→component linking
 ```
 
 ---
@@ -67,8 +65,6 @@ Or run a specific suite:
 
 ```bash
 docker compose run --rm test npm run test:discovery
-docker compose run --rm test npm run test:workflows
-docker compose run --rm test npm run test:governance
 docker compose run --rm test npm run test:accounts
 ```
 

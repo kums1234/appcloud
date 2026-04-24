@@ -1,12 +1,12 @@
 // routes/users.js
 // Profile and role data lives in Postgres.
-// Neo4j User nodes are lightweight stubs (id + name only) kept for
-// SUBMITTED / APPROVED / REJECTED graph relationships on Change nodes.
+// Neo4j User nodes are lightweight stubs (id + name) kept as identity anchors
+// for future provenance relationships (e.g. which user authored an assessment).
 
-import { props, serialize } from '../utils/serialize.js'
+import { serialize } from '../utils/serialize.js'
 
 export default async function userRoutes(fastify) {
-  const { query, write } = fastify.neo4j
+  const { write } = fastify.neo4j
   const pg   = fastify.pg
   const auth = { preHandler: fastify.authenticate }
   const actor = (req) => req.user?.name || req.user?.id || 'system'
@@ -25,27 +25,7 @@ export default async function userRoutes(fastify) {
       [req.params.id]
     )
     if (!rows.length) return reply.notFound('User not found')
-    const user = rows[0]
-
-    // Enrich with activity counts from Neo4j graph
-    const records = await query(`
-      OPTIONAL MATCH (u:User {id: $id})-[:SUBMITTED]->(s:Change)
-      OPTIONAL MATCH (u:User {id: $id})-[:APPROVED]->(a:Change)
-      OPTIONAL MATCH (u:User {id: $id})-[:REJECTED]->(r:Change)
-      RETURN count(DISTINCT s) AS submitted,
-             count(DISTINCT a) AS approved,
-             count(DISTINCT r) AS rejected
-    `, { id: req.params.id })
-
-    const gr = records[0]
-    return {
-      ...user,
-      activity: {
-        submitted: gr ? serialize(gr.get('submitted')) : 0,
-        approved:  gr ? serialize(gr.get('approved'))  : 0,
-        rejected:  gr ? serialize(gr.get('rejected'))  : 0,
-      },
-    }
+    return rows[0]
   })
 
   // ── POST /users ─────────────────────────────────────────────────────────────
@@ -69,7 +49,7 @@ export default async function userRoutes(fastify) {
       throw err
     }
 
-    // Create Neo4j stub so this user can be assigned to changes immediately
+    // Create Neo4j stub so this user is a stable identity in the graph.
     await write('MERGE (u:User {id: $id}) SET u.name = $name', { id: user.id, name: user.name })
       .catch(() => {})
 
@@ -110,41 +90,10 @@ export default async function userRoutes(fastify) {
     )
     if (!rows.length) return reply.notFound('User not found')
 
-    // Remove Neo4j stub — DETACH DELETE preserves Change nodes but drops relationships.
-    // Change history is kept intact; the user just becomes anonymous on the graph.
+    // Remove Neo4j stub and its relationships.
     await write('MATCH (u:User {id: $id}) DETACH DELETE u', { id: req.params.id }).catch(() => {})
 
     pg.audit(actor(req), 'delete', 'User', req.params.id, rows[0].name).catch(() => {})
     reply.code(204)
-  })
-
-  // ── GET /users/:id/changes ──────────────────────────────────────────────────
-  // Graph query — Neo4j still owns the relationship trail.
-  fastify.get('/:id/changes', async (req, reply) => {
-    // Verify user exists in Postgres first
-    const rows = await pg.query('SELECT id FROM users WHERE id = $1 LIMIT 1', [req.params.id])
-    if (!rows.length) return reply.notFound('User not found')
-
-    const records = await query(`
-      MATCH (u:User {id: $id})
-      OPTIONAL MATCH (u)-[:SUBMITTED]->(s:Change)
-      OPTIONAL MATCH (u)-[:APPROVED]->(a:Change)
-      OPTIONAL MATCH (u)-[:REJECTED]->(r:Change)
-      RETURN
-        collect(DISTINCT {change: s, action: 'submitted'}) AS submitted,
-        collect(DISTINCT {change: a, action: 'approved'})  AS approved,
-        collect(DISTINCT {change: r, action: 'rejected'})  AS rejected
-    `, { id: req.params.id })
-
-    if (!records.length) return []
-    const r = records[0]
-    const flatten = (list, action) =>
-      list.filter(i => i.change !== null).map(i => ({ ...props(i.change), action }))
-
-    return [
-      ...flatten(r.get('submitted'), 'submitted'),
-      ...flatten(r.get('approved'),  'approved'),
-      ...flatten(r.get('rejected'),  'rejected'),
-    ].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
   })
 }

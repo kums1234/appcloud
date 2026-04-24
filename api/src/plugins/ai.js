@@ -6,8 +6,8 @@ import { decrypt } from '../utils/encrypt.js'
 // ─── Prompt library ──────────────────────────────────────────────────────────
 
 export const SYSTEM_INFRA = `You are an infrastructure intelligence assistant embedded in AppCloud,
-a graph-based platform for managing cloud infrastructure relationships, change governance,
-and compliance. Be concise, technical, and actionable. Never hallucinate resource IDs or names
+a graph-based platform for modelling cloud infrastructure relationships and blast-radius reasoning.
+Be concise, technical, and actionable. Never hallucinate resource IDs or names
 — only refer to data provided in the prompt. Respond in plain text unless asked for JSON.`
 
 // ─── Local AI helpers (Ollama) ────────────────────────────────────────────────
@@ -61,29 +61,6 @@ Ordered by confidence descending. Include only candidates where you see a genuin
   } catch {
     return []
   }
-}
-
-async function explainRisk(local, change, blastRadius) {
-  const prompt = `Explain the risk of this infrastructure change in plain English.
-
-Change: "${change.title || change.description}"
-Type: ${change.type || 'general'}
-Risk Score: ${change.riskScore}/10
-Status: ${change.status}
-
-Blast Radius:
-- Directly modified: ${(blastRadius.directlyModified || []).map(n => n.name).join(', ') || 'none'}
-- Directly affected apps: ${(blastRadius.directlyAffected || []).join(', ') || 'none'}
-- Indirectly affected apps: ${(blastRadius.indirectlyAffected || []).join(', ') || 'none'}
-
-Write a 3-4 sentence plain-English risk summary that a non-technical stakeholder could
-understand. Then add one bullet point of the most important mitigation to consider.`
-
-  const r = await local.chat([
-    { role: 'system', content: SYSTEM_INFRA },
-    { role: 'user',   content: prompt },
-  ], { temperature: 0.3, maxTokens: 384 })
-  return r.text.trim()
 }
 
 async function explainImpact(local, infraName, components, apps) {
@@ -153,30 +130,6 @@ Respond as structured JSON with keys: items (array), summary (object).`
   } catch {
     return { parsed: null, raw: r.text, provider: r.provider, model: r.model }
   }
-}
-
-async function generateComplianceNarrative(cloud, report) {
-  const prompt = `Generate an executive compliance narrative for this AppCloud report.
-
-Score: ${report.complianceScore}%
-Policy violations: ${report.policyViolations?.length || 0}
-  Critical: ${report.policyViolations?.filter(v => v.severity === 'CRITICAL').length || 0}
-  High: ${report.policyViolations?.filter(v => v.severity === 'HIGH').length || 0}
-Applications without owners: ${report.summary?.applications?.unowned || 0}
-Change approval rate: ${report.summary?.changes?.approvalRate || 0}%
-High-risk unapproved changes: ${report.summary?.changes?.highRiskUnapproved || 0}
-
-Write a 200-word executive summary suitable for a CISO or board report. Include:
-- Overall posture assessment
-- Top 2-3 risks requiring immediate attention
-- Positive controls in place
-- Recommended 30-day priorities`
-
-  const r = await cloud.chat([
-    { role: 'system', content: 'You are a cybersecurity and compliance expert writing for executive audiences. Be precise, professional, and avoid jargon.' },
-    { role: 'user',   content: prompt },
-  ], { temperature: 0.5, maxTokens: 512 })
-  return { narrative: r.text.trim(), provider: r.provider, model: r.model }
 }
 
 async function analyzeDependencies(cloud, topology) {
@@ -333,8 +286,6 @@ export async function aiPlugin(fastify) {
       explainMapping(await getLocal(), infra, suggestion),
     scoreMapping: async (infra, apps) =>
       scoreMapping(await getLocal(), infra, apps),
-    explainRisk: async (change, blastRadius) =>
-      explainRisk(await getLocal(), change, blastRadius),
     explainImpact: async (infraName, comps, apps) =>
       explainImpact(await getLocal(), infraName, comps, apps),
 
@@ -343,8 +294,6 @@ export async function aiPlugin(fastify) {
       planArchitecture(getCloud(), ctx),
     planDriftRemediation: (items) =>
       planDriftRemediation(getCloud(), items),
-    generateComplianceNarrative: (report) =>
-      generateComplianceNarrative(getCloud(), report),
     analyzeDependencies: (topo) =>
       analyzeDependencies(getCloud(), topo),
 
@@ -352,7 +301,6 @@ export async function aiPlugin(fastify) {
     safe: {
       explainMapping: safe(async (infra, s) => explainMapping(await getLocal(), infra, s)),
       scoreMapping:   safe(async (infra, apps) => scoreMapping(await getLocal(), infra, apps)),
-      explainRisk:    safe(async (ch, br) => explainRisk(await getLocal(), ch, br)),
       explainImpact:  safe(async (n, c, a) => explainImpact(await getLocal(), n, c, a)),
     },
   })
