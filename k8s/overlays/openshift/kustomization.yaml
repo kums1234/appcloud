@@ -6,7 +6,6 @@ namespace: appcloud
 resources:
   - ../../base
   - route-api.yaml
-  - scc-patch.yaml
   - hpa.yaml
 
 
@@ -16,7 +15,12 @@ images:
     newName: image-registry.openshift-image-registry.svc:5000/appcloud/appcloud-api
     newTag: latest
 
+# scc-patch.yaml is a strategic-merge patch, not a standalone resource,
+# so it belongs here rather than under resources:. Kustomize refuses to
+# "merge" two Deployments with the same name when both live in resources:
+# (the symptom was the accumulation error we saw on `kubectl kustomize`).
 patches:
+  - path: scc-patch.yaml
   # OpenShift default StorageClass
   - patch: |-
       - op: add
