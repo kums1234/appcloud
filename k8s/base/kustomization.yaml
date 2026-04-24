@@ -24,9 +24,9 @@ configMapGenerator:
   - name: postgres-init
     files:
       - postgres-init/01-schema.sql
-      - postgres-init/02-migrate-users.sql
       - postgres-init/03-audit-indexes.sql
       - postgres-init/07-integrations-evolution.sql
       - postgres-init/08-otel-staging.sql
+      - postgres-init/09-cmdb-assessment.sql
     options:
       disableNameSuffixHash: true

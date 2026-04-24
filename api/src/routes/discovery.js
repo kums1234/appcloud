@@ -1492,6 +1492,12 @@ export default async function discoveryRoutes(fastify) {
     const duration = Date.now() - startedAt
     audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
       { accounts: accounts.length, grandTotal, duration, results, errors })
+
+    // Tell the CMDB assessment scheduler that fresh data has landed. The
+    // scheduler picks this up on its next tick (or immediately, since the
+    // worker tick is cheap). No-op if the plugin isn't decorated.
+    fastify.cmdbAssessment?.markDirty?.().catch(() => {})
+
     return { total: grandTotal, duration, accounts: accounts.length, results, errors, stale, enrichment, bootstrap, completedAt: new Date().toISOString() }
   })
 

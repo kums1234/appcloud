@@ -297,6 +297,12 @@ export default async function integrationManagementRoutes(fastify) {
         [status, row.id],
       )
       audit(actor(req), 'scan', 'Integration', row.id, `${row.type}:${row.name}`, result)
+
+      // Tell the CMDB assessment scheduler a fresh scan has landed so it
+      // picks up the new :CmdbCi / :Infra nodes on its next tick. No-op if
+      // the plugin isn't decorated.
+      fastify.cmdbAssessment?.markDirty?.().catch(() => {})
+
       return { jobId: job.id, ...result }
     } catch (err) {
       const msg = err instanceof ConnectorError ? err.message : `scan failed: ${err.message}`

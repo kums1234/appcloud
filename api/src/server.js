@@ -16,9 +16,11 @@ import integrationManagementRoutes, { connectorsRegistryRoutes } from './routes/
 import { connectorsPlugin } from './plugins/connectors.js'
 import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
+import { cmdbAssessmentSchedulerPlugin } from './plugins/cmdb-assessment-scheduler.js'
 import discoveryRoutes from './routes/discovery.js'
 import discoveryMetadataRoutes from './routes/discovery.metadata.js'
 import auditRoutes from './routes/audit.js'
+import cmdbRoutes from './routes/cmdb.js'
 import { aiPlugin } from './plugins/ai.js'
 import aiRoutes from './routes/ai.js'
 
@@ -57,6 +59,11 @@ await otelAggregatorPlugin(fastify)
 // Scheduler — starts after server ready, requires pg to be initialised
 await schedulerPlugin(fastify)
 
+// CMDB assessment scheduler — periodic + dirty-flag-driven run of the
+// relevance/quality engine. Decorates fastify.cmdbAssessment so scanners
+// can call markDirty() after an ingest completes.
+await cmdbAssessmentSchedulerPlugin(fastify)
+
 // Protected routes — mutations require a valid X-API-Key header when
 // APPCLOUD_API_KEY is set. The fastify.authenticate decorator is a no-op when
 // auth is disabled so the same preHandler works in both modes.
@@ -77,6 +84,7 @@ await fastify.register(discoveryRoutes,         { prefix: '/discovery' })
 // discoveryRoutes so static paths under /discovery don't shadow dynamic ones.
 await fastify.register(discoveryMetadataRoutes, { prefix: '/discovery' })
 await fastify.register(auditRoutes,         { prefix: '/audit' })
+await fastify.register(cmdbRoutes,          { prefix: '/cmdb' })
 // AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
 // and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.
 await aiPlugin(fastify)
