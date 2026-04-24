@@ -61,16 +61,17 @@ export class ServiceNowClient {
   }
 
   /**
-   * Async generator yielding arrays of CI rows for one table, a page at a
-   * time. Caller decides when to stop (e.g. maxPerTable).
+   * Async generator yielding arrays of rows from any Table-API endpoint, a
+   * page at a time. Caller decides when to stop (e.g. via `max`).
    *
    * @param {string} tableName e.g. 'cmdb_ci_server'
    * @param {object} opts
    * @param {string[]} [opts.fields]   Whitelist of columns to request.
    * @param {number}   [opts.pageSize] Rows per page (default 500).
    * @param {number}   [opts.max]      Hard cap on total rows yielded.
+   * @param {string}   [opts.query]    sysparm_query expression (optional).
    */
-  async *listCis(tableName, { fields, pageSize = DEFAULT_PAGE_SIZE, max = Infinity } = {}) {
+  async *listTable(tableName, { fields, pageSize = DEFAULT_PAGE_SIZE, max = Infinity, query } = {}) {
     let offset  = 0
     let yielded = 0
     const params = {
@@ -79,6 +80,7 @@ export class ServiceNowClient {
       sysparm_display_value:  false,
     }
     if (fields?.length) params.sysparm_fields = fields.join(',')
+    if (query)          params.sysparm_query  = query
 
     while (yielded < max) {
       if (this.signal?.aborted) return
@@ -93,6 +95,47 @@ export class ServiceNowClient {
       yield result
       yielded += result.length
       // Short page ⇒ no more rows on the server.
+      if (result.length < limit) return
+      offset += result.length
+    }
+  }
+
+  // Kept for call-site readability — listCis is just listTable for CI tables.
+  listCis(tableName, opts) { return this.listTable(tableName, opts) }
+
+  /**
+   * Stream cmdb_rel_ci rows — one row per ServiceNow CI→CI relationship.
+   * Columns we care about: sys_id (relation id), parent (CI sys_id),
+   * child (CI sys_id), type (relationship type sys_id on cmdb_rel_type).
+   * Display-value on `type` is enabled on this call so we get the readable
+   * name ("Hosted on", "Depends on", ...) without a second fetch.
+   */
+  async *listRelations(opts = {}) {
+    const fields = ['sys_id', 'parent', 'child', 'type', 'sys_updated_on']
+    const params = {
+      sysparm_limit:          opts.pageSize || DEFAULT_PAGE_SIZE,
+      sysparm_exclude_reference_link: true,
+      sysparm_display_value:  'all',   // returns { value, display_value } for `type`
+      sysparm_fields:         fields.join(','),
+    }
+
+    let offset  = 0
+    let yielded = 0
+    const max = opts.max ?? Infinity
+    const pageSize = opts.pageSize || DEFAULT_PAGE_SIZE
+
+    while (yielded < max) {
+      if (this.signal?.aborted) return
+      const remaining = max - yielded
+      const limit     = Math.min(pageSize, remaining)
+      const { result } = await this._get('/api/now/table/cmdb_rel_ci', {
+        ...params,
+        sysparm_limit:  limit,
+        sysparm_offset: offset,
+      })
+      if (!Array.isArray(result) || result.length === 0) return
+      yield result
+      yielded += result.length
       if (result.length < limit) return
       offset += result.length
     }

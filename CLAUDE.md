@@ -27,7 +27,7 @@ Every write uses `MERGE`, never `CREATE`, for both nodes and edges. Scanners re-
 
 Two primary edge types, both with traceability properties attached (not just labels):
 
-- `:CONNECTED_TO` — a relationship inferred between resources (the suggest engine produces most of these)
+- `:CONNECTS_TO` — a relationship inferred between resources (the suggest engine produces most of these)
 - `:DEPLOYED_ON` — a structural hosting relationship (e.g., web app deployed on App Service Plan)
 
 Every edge carries traceability properties that explain *why* the edge exists:
@@ -61,7 +61,7 @@ The scanner does **not** infer relationships. That's the suggest engine's job.
 
 ### 2. Suggest engine
 
-Consumes the raw graph and proposes `:CONNECTED_TO` edges using layered signals. Current signals, in roughly increasing structural weight:
+Consumes the raw graph and proposes `:CONNECTS_TO` edges using layered signals. Current signals, in roughly increasing structural weight:
 
 - **Tag-based** — shared application tags, project tags, etc. (lowest confidence, easily misused)
 - **Structural Signal A: Resource Group co-location** — resources in the same RG get a base score (45–75 pts depending on type compatibility). This is the fallback when tags are missing.

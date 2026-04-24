@@ -1,17 +1,28 @@
 // api/src/connectors/servicenow/index.js
 //
-// Pull-only ServiceNow CMDB connector. Ingests raw CI rows into Neo4j as
-// :CmdbCi nodes keyed on sys_id. Does NOT infer edges — correlation with
-// cloud inventory lives in the /cmdb/assessment endpoint (Slice 6).
+// Pull-only ServiceNow CMDB connector. Two responsibilities:
+//
+//   1. Ingest CI rows from configured CMDB tables as :CmdbCi nodes keyed
+//      on sys_id (raw, no inference).
+//   2. Ingest ServiceNow's own CI→CI relationships from cmdb_rel_ci as
+//      :CONNECTS_TO / :DEPLOYED_ON edges between :CmdbCi nodes with
+//      source='servicenow-cmdb-rel'. The original ServiceNow relation
+//      label ("Hosted on", "Depends on", …) is preserved as the `relType`
+//      property.
+//
+// This connector intentionally does NOT cross-link to :Infra — that is
+// the job of the /cmdb/assessment engine in services/cmdb-assessment.
 //
 // Config shape:
 //   {
-//     instance:    'mycompany' | 'mycompany.service-now.com',
-//     username:    'api-user',
-//     password:    '…',                     // encrypted at rest (SECRET_FIELDS)
-//     tables:      ['cmdb_ci_server', …],   // optional; defaults below
-//     maxPerTable: 10000,                   // safety cap
-//     pageSize:    500,                     // rows per REST call
+//     instance:      'mycompany' | 'mycompany.service-now.com',
+//     username:      'api-user',
+//     password:      '…',                    // encrypted at rest (SECRET_FIELDS)
+//     tables:        ['cmdb_ci_server', …],  // optional; defaults below
+//     maxPerTable:   10000,                  // safety cap
+//     pageSize:      500,                    // rows per REST call
+//     pullRelations: true,                   // include cmdb_rel_ci? (default true)
+//     maxRelations:  100000,                 // safety cap for cmdb_rel_ci
 //   }
 
 import { ServiceNowClient } from './api.js'
@@ -44,19 +55,50 @@ const CI_FIELDS = [
 
 const DEFAULT_MAX_PER_TABLE = 10000
 const DEFAULT_PAGE_SIZE     = 500
+const DEFAULT_MAX_RELATIONS = 100000
+
+// ServiceNow relation-type display names → AppCloud edge labels.
+// Anything not listed falls through to :CONNECTS_TO (the more permissive
+// of the two existing edge types, consistent with CLAUDE.md's rule that
+// CONNECTS_TO is "a relationship inferred between resources").
+const REL_TYPE_TO_EDGE = {
+  'Hosted on::Hosts':             'DEPLOYED_ON',
+  'Runs on::Runs':                'DEPLOYED_ON',
+  'Virtualised by::Virtualises':  'DEPLOYED_ON',
+  'Virtualized by::Virtualizes':  'DEPLOYED_ON',
+  'Installed on::Installs':       'DEPLOYED_ON',
+  'Depends on::Used by':          'CONNECTS_TO',
+  'Uses::Used by':                'CONNECTS_TO',
+  'Provides::Receives':           'CONNECTS_TO',
+  'Receives data from::Sends data to': 'CONNECTS_TO',
+  'Connected to::Connected by':   'CONNECTS_TO',
+}
 
 // ── JSON Schema ─────────────────────────────────────────────────────────────
 const authSchema = {
   type: 'object',
   required: ['instance', 'username', 'password'],
   properties: {
-    instance:    { type: 'string' },
-    username:    { type: 'string' },
-    password:    { type: 'string' },
-    tables:      { type: 'array',   items: { type: 'string' }, default: DEFAULT_TABLES },
-    maxPerTable: { type: 'integer', minimum: 1, maximum: 1000000, default: DEFAULT_MAX_PER_TABLE },
-    pageSize:    { type: 'integer', minimum: 1, maximum: 2000,    default: DEFAULT_PAGE_SIZE },
+    instance:      { type: 'string' },
+    username:      { type: 'string' },
+    password:      { type: 'string' },
+    tables:        { type: 'array',   items: { type: 'string' }, default: DEFAULT_TABLES },
+    maxPerTable:   { type: 'integer', minimum: 1, maximum: 1000000, default: DEFAULT_MAX_PER_TABLE },
+    pageSize:      { type: 'integer', minimum: 1, maximum: 2000,    default: DEFAULT_PAGE_SIZE },
+    pullRelations: { type: 'boolean', default: true },
+    maxRelations:  { type: 'integer', minimum: 1, maximum: 10000000, default: DEFAULT_MAX_RELATIONS },
   },
+}
+
+// Map the display_value on cmdb_rel_ci.type — which comes back as a
+// parent/child pair "Hosted on::Hosts" — to our edge type. Exported for
+// tests + downstream observability.
+export function mapRelToEdge(displayName) {
+  if (!displayName) return { edge: 'CONNECTS_TO', relType: 'Unknown' }
+  const edge = REL_TYPE_TO_EDGE[displayName] || 'CONNECTS_TO'
+  // Preserve the forward-direction label ("Depends on" from "Depends on::Used by").
+  const relType = displayName.split('::')[0] || displayName
+  return { edge, relType }
 }
 
 // ── Connector hooks ─────────────────────────────────────────────────────────
@@ -72,14 +114,17 @@ async function healthCheck(cfg) {
 }
 
 /**
- * Yields one batch per page per configured table. Each batch carries its
- * table name so normalize() can attribute the rows.
+ * Yields batches from two sources:
+ *   1. One batch per page per configured CI table.
+ *   2. One batch per page of cmdb_rel_ci (relationships) when pullRelations
+ *      is enabled.
+ * Batch shape carries a `kind` discriminator consumed by normalize().
  */
 async function* fetch(cfg, ctx) {
   const tables = cfg.tables?.length ? cfg.tables : DEFAULT_TABLES
   const client = new ServiceNowClient({ ...cfg, signal: ctx?.signal })
 
-  ctx?.log?.info?.(`[servicenow] scanning ${tables.length} table(s) at ${cfg.instance}`)
+  ctx?.log?.info?.(`[servicenow] scanning ${tables.length} CI table(s) at ${cfg.instance}`)
 
   for (const table of tables) {
     if (ctx?.signal?.aborted) return
@@ -91,23 +136,84 @@ async function* fetch(cfg, ctx) {
         max:      cfg.maxPerTable || DEFAULT_MAX_PER_TABLE,
       })) {
         pageCount++
-        yield { table, rows }
+        yield { kind: 'cis', table, rows }
         if (ctx?.signal?.aborted) return
       }
       ctx?.log?.info?.(`[servicenow] ${table}: ${pageCount} page(s) fetched`)
     } catch (err) {
       // Surface the failure via normalize+ingest so the sync_job row captures
       // it, but don't abort the whole scan — other tables may still succeed.
-      yield { table, rows: [], fetchError: err.message }
+      yield { kind: 'cis', table, rows: [], fetchError: err.message }
+    }
+  }
+
+  if (cfg.pullRelations !== false) {
+    if (ctx?.signal?.aborted) return
+    ctx?.log?.info?.(`[servicenow] scanning cmdb_rel_ci at ${cfg.instance}`)
+    let pageCount = 0
+    try {
+      for await (const rows of client.listRelations({
+        pageSize: cfg.pageSize || DEFAULT_PAGE_SIZE,
+        max:      cfg.maxRelations || DEFAULT_MAX_RELATIONS,
+      })) {
+        pageCount++
+        yield { kind: 'rels', rows }
+        if (ctx?.signal?.aborted) return
+      }
+      ctx?.log?.info?.(`[servicenow] cmdb_rel_ci: ${pageCount} page(s) fetched`)
+    } catch (err) {
+      yield { kind: 'rels', rows: [], fetchError: err.message }
     }
   }
 }
 
 function normalize(raw) {
+  const fetchedAt = new Date().toISOString()
+  const source    = { connectorId: 'servicenow', fetchedAt }
+
+  if (raw.kind === 'rels') {
+    if (raw.fetchError) {
+      return {
+        kind:    'cmdb-rels',
+        source,
+        rels:    [],
+        warning: `fetch failed for cmdb_rel_ci: ${raw.fetchError}`,
+      }
+    }
+    // cmdb_rel_ci row shape when sysparm_display_value=all:
+    //   sys_id:         { value, display_value }
+    //   parent:         { value, display_value }
+    //   child:          { value, display_value }
+    //   type:           { value, display_value }   // e.g. "Hosted on::Hosts"
+    //   sys_updated_on: { value, display_value }
+    // `value` is the raw string/sys_id; `display_value` is the human label.
+    const v = (col) => (col == null) ? null : (typeof col === 'object' ? col.value : col)
+    const dv = (col) => (col == null) ? null : (typeof col === 'object' ? col.display_value : col)
+
+    const rels = raw.rows.map(row => {
+      const parentId = v(row.parent)
+      const childId  = v(row.child)
+      if (!parentId || !childId) return null
+      const { edge, relType } = mapRelToEdge(dv(row.type))
+      return {
+        rel_sys_id: v(row.sys_id),
+        parent:     parentId,
+        child:      childId,
+        edge,                                   // 'CONNECTS_TO' | 'DEPLOYED_ON'
+        relType,                                // e.g. 'Depends on'
+        relTypeRaw: dv(row.type) || null,
+        updatedOn:  v(row.sys_updated_on) || null,
+      }
+    }).filter(Boolean)
+
+    return { kind: 'cmdb-rels', source, rels }
+  }
+
+  // Default / explicit 'cis' kind
   if (raw.fetchError) {
     return {
       kind:    'cmdb-cis',
-      source:  { connectorId: 'servicenow', fetchedAt: new Date().toISOString() },
+      source,
       table:   raw.table,
       cis:     [],
       warning: `fetch failed for ${raw.table}: ${raw.fetchError}`,
@@ -130,15 +236,15 @@ function normalize(raw) {
     sn_updated_on:      row.sys_updated_on || null,
   })).filter(ci => ci.sys_id)
 
-  return {
-    kind:   'cmdb-cis',
-    source: { connectorId: 'servicenow', fetchedAt: new Date().toISOString() },
-    table:  raw.table,
-    cis,
-  }
+  return { kind: 'cmdb-cis', source, table: raw.table, cis }
 }
 
 async function ingest(normalized, ctx) {
+  if (normalized.kind === 'cmdb-rels') return ingestRels(normalized, ctx)
+  return ingestCis(normalized, ctx)
+}
+
+async function ingestCis(normalized, ctx) {
   const warnings = []
   if (normalized.warning) warnings.push(normalized.warning)
 
@@ -193,6 +299,84 @@ async function ingest(normalized, ctx) {
   }
 }
 
+// ── cmdb_rel_ci → :CONNECTS_TO / :DEPLOYED_ON edges between :CmdbCi nodes
+//
+// We do a separate batch per edge label so the Cypher query can use a
+// literal relationship type (Neo4j doesn't support variable rel types in
+// MERGE without APOC). For each group, we pre-materialise the CI stubs
+// with MERGE on sys_id so dangling parent/child references don't fail the
+// write — they get upgraded later by a CI-table scan.
+async function ingestRels(normalized, ctx) {
+  const warnings = []
+  if (normalized.warning) warnings.push(normalized.warning)
+
+  if (!normalized.rels.length) {
+    return { resourcesFound: 0, resourcesCreated: 0, resourcesUpdated: 0, resourcesSkipped: 0, edgesCreated: 0, warnings }
+  }
+
+  const now = new Date().toISOString()
+  let edgesCreated = 0
+  let edgesUpdated = 0
+  const byEdge = { CONNECTS_TO: [], DEPLOYED_ON: [] }
+  for (const r of normalized.rels) byEdge[r.edge].push(r)
+
+  for (const [edgeLabel, group] of Object.entries(byEdge)) {
+    if (!group.length) continue
+    // Count existing edges with this source tag so we can split created/updated.
+    let existingCount = 0
+    try {
+      const rows = await ctx.neo4j.query(
+        `UNWIND $rels AS r
+         MATCH (p:CmdbCi { sys_id: r.parent })-[e:${edgeLabel}]->(c:CmdbCi { sys_id: r.child })
+         WHERE e.source = 'servicenow-cmdb-rel' AND e.relSysId = r.rel_sys_id
+         RETURN count(e) AS n`,
+        { rels: group },
+      )
+      existingCount = rows[0]?.get?.('n')?.toNumber?.() ?? Number(rows[0]?.get?.('n') ?? 0)
+    } catch (err) {
+      warnings.push(`rel pre-count (${edgeLabel}) failed: ${err.message}`)
+    }
+
+    try {
+      await ctx.neo4j.write(
+        `UNWIND $rels AS r
+         MERGE (p:CmdbCi { sys_id: r.parent })
+         MERGE (c:CmdbCi { sys_id: r.child })
+         MERGE (p)-[e:${edgeLabel} { relSysId: r.rel_sys_id }]->(c)
+         ON CREATE SET
+           e.source     = 'servicenow-cmdb-rel',
+           e.relType    = r.relType,
+           e.relTypeRaw = r.relTypeRaw,
+           e.confidence = 85,
+           e.evidence   = 'ServiceNow cmdb_rel_ci ' + r.rel_sys_id + ': ' + r.relType,
+           e.createdAt  = $now
+         SET
+           e.relType    = r.relType,
+           e.relTypeRaw = r.relTypeRaw,
+           e.lastSeenAt = $now,
+           e.snUpdatedOn = r.updatedOn`,
+        { rels: group, now },
+      )
+    } catch (err) {
+      warnings.push(`rel ingest (${edgeLabel}) failed: ${err.message}`)
+      continue
+    }
+
+    edgesCreated += Math.max(0, group.length - existingCount)
+    edgesUpdated += existingCount
+  }
+
+  return {
+    resourcesFound:   0,
+    resourcesCreated: 0,
+    resourcesUpdated: 0,
+    resourcesSkipped: 0,
+    edgesCreated,
+    edgesUpdated,
+    warnings,
+  }
+}
+
 /** @type {import('../types.js').UiMetadata} */
 const uiMetadata = {
   vendor:         'ServiceNow',
@@ -204,6 +388,7 @@ const uiMetadata = {
   capabilities: [
     'Basic-auth API',
     'Configurable CI tables',
+    'cmdb_rel_ci → :CONNECTS_TO / :DEPLOYED_ON',
     'sys_id-keyed idempotent MERGE',
   ],
   fields: [
@@ -217,9 +402,13 @@ const uiMetadata = {
     { key: 'tables',   label: 'CMDB TABLES (comma-separated)', type: 'text',
       placeholder: DEFAULT_TABLES.join(', '),
       help: 'Leave blank to scan the four defaults: servers, databases, cloud resources, business apps.' },
-    { key: 'maxPerTable', label: 'MAX ROWS PER TABLE', type: 'number',
+    { key: 'pullRelations', label: 'INGEST CMDB RELATIONSHIPS', type: 'boolean',
+      help: 'Pull cmdb_rel_ci rows as graph edges between :CmdbCi nodes.' },
+    { key: 'maxPerTable',  label: 'MAX ROWS PER TABLE',     type: 'number',
       placeholder: String(DEFAULT_MAX_PER_TABLE) },
-    { key: 'pageSize',    label: 'PAGE SIZE',          type: 'number',
+    { key: 'maxRelations', label: 'MAX RELATIONSHIP ROWS',  type: 'number',
+      placeholder: String(DEFAULT_MAX_RELATIONS) },
+    { key: 'pageSize',     label: 'PAGE SIZE',              type: 'number',
       placeholder: String(DEFAULT_PAGE_SIZE) },
   ],
 }
@@ -229,7 +418,7 @@ const spec = {
   id:          'servicenow',
   category:    'cmdb',
   displayName: 'ServiceNow CMDB',
-  description: 'Pulls Configuration Items from ServiceNow CMDB tables (default: cmdb_ci_server, cmdb_ci_database, cmdb_ci_cloud_resource_base, cmdb_ci_business_app) into Neo4j as raw :CmdbCi nodes keyed on sys_id. Does not infer edges — correlation with cloud inventory is done by /cmdb/assessment.',
+  description: 'Pulls Configuration Items from ServiceNow CMDB tables (default: cmdb_ci_server, cmdb_ci_database, cmdb_ci_cloud_resource_base, cmdb_ci_business_app) into Neo4j as :CmdbCi nodes keyed on sys_id, and cmdb_rel_ci rows as :CONNECTS_TO / :DEPLOYED_ON edges between those nodes (source=servicenow-cmdb-rel, confidence=85). Correlation to :Infra is done by /cmdb/assessment.',
   authSchema,
   uiMetadata,
   healthCheck,
