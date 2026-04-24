@@ -1,7 +1,12 @@
 import { INFRA_ONLY_TYPES, PLATFORM_TYPES, hasExplicitAppTag } from './discovery.schema.js'
 
-export async function bootstrapDiscovery(fastify) {
+// Bootstrap accepts an optional `episodeId` so every :DEPLOYED_ON edge it
+// writes carries the same provenance tag as the scan that triggered it.
+// Callers that invoke bootstrap directly (e.g. POST /discovery/bootstrap)
+// can omit it; the edges will still have their `source` tag.
+export async function bootstrapDiscovery(fastify, opts = {}) {
   const { write, query } = fastify.neo4j
+  const episodeId = opts.episodeId || null
 
   function parse(val) {
     try { return typeof val === 'string' ? JSON.parse(val) : val || {} } catch { return {} }
@@ -233,7 +238,9 @@ export async function bootstrapDiscovery(fastify) {
           MATCH (i:Infra {id: $infraId})
           MERGE (c)-[rel:DEPLOYED_ON]->(i)
           ON CREATE SET rel.source = 'bootstrap', rel.mappedAt = datetime()
-        `, { compId, infraId: infra.id })
+          SET rel.lastSeenAt = datetime(),
+              rel.episodeId  = $episodeId
+        `, { compId, infraId: infra.id, episodeId })
 
         linked++
       } catch (err) {
@@ -320,7 +327,9 @@ export async function bootstrapDiscovery(fastify) {
             ON CREATE SET rel.source = 'bootstrap-rg-propagation',
                           rel.rgRatio = $ratio,
                           rel.mappedAt = datetime()
-          `, { compId, infraId: row.get('infraId'), ratio })
+            SET rel.lastSeenAt = datetime(),
+                rel.episodeId  = $episodeId
+          `, { compId, infraId: row.get('infraId'), ratio, episodeId })
           rgLinked++
         } catch (err) {
           skipped.push({ infraId: row.get('infraId'), error: err.message })

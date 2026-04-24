@@ -18,9 +18,9 @@
 //
 // Returns a summary: counts + timings. Callers decide how to log/persist.
 
-import { randomUUID } from 'crypto'
 import { buildInfraIndex, matchCiToInfra } from './matcher.js'
 import { scoreRelevance, scoreQuality, daysBetween } from './scoring.js'
+import { startEpisode, finishEpisode } from '../episodes.js'
 
 const EPISODE_SOURCE = 'cmdb-assessment'
 
@@ -32,8 +32,10 @@ export async function runAssessment(ctx, opts = {}) {
   if (!neo4j?.query || !neo4j?.write) {
     throw new Error('runAssessment requires ctx.neo4j with query + write')
   }
-  const episodeId = opts.episodeId || randomUUID()
-  const startedAt = new Date().toISOString()
+  // Use shared episode helper so the :IngestionEpisode node shape matches
+  // every other producer in the system.
+  const episode = await startEpisode(neo4j, EPISODE_SOURCE, opts.episodeId)
+  const { uuid: episodeId, startedAt } = episode
   const t0 = Date.now()
 
   // ── 1. Fetch :Infra + :CmdbCi ─────────────────────────────────────────────
@@ -190,29 +192,15 @@ export async function runAssessment(ctx, opts = {}) {
     `, { rows: slice, episodeId })
   }
 
-  // ── 6. Emit the IngestionEpisode node ────────────────────────────────────
-  const finishedAt = new Date().toISOString()
-  await neo4j.write(`
-    MERGE (e:IngestionEpisode { uuid: $episodeId })
-    SET e.source     = $source,
-        e.startedAt  = $startedAt,
-        e.finishedAt = $finishedAt,
-        e.outcome    = $outcome,
-        e.stats      = $statsJson
-  `, {
-    episodeId,
-    source:     EPISODE_SOURCE,
-    startedAt,
-    finishedAt,
-    outcome:    'ok',
-    statsJson:  JSON.stringify({
-      cis: cis.length,
-      infra: infraNodes.length,
-      matched: matched.length,
-      unmatched: unmatched.length,
-    }),
+  // ── 6. Finish the episode ────────────────────────────────────────────────
+  await finishEpisode(neo4j, episode, 'ok', {
+    cis:       cis.length,
+    infra:     infraNodes.length,
+    matched:   matched.length,
+    unmatched: unmatched.length,
   })
 
+  const finishedAt = new Date().toISOString()
   const durationMs = Date.now() - t0
   return {
     episodeId,

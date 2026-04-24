@@ -16,6 +16,7 @@ import { props, serialize } from '../utils/serialize.js'
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { bootstrapDiscovery } from './discovery.bootstrap.js'
 import { bootstrapSuggestFallback } from './discovery.suggest.patch.js'
+import { startEpisode, finishEpisode } from '../services/episodes.js'
 import { runAutoCreateIfEnabled } from '../plugins/scheduler.auto-create.patch.js'
 import { enrichAzureRelationships } from './discovery.azure.enrich.js'
 import { getLabelsForType, getPromotedFields, buildLabelSetClause, INFRA_ONLY_TYPES, PLATFORM_TYPES, hasExplicitAppTag } from './discovery.schema.js'
@@ -1416,6 +1417,11 @@ export default async function discoveryRoutes(fastify) {
       return reply.badRequest('No cloud accounts configured. Add accounts via Integrations first.')
     }
 
+    // One episode spans the whole scan+enrich+bootstrap pipeline so edges
+    // produced by any stage share a single provenance id.
+    const episode = await startEpisode(fastify.neo4j, 'discovery.scan.all').catch(() => null)
+    const episodeId = episode?.uuid || null
+
     const results    = {}
     const errors     = {}
     const providers  = new Set()
@@ -1481,24 +1487,33 @@ export default async function discoveryRoutes(fastify) {
       }
     }
 
-    // Auto-bootstrap: create applications and link unmapped resources
+    // Auto-bootstrap: create applications and link unmapped resources.
+    // Bootstrap shares the parent scan's episodeId so every :DEPLOYED_ON
+    // edge it writes is traceable to this scan run.
     let bootstrap = null
     try {
-      bootstrap = await bootstrapDiscovery(fastify)
+      bootstrap = await bootstrapDiscovery(fastify, { episodeId })
     } catch (err) {
       fastify.log.warn(`[Auto-bootstrap] ${err.message}`)
     }
 
     const duration = Date.now() - startedAt
     audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
-      { accounts: accounts.length, grandTotal, duration, results, errors })
+      { accounts: accounts.length, grandTotal, duration, results, errors, episodeId })
 
     // Tell the CMDB assessment scheduler that fresh data has landed. The
     // scheduler picks this up on its next tick (or immediately, since the
     // worker tick is cheap). No-op if the plugin isn't decorated.
     fastify.cmdbAssessment?.markDirty?.().catch(() => {})
 
-    return { total: grandTotal, duration, accounts: accounts.length, results, errors, stale, enrichment, bootstrap, completedAt: new Date().toISOString() }
+    const outcome = Object.keys(errors).length ? 'partial' : 'ok'
+    await finishEpisode(fastify.neo4j, episode, outcome, {
+      accounts:   accounts.length,
+      grandTotal,
+      durationMs: duration,
+    }).catch(() => {})
+
+    return { episodeId, total: grandTotal, duration, accounts: accounts.length, results, errors, stale, enrichment, bootstrap, completedAt: new Date().toISOString() }
   })
 
   // ── GET /discovery/schedule ─────────────────────────────────────────────

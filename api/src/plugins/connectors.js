@@ -11,6 +11,7 @@
 
 import { loadConnectors, getConnector, listConnectors, serializeSpec } from '../connectors/index.js'
 import { runPullScan, ConnectorError } from '../connectors/base.js'
+import { startEpisode, finishEpisode } from '../services/episodes.js'
 
 // Applied on every boot — safe due to IF NOT EXISTS / DO-block guards.
 const RUNTIME_DDL = `
@@ -65,14 +66,37 @@ export async function connectorsPlugin(fastify) {
       if (spec.receiver && !spec.fetch) {
         throw new ConnectorError(spec.id, 'dispatch', 'push-style connector has no pull entrypoint')
       }
+      // Every connector run is an :IngestionEpisode. opts.episodeId lets
+      // a caller reuse a parent episode (e.g. when /discovery/scan/all
+      // drives several connector runs under one audit id).
+      const episode = await startEpisode(
+        fastify.neo4j,
+        `connector:${spec.id}`,
+        opts.episodeId,
+      )
       const ctx = {
         log:           fastify.log,
         pg:            fastify.pg,
         neo4j:         fastify.neo4j,
         integrationId: integrationRow.id,
+        episodeId:     episode.uuid,
         signal:        opts.signal,
       }
-      return runPullScan(spec, integrationRow.config || {}, ctx)
+      let outcome = 'ok'
+      try {
+        const result = await runPullScan(spec, integrationRow.config || {}, ctx)
+        if ((result.warnings || []).length) outcome = 'partial'
+        await finishEpisode(fastify.neo4j, episode, outcome, {
+          resourcesFound:   result.resourcesFound,
+          resourcesCreated: result.resourcesCreated,
+          resourcesUpdated: result.resourcesUpdated,
+          edgesCreated:     result.edgesCreated ?? 0,
+        })
+        return { ...result, episodeId: episode.uuid }
+      } catch (err) {
+        await finishEpisode(fastify.neo4j, episode, 'error', { error: err.message })
+        throw err
+      }
     },
   })
 

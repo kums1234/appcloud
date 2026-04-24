@@ -284,8 +284,9 @@ async function ingestCis(normalized, ctx) {
         n.cloud_id           = ci.cloud_id,
         n.sn_updated_on      = ci.sn_updated_on,
         n.source             = 'servicenow',
-        n.lastSeenAt         = $now
-  `, { cis: normalized.cis, now })
+        n.lastSeenAt         = $now,
+        n.lastEpisodeId      = $episodeId
+  `, { cis: normalized.cis, now, episodeId: ctx.episodeId || null })
 
   const created = normalized.cis.filter(c => !existing.has(c.sys_id)).length
   const updated = normalized.cis.length - created
@@ -354,8 +355,9 @@ async function ingestRels(normalized, ctx) {
            e.relType    = r.relType,
            e.relTypeRaw = r.relTypeRaw,
            e.lastSeenAt = $now,
-           e.snUpdatedOn = r.updatedOn`,
-        { rels: group, now },
+           e.snUpdatedOn = r.updatedOn,
+           e.episodeId  = $episodeId`,
+        { rels: group, now, episodeId: ctx.episodeId || null },
       )
     } catch (err) {
       warnings.push(`rel ingest (${edgeLabel}) failed: ${err.message}`)
