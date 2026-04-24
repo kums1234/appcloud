@@ -5,8 +5,7 @@
 #   ./k8s/scripts/deploy-minikube.sh              # full deploy (build only if changed)
 #   ./k8s/scripts/deploy-minikube.sh --force       # force rebuild even if images match
 #   ./k8s/scripts/deploy-minikube.sh --skip-build  # skip build + load entirely
-#   ./k8s/scripts/deploy-minikube.sh --api-only    # rebuild only the API image
-#   ./k8s/scripts/deploy-minikube.sh --ui-only     # rebuild only the UI image
+#   ./k8s/scripts/deploy-minikube.sh --api-only    # (kept for backwards compat — same as default)
 #
 # Smart behavior:
 #   - Compares local Docker image IDs with minikube's image IDs
@@ -17,14 +16,11 @@ set -euo pipefail
 
 SKIP_BUILD=false
 FORCE_BUILD=false
-API_ONLY=false
-UI_ONLY=false
 for arg in "$@"; do
   case "$arg" in
     --skip-build) SKIP_BUILD=true ;;
     --force)      FORCE_BUILD=true ;;
-    --api-only)   API_ONLY=true ;;
-    --ui-only)    UI_ONLY=true ;;
+    --api-only)   ;;
   esac
 done
 
@@ -97,7 +93,6 @@ release_image_lock() {
 
 # ── Smart build + load ────────────────────────────────────────────────────────
 NEEDS_RESTART_API=false
-NEEDS_RESTART_UI=false
 
 if [[ "$SKIP_BUILD" == "true" ]]; then
   echo "► Skipping build + load (--skip-build)"
@@ -146,11 +141,10 @@ else
       echo "    Stale image is likely referenced by a running pod. Scaling down + forcing reload..."
 
       # Identify which deployment is referencing the image so we can release
-      # the lock. `appcloud-api` → `api`, `appcloud-ui` → `ui`.
+      # the lock. `appcloud-api` → `api`.
       local deployment=""
       case "$name" in
         appcloud-api) deployment="api" ;;
-        appcloud-ui)  deployment="ui"  ;;
       esac
 
       if [[ -n "$deployment" ]]; then
@@ -183,15 +177,9 @@ else
 
     # Flag restart needed
     if [[ "$name" == "appcloud-api" ]]; then NEEDS_RESTART_API=true; fi
-    if [[ "$name" == "appcloud-ui" ]];  then NEEDS_RESTART_UI=true; fi
   }
 
-  if [[ "$UI_ONLY" == "false" ]]; then
-    build_and_load "appcloud-api" "$ROOT_DIR/api"
-  fi
-  if [[ "$API_ONLY" == "false" ]]; then
-    build_and_load "appcloud-ui" "$ROOT_DIR/ui"
-  fi
+  build_and_load "appcloud-api" "$ROOT_DIR/api"
 fi
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
@@ -256,13 +244,8 @@ if [[ "$NEEDS_RESTART_API" == "true" ]]; then
   echo "► Restarting API pods (new image loaded)..."
   kubectl -n appcloud delete pod -l app=api --wait=false 2>/dev/null || true
 fi
-if [[ "$NEEDS_RESTART_UI" == "true" ]]; then
-  echo "► Restarting UI pods (new image loaded)..."
-  kubectl -n appcloud delete pod -l app=ui --wait=false 2>/dev/null || true
-fi
 
 wait_for_deployment api 240
-wait_for_deployment ui  180
 
 # ── /etc/hosts ────────────────────────────────────────────────────────────────
 if grep -q "appcloud.local" /etc/hosts; then
@@ -276,24 +259,14 @@ fi
 # If this fails, the pod will silently run stale code. Fail loud here instead.
 final_api_local=$(local_image_id appcloud-api:latest)
 final_api_mk=$(minikube_image_id appcloud-api:latest)
-final_ui_local=$(local_image_id appcloud-ui:latest)
-final_ui_mk=$(minikube_image_id appcloud-ui:latest)
 
 sanity_ok=true
-if [[ "$UI_ONLY" == "false" ]] && [[ "$SKIP_BUILD" == "false" ]] \
+if [[ "$SKIP_BUILD" == "false" ]] \
    && [[ -n "$final_api_local" ]] && [[ "$final_api_local" != "$final_api_mk" ]]; then
   echo ""
   echo "  ✗ SANITY CHECK FAILED: API image IDs differ"
   echo "      Local:    $final_api_local"
   echo "      Minikube: $final_api_mk"
-  sanity_ok=false
-fi
-if [[ "$API_ONLY" == "false" ]] && [[ "$SKIP_BUILD" == "false" ]] \
-   && [[ -n "$final_ui_local" ]] && [[ "$final_ui_local" != "$final_ui_mk" ]]; then
-  echo ""
-  echo "  ✗ SANITY CHECK FAILED: UI image IDs differ"
-  echo "      Local:    $final_ui_local"
-  echo "      Minikube: $final_ui_mk"
   sanity_ok=false
 fi
 
@@ -311,18 +284,16 @@ echo "════════════════════════�
 echo ""
 echo "  Image status:"
 echo "    API: $final_api_local (local) / $final_api_mk (minikube)"
-echo "    UI:  $final_ui_local (local) / $final_ui_mk (minikube)"
 echo ""
 echo "  Access:"
-echo "    Port forward:  kubectl -n appcloud port-forward svc/ui 4000:4000"
-echo "                   then open http://localhost:4000"
+echo "    Port forward:  kubectl -n appcloud port-forward svc/api 3000:3000"
+echo "                   then open http://localhost:3000"
 echo "    Tunnel:        minikube tunnel --profile=$PROFILE"
 echo "                   then open http://appcloud.local"
 echo ""
 echo "  Quick redeploy (code changes only):"
-echo "    ./k8s/scripts/deploy-minikube.sh --api-only    # API changes"
-echo "    ./k8s/scripts/deploy-minikube.sh --ui-only     # UI changes"
-echo "    ./k8s/scripts/deploy-minikube.sh --force       # force full rebuild"
+echo "    ./k8s/scripts/deploy-minikube.sh               # API rebuild (default)"
+echo "    ./k8s/scripts/deploy-minikube.sh --force       # force rebuild"
 echo ""
 echo "  Logs:      kubectl -n appcloud logs -f deploy/api"
 echo "  Pods:      kubectl -n appcloud get pods"

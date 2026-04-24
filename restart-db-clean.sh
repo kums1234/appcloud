@@ -46,6 +46,5 @@ echo ""
 echo "=== Stack status ==="
 docker compose ps
 echo ""
-echo "UI:  http://localhost:4000"
 echo "API: http://localhost:3000"
 echo "Neo4j Browser: http://localhost:7474"

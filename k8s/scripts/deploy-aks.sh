@@ -52,7 +52,7 @@ az acr login --name "$ACR_NAME"
 
 # ── Build and push ─────────────────────────────────────────────────────────────
 if [[ "$SKIP_BUILD" == "false" ]]; then
-  for svc in api ui; do
+  for svc in api; do
     echo "► Building and pushing appcloud-$svc..."
     docker build --platform linux/amd64 -t "$ACR_SERVER/appcloud-$svc:latest" "$ROOT_DIR/$svc"
     docker push "$ACR_SERVER/appcloud-$svc:latest"
@@ -103,7 +103,6 @@ echo "► Waiting for rollouts..."
 kubectl -n appcloud rollout status deployment/neo4j    --timeout=300s
 kubectl -n appcloud rollout status deployment/postgres --timeout=180s
 kubectl -n appcloud rollout status deployment/api      --timeout=180s
-kubectl -n appcloud rollout status deployment/ui       --timeout=180s
 
 echo ""
 LB_IP=$(kubectl -n appcloud get ingress appcloud -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending...")

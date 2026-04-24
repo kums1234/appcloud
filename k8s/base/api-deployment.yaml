@@ -93,7 +93,7 @@ spec:
               # plus the IaC connector framework (S3/Azure-Blob/GCS SDKs) and
               # the OTel aggregator — 512Mi was tripping the OOM killer during
               # cold boot once the full stack loaded. 1Gi was over the
-              # minikube node's headroom (with Neo4j/Postgres/Ollama/UI also
+              # minikube node's headroom (with Neo4j/Postgres/Ollama also
               # scheduled); 768Mi is the middle ground.
               memory: "768Mi"
               cpu: "500m"

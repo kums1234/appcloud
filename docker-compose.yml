@@ -95,18 +95,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ── Next.js UI ───────────────────────────────────────────────────────────────
-  ui:
-    build: ./ui
-    container_name: appcloud-ui
-    ports:
-      - "4000:4000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://api:3000
-    depends_on:
-      - api
-    restart: unless-stopped
-
 secrets:
   db_username:
     file: ./secrets/db_username.txt

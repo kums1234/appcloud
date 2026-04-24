@@ -13,9 +13,6 @@ images:
   - name: appcloud-api
     newName: appcloud-api
     newTag: latest
-  - name: appcloud-ui
-    newName: appcloud-ui
-    newTag: latest
 
 patches:
   # Use 'standard' StorageClass (minikube default)
@@ -41,13 +38,6 @@ patches:
     target:
       kind: Deployment
       name: api
-  - patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-    target:
-      kind: Deployment
-      name: ui
   # Tighten resource limits for local machine
   - patch: |-
       - op: replace
@@ -68,13 +58,6 @@ patches:
     target:
       kind: Deployment
       name: api
-  - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Never
-    target:
-      kind: Deployment
-      name: ui
 
   # Use Recreate strategy on minikube — rolling updates need spare node capacity
   # that a single-node local cluster often doesn't have
@@ -86,14 +69,6 @@ patches:
     target:
       kind: Deployment
       name: api
-  - patch: |-
-      - op: replace
-        path: /spec/strategy
-        value:
-          type: Recreate
-    target:
-      kind: Deployment
-      name: ui
   # Lower resource requests for local dev
   - patch: |-
       - op: replace
@@ -105,16 +80,6 @@ patches:
     target:
       kind: Deployment
       name: api
-  - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/requests/memory
-        value: "128Mi"
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/requests/cpu
-        value: "50m"
-    target:
-      kind: Deployment
-      name: ui
 
   - patch: |-
       - op: add

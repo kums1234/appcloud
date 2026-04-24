@@ -37,7 +37,7 @@ aws ecr get-login-password --region "$AWS_REGION" | \
   docker login --username AWS --password-stdin "$ECR_BASE"
 
 # ── Ensure ECR repos exist ─────────────────────────────────────────────────────
-for repo in appcloud-api appcloud-ui; do
+for repo in appcloud-api; do
   aws ecr describe-repositories --repository-names "$repo" --region "$AWS_REGION" &>/dev/null || \
     aws ecr create-repository --repository-name "$repo" --region "$AWS_REGION" | jq -r '.repository.repositoryUri'
   echo "  ✓ ECR repo: $ECR_BASE/$repo"
@@ -45,7 +45,7 @@ done
 
 # ── Build and push ─────────────────────────────────────────────────────────────
 if [[ "$SKIP_BUILD" == "false" ]]; then
-  for svc in api ui; do
+  for svc in api; do
     echo "► Building and pushing appcloud-$svc..."
     docker build -t "$ECR_BASE/appcloud-$svc:latest" "$ROOT_DIR/$svc"
     docker push "$ECR_BASE/appcloud-$svc:latest"
@@ -87,7 +87,6 @@ echo "► Waiting for rollouts..."
 kubectl -n appcloud rollout status deployment/neo4j   --timeout=300s
 kubectl -n appcloud rollout status deployment/postgres --timeout=180s
 kubectl -n appcloud rollout status deployment/api      --timeout=180s
-kubectl -n appcloud rollout status deployment/ui       --timeout=180s
 
 # ── Print ALB hostname ─────────────────────────────────────────────────────────
 echo ""

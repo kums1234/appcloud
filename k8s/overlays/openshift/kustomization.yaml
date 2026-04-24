@@ -5,7 +5,6 @@ namespace: appcloud
 
 resources:
   - ../../base
-  - route-ui.yaml
   - route-api.yaml
   - scc-patch.yaml
   - hpa.yaml
@@ -15,9 +14,6 @@ resources:
 images:
   - name: appcloud-api
     newName: image-registry.openshift-image-registry.svc:5000/appcloud/appcloud-api
-    newTag: latest
-  - name: appcloud-ui
-    newName: image-registry.openshift-image-registry.svc:5000/appcloud/appcloud-ui
     newTag: latest
 
 patches:

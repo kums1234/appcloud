@@ -47,7 +47,7 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
   oc registry login 2>/dev/null || \
     docker login -u "$(oc whoami)" -p "$(oc whoami -t)" "$OC_REGISTRY"
 
-  for svc in api ui; do
+  for svc in api; do
     echo "► Building and pushing appcloud-$svc..."
     docker build -t "$REGISTRY_PATH/appcloud-$svc:latest" "$ROOT_DIR/$svc"
     docker push "$REGISTRY_PATH/appcloud-$svc:latest"
@@ -78,16 +78,14 @@ echo "► Waiting for rollouts..."
 kubectl -n "$OC_PROJECT" rollout status deployment/neo4j    --timeout=300s
 kubectl -n "$OC_PROJECT" rollout status deployment/postgres --timeout=180s
 kubectl -n "$OC_PROJECT" rollout status deployment/api      --timeout=180s
-kubectl -n "$OC_PROJECT" rollout status deployment/ui       --timeout=180s
 
 echo ""
-ROUTE=$(oc -n "$OC_PROJECT" get route appcloud-ui -o jsonpath='{.spec.host}' 2>/dev/null || echo "pending...")
+ROUTE=$(oc -n "$OC_PROJECT" get route appcloud-api -o jsonpath='{.spec.host}' 2>/dev/null || echo "pending...")
 echo "══════════════════════════════════════════════════"
 echo "  ✓  AppCloud is running on OpenShift!"
 echo "══════════════════════════════════════════════════"
 echo ""
-echo "  UI Route:  https://$ROUTE"
-echo "  API Route: $(oc -n $OC_PROJECT get route appcloud-api -o jsonpath='{.spec.host}' 2>/dev/null)"
+echo "  API Route: https://$ROUTE"
 echo ""
 echo "  Logs:     oc -n $OC_PROJECT logs -f deploy/api"
 echo "  All pods: oc -n $OC_PROJECT get pods"

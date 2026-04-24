@@ -13,9 +13,6 @@ images:
   - name: appcloud-api
     newName: appcloudregistry.azurecr.io/appcloud-api
     newTag: latest
-  - name: appcloud-ui
-    newName: appcloudregistry.azurecr.io/appcloud-ui
-    newTag: latest
 
 patches:
   # AKS managed-csi StorageClass (Azure Disk) — scoped per PVC to avoid
