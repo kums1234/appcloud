@@ -12,9 +12,16 @@ mkdir -p secrets
 # Write your credentials (replace with real values)
 echo "neo4j" > secrets/db_username.txt
 echo "your-strong-password-here" > secrets/db_password.txt
+echo "appcloud" > secrets/pg_username.txt
+echo "your-strong-password-here" > secrets/pg_password.txt
+
+# Generate the API key (sent as X-API-Key header) and the encryption key
+# (used to AES-256-GCM encrypt stored connector credentials at rest).
+openssl rand -hex 32 > secrets/appcloud_api_key.txt
+openssl rand -hex 32 > secrets/appcloud_encryption_key.txt
 
 # Lock down permissions so only your user can read them
-chmod 600 secrets/db_username.txt secrets/db_password.txt
+chmod 600 secrets/*.txt
 ```
 
 Add to `.gitignore` (if not already present):
@@ -30,6 +37,8 @@ secrets/
 | `secrets/db_password.txt` | Neo4j container | same as above |
 | `secrets/db_username.txt` | API container | `DB_USERNAME_FILE=/run/secrets/db_username` → read by `neo4j.js` |
 | `secrets/db_password.txt` | API container | `DB_PASSWORD_FILE=/run/secrets/db_password` → read by `neo4j.js` |
+| `secrets/appcloud_api_key.txt` | API container | `APPCLOUD_API_KEY_FILE` → read by `plugins/auth.js`; callers send it as `X-API-Key` |
+| `secrets/appcloud_encryption_key.txt` | API container | `APPCLOUD_ENCRYPTION_KEY_FILE` → read by `utils/encrypt.js` to AES-encrypt connector secrets at rest |
 
 Docker mounts each secret file at `/run/secrets/<name>` inside the container.
 The API reads the file path from the `*_FILE` env var and reads the file content

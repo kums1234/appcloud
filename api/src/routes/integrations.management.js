@@ -31,7 +31,7 @@ function redact(row) {
 
 export default async function integrationManagementRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // ── GET /integrations ───────────────────────────────────────────────────────
   // List all configured connector instances. Secrets are decrypted so the UI

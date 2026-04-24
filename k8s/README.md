@@ -36,7 +36,8 @@ echo "neo4j"      > secrets/db_username.txt
 echo "CHANGE_ME"  > secrets/db_password.txt
 echo "appcloud"   > secrets/pg_username.txt
 echo "CHANGE_ME"  > secrets/pg_password.txt
-openssl rand -hex 64 > secrets/jwt_secret.txt
+openssl rand -hex 32 > secrets/appcloud_api_key.txt
+openssl rand -hex 32 > secrets/appcloud_encryption_key.txt
 ```
 
 Secrets are created as Kubernetes Secrets from these files by each deploy script.
@@ -208,8 +209,10 @@ kubectl -n appcloud create secret generic appcloud-db-credentials \
 kubectl -n appcloud create secret generic appcloud-pg-credentials \
   --from-file=pg_username=secrets/pg_username.txt \
   --from-file=pg_password=secrets/pg_password.txt
-kubectl -n appcloud create secret generic appcloud-jwt-secret \
-  --from-file=jwt_secret=secrets/jwt_secret.txt
+kubectl -n appcloud create secret generic appcloud-api-key \
+  --from-file=appcloud_api_key=secrets/appcloud_api_key.txt
+kubectl -n appcloud create secret generic appcloud-encryption-key \
+  --from-file=appcloud_encryption_key=secrets/appcloud_encryption_key.txt
 
 # 2. Apply the overlay
 kubectl apply -k k8s/overlays/minikube     # or eks / aks / openshift

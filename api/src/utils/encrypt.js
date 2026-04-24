@@ -8,12 +8,20 @@ const IV_LEN = 16
 const KEY_LEN = 32
 
 function deriveKey() {
-  const filePath = process.env.JWT_SECRET_FILE
+  const filePath = process.env.APPCLOUD_ENCRYPTION_KEY_FILE
   let raw = ''
   if (filePath) {
     try { raw = fs.readFileSync(filePath, 'utf8').trim() } catch {}
   }
-  if (!raw) raw = process.env.JWT_SECRET || process.env.ENCRYPTION_KEY || 'appcloud-dev-key-change-in-prod'
+  // Preferred: APPCLOUD_ENCRYPTION_KEY. Legacy fallbacks (ENCRYPTION_KEY,
+  // JWT_SECRET) keep existing encrypted rows in local dev DBs decryptable
+  // during the refocus migration.
+  if (!raw) {
+    raw = process.env.APPCLOUD_ENCRYPTION_KEY
+      || process.env.ENCRYPTION_KEY
+      || process.env.JWT_SECRET
+      || 'appcloud-dev-key-change-in-prod'
+  }
   return createHash('sha256').update(raw).digest()
 }
 

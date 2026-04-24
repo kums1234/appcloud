@@ -3,8 +3,10 @@ import { encrypt, decrypt, encryptConfig, decryptConfig } from '../encrypt.js'
 
 beforeAll(() => {
   // Tests must be deterministic regardless of host env; override the key.
-  process.env.JWT_SECRET = 'test-encrypt-key-fixed'
-  delete process.env.JWT_SECRET_FILE
+  process.env.APPCLOUD_ENCRYPTION_KEY = 'test-encrypt-key-fixed'
+  delete process.env.APPCLOUD_ENCRYPTION_KEY_FILE
+  delete process.env.ENCRYPTION_KEY
+  delete process.env.JWT_SECRET
 })
 
 describe('encrypt/decrypt', () => {

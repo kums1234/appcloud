@@ -1,33 +1,39 @@
-import jwt from '@fastify/jwt'
+// plugins/auth.js
+// Headless API-key gate. Reads the expected key from (in order):
+//   1. APPCLOUD_API_KEY_FILE  (file path — typical k8s secret mount)
+//   2. APPCLOUD_API_KEY       (env var — typical docker-compose / local dev)
+//
+// When neither is set, auth is disabled and fastify.authenticate is a no-op
+// so the same preHandler works in both modes. This matches the previous JWT
+// plugin's behaviour and keeps local dev frictionless.
+//
+// Callers authenticate by sending:  X-API-Key: <key>
+// A missing or mismatched key on a protected route returns 401.
+import fs from 'fs'
+
+function readKey() {
+  const filePath = process.env.APPCLOUD_API_KEY_FILE
+  if (filePath) {
+    try { return fs.readFileSync(filePath, 'utf8').trim() } catch {}
+  }
+  return (process.env.APPCLOUD_API_KEY || '').trim()
+}
 
 export async function authPlugin(fastify) {
-  const secret = process.env.JWT_SECRET
-  if (!secret) {
-    fastify.log.warn('[auth] JWT_SECRET not set — authentication disabled, all routes open')
-    // Decorate with a no-op so routes that call fastify.authenticate don't crash
+  const expected = readKey()
+
+  if (!expected) {
+    fastify.log.warn('[auth] APPCLOUD_API_KEY not set — authentication disabled, all routes open')
     fastify.decorate('authenticate', async () => {})
     return
   }
 
-  await fastify.register(jwt, {
-    secret,
-    sign:   { expiresIn: process.env.JWT_EXPIRES_IN || '8h' },
-    verify: { extractToken: req => {
-      // Accept Bearer header OR httpOnly cookie
-      const auth = req.headers.authorization
-      if (auth?.startsWith('Bearer ')) return auth.slice(7)
-      return req.cookies?.appcloud_token
-    }},
-  })
-
-  // Decorator used as a preHandler on protected routes
   fastify.decorate('authenticate', async (req, reply) => {
-    try {
-      await req.jwtVerify()
-    } catch (err) {
-      reply.code(401).send({ error: 'Unauthorized', message: 'Valid JWT required' })
+    const provided = (req.headers['x-api-key'] || '').trim()
+    if (!provided || provided !== expected) {
+      reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
     }
   })
 
-  fastify.log.info('[auth] JWT authentication enabled')
+  fastify.log.info('[auth] API-key authentication enabled (X-API-Key header)')
 }

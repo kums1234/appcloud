@@ -34,8 +34,6 @@ spec:
               value: "3000"
             - name: HOST
               value: "0.0.0.0"
-            - name: JWT_EXPIRES_IN
-              value: "8h"
             - name: OLLAMA_BASE_URL
               value: http://ollama:11434
             - name: OLLAMA_MODEL
@@ -48,8 +46,10 @@ spec:
               value: /run/secrets/pg_username
             - name: PG_PASSWORD_FILE
               value: /run/secrets/pg_password
-            - name: JWT_SECRET_FILE
-              value: /run/secrets/jwt_secret
+            - name: APPCLOUD_API_KEY_FILE
+              value: /run/secrets/appcloud_api_key
+            - name: APPCLOUD_ENCRYPTION_KEY_FILE
+              value: /run/secrets/appcloud_encryption_key
           volumeMounts:
             - name: db-username
               mountPath: /run/secrets/db_username
@@ -67,9 +67,13 @@ spec:
               mountPath: /run/secrets/pg_password
               subPath: pg_password
               readOnly: true
-            - name: jwt-secret
-              mountPath: /run/secrets/jwt_secret
-              subPath: jwt_secret
+            - name: appcloud-api-key
+              mountPath: /run/secrets/appcloud_api_key
+              subPath: appcloud_api_key
+              readOnly: true
+            - name: appcloud-encryption-key
+              mountPath: /run/secrets/appcloud_encryption_key
+              subPath: appcloud_encryption_key
               readOnly: true
           readinessProbe:
             httpGet:
@@ -110,6 +114,9 @@ spec:
         - name: pg-password
           secret:
             secretName: appcloud-pg-credentials
-        - name: jwt-secret
+        - name: appcloud-api-key
           secret:
-            secretName: appcloud-jwt-secret
+            secretName: appcloud-api-key
+        - name: appcloud-encryption-key
+          secret:
+            secretName: appcloud-encryption-key

@@ -18,7 +18,8 @@ services:
       - /app/node_modules  # Named volume to avoid host node_modules conflicts
     environment:
       - NODE_ENV=development
-      - JWT_SECRET=dev-jwt-secret-for-local-development
+      - APPCLOUD_API_KEY=dev-api-key-for-local-development
+      - APPCLOUD_ENCRYPTION_KEY=dev-encryption-key-for-local-development
     command: ["npm", "run", "dev"]
     ports:
       - "3000:3000"

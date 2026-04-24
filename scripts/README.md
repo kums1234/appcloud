@@ -15,7 +15,7 @@ The demo setup creates a realistic microservices landscape with:
 ## Prerequisites
 
 1. **API Server Running**: The AppCloud API must be running on `http://localhost:3000`
-2. **Authentication**: A valid JWT token with admin privileges
+2. **Authentication**: `APPCLOUD_API_KEY` set to a valid API key (only needed when the API is running with auth enabled)
 3. **curl and jq**: Required for API calls and JSON parsing
 
 ## Usage
@@ -25,8 +25,8 @@ The demo setup creates a realistic microservices landscape with:
 Set these environment variables before running the scripts:
 
 ```bash
-export API_BASE="http://localhost:3000"     # Optional, defaults to localhost:3000
-export JWT_TOKEN="your-jwt-token-here"       # Required
+export API_BASE="http://localhost:3000"          # Optional, defaults to localhost:3000
+export APPCLOUD_API_KEY="your-api-key-here"      # Optional; only needed if auth is enabled
 ```
 
 ### Creating Demo Data
@@ -102,8 +102,8 @@ Notification Service (Tier 2)
 ## Troubleshooting
 
 ### Authentication Issues
-- Ensure `JWT_TOKEN` is set with a valid token
-- Check that the token has admin/create permissions
+- Ensure `APPCLOUD_API_KEY` is set to the same value the API was started with
+- If auth is disabled on the API, leaving `APPCLOUD_API_KEY` unset is fine
 
 ### API Connection Issues
 - Verify the API server is running on the correct port

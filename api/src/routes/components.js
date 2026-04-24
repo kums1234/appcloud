@@ -39,7 +39,7 @@ export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const auth = { preHandler: fastify.authenticate }
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /components/metadata — taxonomy + enums for form builders
   fastify.get('/metadata', async () => ({

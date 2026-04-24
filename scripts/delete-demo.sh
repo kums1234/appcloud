@@ -7,7 +7,7 @@ set -euo pipefail
 
 # Configuration
 API_BASE="${API_BASE:-http://localhost:3000}"
-JWT_TOKEN="${JWT_TOKEN:-}"  # Optional - set if authentication is enabled
+APPCLOUD_API_KEY="${APPCLOUD_API_KEY:-}"  # Optional - set if authentication is enabled
 
 # Colors for output
 RED='\033[0;31m'
@@ -21,28 +21,27 @@ success() { echo -e "${GREEN}✓${NC}  $*" >&2; }
 warn() { echo -e "${YELLOW}⚠${NC}  $*" >&2; }
 error() { echo -e "${RED}✗${NC}  $*" >&2; }
 
-# Check if JWT token is provided
-if [ -z "$JWT_TOKEN" ]; then
-    warn "JWT_TOKEN not set — assuming authentication is disabled"
+# Check if API key is provided
+if [ -z "$APPCLOUD_API_KEY" ]; then
+    warn "APPCLOUD_API_KEY not set — assuming authentication is disabled"
 else
-    log "Using JWT token for authentication"
+    log "Using API key for authentication"
 fi
 
-# Headers for API calls
-# (Set dynamically in api_call function based on JWT_TOKEN)
-
-# Helper function to make API calls
+# Helper function to make API calls. The X-API-Key header is only added
+# when APPCLOUD_API_KEY is set, so the same helper works against dev
+# instances running without auth.
 api_call() {
     local method="$1"
     local endpoint="$2"
     local data="${3:-}"
 
     if [ "$method" = "GET" ]; then
-        curl -s "$API_BASE$endpoint"
+        curl -s ${APPCLOUD_API_KEY:+-H "X-API-Key: $APPCLOUD_API_KEY"} "$API_BASE$endpoint"
     elif [ "$method" = "DELETE" ]; then
-        curl -s -X DELETE ${JWT_TOKEN:+-H "Authorization: Bearer $JWT_TOKEN"} "$API_BASE$endpoint"
+        curl -s -X DELETE ${APPCLOUD_API_KEY:+-H "X-API-Key: $APPCLOUD_API_KEY"} "$API_BASE$endpoint"
     else
-        curl -s -X "$method" -H "Content-Type: application/json" ${JWT_TOKEN:+-H "Authorization: Bearer $JWT_TOKEN"} -d "$data" "$API_BASE$endpoint"
+        curl -s -X "$method" -H "Content-Type: application/json" ${APPCLOUD_API_KEY:+-H "X-API-Key: $APPCLOUD_API_KEY"} -d "$data" "$API_BASE$endpoint"
     fi
 }
 

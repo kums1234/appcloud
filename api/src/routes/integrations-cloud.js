@@ -27,7 +27,7 @@ const CREATE_TABLE_SQL = `
 
 export default async function cloudAccountRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // Ensure table exists when server starts — non-fatal if Postgres unavailable
   fastify.addHook('onReady', async () => {

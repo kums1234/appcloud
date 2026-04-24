@@ -114,7 +114,8 @@ describe('someFunction', () => {
 
 Development overrides:
 - `NODE_ENV=development`
-- `JWT_SECRET=dev-jwt-secret-for-local-development`
+- `APPCLOUD_API_KEY=dev-api-key-for-local-development`
+- `APPCLOUD_ENCRYPTION_KEY=dev-encryption-key-for-local-development`
 - Database names suffixed with `_dev`
 
 ### Volume Mounting

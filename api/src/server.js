@@ -5,11 +5,9 @@ import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
 import { authPlugin } from './plugins/auth.js'
-import authRoutes from './routes/auth.js'
 import applicationRoutes from './routes/applications.js'
 import componentRoutes from './routes/components.js'
 import infraRoutes from './routes/infra.js'
-import userRoutes from './routes/users.js'
 import graphRoutes from './routes/graph.js'
 import integrationRoutes from './routes/integrations.js'
 import cloudAccountRoutes from './routes/integrations-cloud.js'
@@ -59,16 +57,12 @@ await otelAggregatorPlugin(fastify)
 // Scheduler — starts after server ready, requires pg to be initialised
 await schedulerPlugin(fastify)
 
-// Public routes (no auth required)
-await fastify.register(authRoutes, { prefix: '/auth' })
-
-// Protected routes — mutations require a valid JWT when JWT_SECRET is set.
-// The fastify.authenticate decorator is a no-op when auth is disabled so
-// the same preHandler works in both modes.
+// Protected routes — mutations require a valid X-API-Key header when
+// APPCLOUD_API_KEY is set. The fastify.authenticate decorator is a no-op when
+// auth is disabled so the same preHandler works in both modes.
 await fastify.register(applicationRoutes,  { prefix: '/applications' })
 await fastify.register(componentRoutes,    { prefix: '/components' })
 await fastify.register(infraRoutes,        { prefix: '/infra' })
-await fastify.register(userRoutes,         { prefix: '/users' })
 await fastify.register(graphRoutes,        { prefix: '/graph' })
 await fastify.register(integrationRoutes,          { prefix: '/integrations' })
 await fastify.register(cloudAccountRoutes,         { prefix: '/integrations' })

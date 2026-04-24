@@ -75,9 +75,13 @@ kubectl -n appcloud create secret generic appcloud-pg-credentials \
   --from-file=pg_username="$SECRETS_DIR/pg_username.txt" \
   --from-file=pg_password="$SECRETS_DIR/pg_password.txt"
 
-kubectl -n appcloud delete secret appcloud-jwt-secret 2>/dev/null || true
-kubectl -n appcloud create secret generic appcloud-jwt-secret \
-  --from-file=jwt_secret="$SECRETS_DIR/jwt_secret.txt"
+kubectl -n appcloud delete secret appcloud-api-key 2>/dev/null || true
+kubectl -n appcloud create secret generic appcloud-api-key \
+  --from-file=appcloud_api_key="$SECRETS_DIR/appcloud_api_key.txt"
+
+kubectl -n appcloud delete secret appcloud-encryption-key 2>/dev/null || true
+kubectl -n appcloud create secret generic appcloud-encryption-key \
+  --from-file=appcloud_encryption_key="$SECRETS_DIR/appcloud_encryption_key.txt"
 
 # ── Deploy ─────────────────────────────────────────────────────────────────────
 echo "► Applying kustomize overlay (eks)..."

@@ -1088,7 +1088,7 @@ export default async function discoveryRoutes(fastify) {
   }
   const { write, query } = fastify.neo4j
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // ── GET /discovery/accounts — proxy to Postgres cloud accounts ────────
   // Kept for backwards compatibility — returns same shape as before

@@ -3,7 +3,7 @@ import { props, serialize } from '../utils/serialize.js'
 export default async function infraRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const auth  = { preHandler: fastify.authenticate }
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /infra
   fastify.get('/', async (req, reply) => {

@@ -42,7 +42,7 @@ function decryptAiConfig(config) {
 
 export default async function aiConfigRoutes(fastify) {
   const audit = (...a) => fastify.pg?.audit?.(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // Ensure table exists
   fastify.addHook('onReady', async () => {

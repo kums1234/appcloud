@@ -187,7 +187,7 @@ echo ""
 echo "► Creating namespace and secrets..."
 kubectl apply -f "$K8S_DIR/base/namespace.yaml" 2>/dev/null || true
 
-for secret_name in appcloud-db-credentials appcloud-pg-credentials appcloud-jwt-secret; do
+for secret_name in appcloud-db-credentials appcloud-pg-credentials appcloud-api-key appcloud-encryption-key; do
   kubectl -n appcloud get secret "$secret_name" &>/dev/null && continue
   case "$secret_name" in
     appcloud-db-credentials)
@@ -198,9 +198,12 @@ for secret_name in appcloud-db-credentials appcloud-pg-credentials appcloud-jwt-
       kubectl -n appcloud create secret generic "$secret_name" \
         --from-file=pg_username="$SECRETS_DIR/pg_username.txt" \
         --from-file=pg_password="$SECRETS_DIR/pg_password.txt" ;;
-    appcloud-jwt-secret)
+    appcloud-api-key)
       kubectl -n appcloud create secret generic "$secret_name" \
-        --from-file=jwt_secret="$SECRETS_DIR/jwt_secret.txt" ;;
+        --from-file=appcloud_api_key="$SECRETS_DIR/appcloud_api_key.txt" ;;
+    appcloud-encryption-key)
+      kubectl -n appcloud create secret generic "$secret_name" \
+        --from-file=appcloud_encryption_key="$SECRETS_DIR/appcloud_encryption_key.txt" ;;
   esac
   echo "  ✓ Created $secret_name"
 done

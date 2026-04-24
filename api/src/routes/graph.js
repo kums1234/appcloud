@@ -2,7 +2,7 @@ import { props, serialize } from '../utils/serialize.js'
 
 export default async function graphRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
   const { query } = fastify.neo4j
 
   // GET /graph/summary

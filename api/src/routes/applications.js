@@ -4,8 +4,8 @@ export default async function applicationRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const auth = { preHandler: fastify.authenticate }
 
-  // ── actor helper — name from JWT or fallback ────────────────────────────────
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  // ── actor helper — operator identity via X-Actor header, defaults to 'system'
+  const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /applications
   fastify.get('/', async (req, reply) => {
