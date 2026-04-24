@@ -16,7 +16,7 @@
 //     Customer pushes data in; the connector routes handle auth + staging.
 
 /**
- * @typedef {'iac'|'apm'|'cloud'|'telemetry-ingest'|'upload'} ConnectorCategory
+ * @typedef {'iac'|'apm'|'cloud'|'cmdb'|'telemetry-ingest'|'upload'} ConnectorCategory
  */
 
 /**

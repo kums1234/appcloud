@@ -5,12 +5,13 @@ import { loadConnectors, getConnector, listConnectors, serializeSpec } from '../
 const log = { info() {}, warn() {}, error() {} }
 
 describe('connector registry', () => {
-  test('loads the three real connectors from the filesystem', async () => {
+  test('loads the real connectors from the filesystem', async () => {
     const reg = await loadConnectors(log)
     const ids = Array.from(reg.keys()).sort()
     expect(ids).toEqual(expect.arrayContaining([
       'iac-state-backend',
       'otel-ingest',
+      'servicenow',
       'terraform-cloud',
     ]))
   })
@@ -20,7 +21,7 @@ describe('connector registry', () => {
     for (const spec of listConnectors()) {
       expect(typeof spec.id).toBe('string')
       expect(typeof spec.displayName).toBe('string')
-      expect(['iac', 'apm', 'cloud', 'telemetry-ingest', 'upload']).toContain(spec.category)
+      expect(['iac', 'apm', 'cloud', 'cmdb', 'telemetry-ingest', 'upload']).toContain(spec.category)
       expect(typeof spec.authSchema).toBe('object')
 
       // Must be either pull-style (fetch) or push-style (receiver), not neither.
@@ -64,5 +65,17 @@ describe('connector registry', () => {
     await loadConnectors(log)
     const spec = getConnector('terraform-cloud')
     expect(spec.authSchema.required).toEqual(expect.arrayContaining(['organization', 'apiToken']))
+  })
+
+  test('servicenow is a cmdb pull connector requiring instance + creds', async () => {
+    await loadConnectors(log)
+    const spec = getConnector('servicenow')
+    expect(spec).toBeTruthy()
+    expect(spec.category).toBe('cmdb')
+    expect(spec.authSchema.required).toEqual(expect.arrayContaining(['instance', 'username', 'password']))
+    expect(typeof spec.fetch).toBe('function')
+    expect(typeof spec.normalize).toBe('function')
+    expect(typeof spec.ingest).toBe('function')
+    expect(spec.receiver).toBeUndefined()
   })
 })
