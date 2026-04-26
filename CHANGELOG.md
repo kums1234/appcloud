@@ -5,6 +5,51 @@ grouped by release branch and ordered newest-first within each section.
 
 ---
 
+## Unreleased — `fastify5_migration` branch
+
+Fastify 4 → 5 major-version upgrade. Closes the three remaining
+fastify-side advisories that the security_enhancement slice deferred
+(GHSA-mrq3-vjjr-p77c DoS via sendWebStream, GHSA-jx2c-rxcm-jvmq
+Content-Type tab-character body-validation bypass, GHSA-444r-cwp2-x5xf
+X-Forwarded-Proto/Host spoofing).
+
+### Changed
+- `fastify`               4.26 → 5.8
+- `@fastify/cors`         9    → 10
+- `@fastify/multipart`    8    → 9
+- `@fastify/sensible`     5    → 6
+- `@fastify/swagger`      8    → 9
+- `@fastify/swagger-ui`   4    → 5
+
+`@fastify/helmet` (13) and `@fastify/rate-limit` (10) were already on
+v5-compatible majors from earlier slices.
+
+### Migration notes
+- **No application code changes required.** Verified by grepping for
+  every Fastify-4 deprecated API surface (`request.routerPath`,
+  `reply.getResponseTime`, `request.routeSchema`, `request.routeConfig`,
+  `request.context`, `reply.context`) — every match landed in vendored
+  `node_modules/fastify/test/` files, never in our handlers.
+- `docs/openapi.{json,yaml}` regenerated under the new Fastify 5 schema
+  emitter; the drift test catches any subsequent skew.
+- Required Node version is now ≥ 20 (we target 22 in CI + dev fnm).
+- `request.query` parses semicolons differently in v5; we don't pass any
+  semicolon-delimited query strings, so no behaviour change.
+
+### Reliability
+- `npm audit` no longer flags `fastify` directly. Remaining 23 advisories
+  live in transitive deps of `openapi-to-postmanv2` (yaml/lodash/
+  postman-collection) and `@google-cloud/storage` (gaxios → undici),
+  outside our exploit surface.
+
+### Test posture
+- 364 unit + 37 integration = 401 tests pass under Fastify 5 with no
+  source modification. The auth-coverage invariant test still locks
+  every route down to the attached scope handler; the drift test still
+  pins `docs/openapi.{json,yaml}` to the live route registrations.
+
+---
+
 ## Unreleased — `multi_key_rbac` branch
 
 DB-backed multi-key RBAC system replacing the previous single-env-var auth.
