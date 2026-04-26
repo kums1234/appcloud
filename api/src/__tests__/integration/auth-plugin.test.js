@@ -506,6 +506,98 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     expect(r.statusCode).toBe(400)
   })
 
+  test('GET /audit?actor=… is exact-match by default; ?like=true opts into substring', async () => {
+    // Insert two rows with similar but distinct actor names.
+    await pgClient.query(`
+      INSERT INTO audit_log (actor, action, resource_type, resource_id) VALUES
+        ('ci-deploy-staging', 'test-actor-match', 'TestRow', 'a1'),
+        ('ci-deploy-prod',    'test-actor-match', 'TestRow', 'a2')
+    `)
+
+    // Exact (default) — only the prefix-name row matches.
+    const exact = await fastify.inject({
+      method: 'GET', url: '/audit?actor=ci-deploy-staging&action=test-actor-match',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(exact.statusCode).toBe(200)
+    const exactBody = JSON.parse(exact.payload)
+    expect(exactBody.rows.length).toBe(1)
+    expect(exactBody.rows[0].actor).toBe('ci-deploy-staging')
+
+    // Opt-in substring — both rows match.
+    const sub = await fastify.inject({
+      method: 'GET', url: '/audit?actor=ci-deploy&like=true&action=test-actor-match',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(sub.statusCode).toBe(200)
+    const subBody = JSON.parse(sub.payload)
+    expect(subBody.rows.length).toBe(2)
+    const actors = subBody.rows.map(r => r.actor).sort()
+    expect(actors).toEqual(['ci-deploy-prod', 'ci-deploy-staging'])
+  })
+
+  test('GET /audit/actor/:name is exact by default; ?like=true returns substring matches', async () => {
+    // The fixtures from the previous test are still in the DB.
+    const exact = await fastify.inject({
+      method: 'GET', url: '/audit/actor/ci-deploy-staging',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(exact.statusCode).toBe(200)
+    const exactBody = JSON.parse(exact.payload)
+    expect(exactBody.rows.every(r => r.actor === 'ci-deploy-staging')).toBe(true)
+
+    const sub = await fastify.inject({
+      method: 'GET', url: '/audit/actor/ci-deploy?like=true',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(sub.statusCode).toBe(200)
+    const subBody = JSON.parse(sub.payload)
+    expect(subBody.rows.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('GET /audit/stats topActors groups by (actor_key_id, actor)', async () => {
+    // Insert two rows for the same actor name but different key_ids — they
+    // should surface as two separate topActors entries, not one collapsed.
+    const fakeKeyA = '11111111-1111-1111-1111-111111111111'
+    const fakeKeyB = '22222222-2222-2222-2222-222222222222'
+    // We need real api_keys rows for the FK; create two with the same display
+    // name is blocked by the UNIQUE(name) constraint on api_keys, so simulate
+    // the collision by inserting audit_log rows directly with NULL/non-NULL
+    // key_ids under the same display name. The grouping should still split.
+    await pgClient.query(`
+      INSERT INTO audit_log (actor, actor_key_id, action, resource_type, resource_id) VALUES
+        ('shared-name', NULL, 'topactors-fixture', 'TestRow', 's1'),
+        ('shared-name', NULL, 'topactors-fixture', 'TestRow', 's2'),
+        ('shared-name', NULL, 'topactors-fixture', 'TestRow', 's3')
+    `)
+    // Real key + same display-name fixture (write rows under bootstrap-admin).
+    const adminKeyRow = await pgClient.query(
+      `SELECT id FROM api_keys WHERE name = 'bootstrap-admin-key'`,
+    )
+    const adminKeyId = adminKeyRow.rows[0].id
+    await pgClient.query(`
+      INSERT INTO audit_log (actor, actor_key_id, action, resource_type, resource_id) VALUES
+        ('shared-name', $1, 'topactors-fixture', 'TestRow', 's4'),
+        ('shared-name', $1, 'topactors-fixture', 'TestRow', 's5')
+    `, [adminKeyId])
+
+    const r = await fastify.inject({
+      method: 'GET', url: '/audit/stats?days=1',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(r.statusCode).toBe(200)
+    const stats = JSON.parse(r.payload)
+
+    const sharedRows = stats.topActors.filter(a => a.actor === 'shared-name')
+    // Two rows: one with NULL actorKeyId (3 events) and one with the admin
+    // key id (2 events). Confirm the split + that actorKeyId is exposed.
+    expect(sharedRows.length).toBe(2)
+    const nullKeyEntry = sharedRows.find(a => a.actorKeyId === null)
+    const realKeyEntry = sharedRows.find(a => a.actorKeyId === adminKeyId)
+    expect(nullKeyEntry?.count).toBe(3)
+    expect(realKeyEntry?.count).toBe(2)
+  })
+
   test('X-Actor header on an authenticated request is ignored + warned', async () => {
     // The principal is determined by the API key (bootstrap-admin-key),
     // not by the X-Actor header. Verify (a) the audit row records the

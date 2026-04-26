@@ -49,14 +49,15 @@ export default async function auditRoutes(fastify) {
     config: { requireAdmin: true },
     schema: {
       summary:     'Paginated audit log',
-      description: 'Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` (substring match) / `keyId` (exact match on the API key UUID) / `scope` (admin|write|read) / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a row can be traced back to the specific API key that performed the action.',
+      description: 'Every mutation API call writes a row here. `actor` is exact-match by default — pass `?like=true` to opt into the legacy substring/ILIKE behaviour (separate keys with similar names like `ci-deploy-staging` / `ci-deploy-prod` previously collapsed into one query, which is now opt-in). Other filters: `action`, `resourceType`, `resourceId`, `keyId` (exact UUID), `scope` (admin|write|read), `from`/`to` (ISO date), `q` (substring on `resource_name` OR `actor`). Returns `{ rows, total, page, pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a row can be traced back to the specific API key that performed the action.',
       querystring: { type: 'object', additionalProperties: false, properties: {
         page:         { type: ['integer', 'string'] },
         pageSize:     { type: ['integer', 'string'] },
         action:       { type: 'string' },
         resourceType: { type: 'string' },
         resourceId:   { type: 'string' },
-        actor:        { type: 'string' },
+        actor:        { type: 'string', description: 'Exact match by default. Set `like=true` for case-insensitive substring (legacy).' },
+        like:         { type: 'string', enum: ['true', 'false'], description: 'Opt-in substring match for `actor` (default false = exact match).' },
         keyId:        { type: 'string', format: 'uuid', description: 'Exact match on actor_key_id — see GET /admin/api-keys for ids.' },
         scope:        { type: 'string', enum: ['admin', 'write', 'read'] },
         from:         { type: 'string', format: 'date-time' },
@@ -74,7 +75,8 @@ export default async function auditRoutes(fastify) {
       action,          // filter by action: create|update|delete|approve|reject|login|...
       resourceType,    // filter by resource_type: Application|Component|Infra|User|...
       resourceId,      // filter by specific resource
-      actor,           // filter by actor name (substring)
+      actor,           // filter by actor name (exact match by default)
+      like,            // 'true' to opt into substring match on `actor` (legacy)
       keyId,           // filter by actor_key_id (exact)
       scope,           // filter by actor_scope (admin|write|read)
       from,            // ISO date string — lower bound on created_at
@@ -89,7 +91,10 @@ export default async function auditRoutes(fastify) {
     const limit  = Math.min(parseInt(pageSize) || 50, 200)
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit
 
-    // Build WHERE clauses dynamically
+    // Build WHERE clauses dynamically. The `actor` matcher flips between
+    // exact (default) and ILIKE-substring (opt-in via like=true) — substring
+    // match was the previous default but collapsed across similarly-named
+    // keys (e.g. `ci-deploy` matching `ci-deploy-staging`/`ci-deploy-prod`).
     const conditions = []
     const params     = []
     let   p          = 1
@@ -97,7 +102,10 @@ export default async function auditRoutes(fastify) {
     if (action)       { conditions.push(`action = $${p++}`)        ; params.push(action) }
     if (resourceType) { conditions.push(`resource_type = $${p++}`) ; params.push(resourceType) }
     if (resourceId)   { conditions.push(`resource_id = $${p++}`)   ; params.push(resourceId) }
-    if (actor)        { conditions.push(`actor ILIKE $${p++}`)      ; params.push(`%${actor}%`) }
+    if (actor) {
+      if (like === 'true') { conditions.push(`actor ILIKE $${p++}`); params.push(`%${actor}%`) }
+      else                 { conditions.push(`actor = $${p++}`)    ; params.push(actor) }
+    }
     if (keyId)        { conditions.push(`actor_key_id = $${p++}`)  ; params.push(keyId) }
     if (scope)        { conditions.push(`actor_scope = $${p++}`)   ; params.push(scope) }
     if (from)         { conditions.push(`created_at >= $${p++}`)   ; params.push(from) }
@@ -166,17 +174,23 @@ export default async function auditRoutes(fastify) {
         GROUP BY resource_type ORDER BY cnt DESC
       `, [parseInt(days)]),
 
-      // Top actors — also surface the actor's principal-scope so a list
-      // of actors is decipherable without joining back to api_keys.
+      // Top actors — group by (actor_key_id, actor) so two keys that
+      // happened to share a display name (e.g. a name reused after the
+      // original key was revoked, or two bootstrap rows from different
+      // env files) surface as separate rows instead of collapsing into
+      // one. The actor_key_id is NULL for system / unauthenticated rows;
+      // those still group together under their text actor.
       fastify.pg.query(`
         SELECT actor,
+               actor_key_id,
                COUNT(*) AS cnt,
                array_agg(DISTINCT action       ORDER BY action)       AS actions,
                array_agg(DISTINCT actor_scope) FILTER (WHERE actor_scope IS NOT NULL) AS scopes
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
           AND actor IS NOT NULL
-        GROUP BY actor ORDER BY cnt DESC LIMIT 20
+        GROUP BY actor_key_id, actor
+        ORDER BY cnt DESC LIMIT 20
       `, [parseInt(days)]),
 
       // Count by actor_scope — pre-RBAC rows show up under '(none)' so
@@ -204,10 +218,11 @@ export default async function auditRoutes(fastify) {
       byResourceType: Object.fromEntries(byType.map(r => [r.resource_type, parseInt(r.cnt)])),
       byScope:        Object.fromEntries(byScope.map(r => [r.scope, parseInt(r.cnt)])),
       topActors:      byActor.map(r => ({
-        actor:   r.actor,
-        count:   parseInt(r.cnt),
-        actions: r.actions,
-        scopes:  r.scopes ?? [],
+        actor:      r.actor,
+        actorKeyId: r.actor_key_id ?? null,    // null for system / pre-RBAC rows
+        count:      parseInt(r.cnt),
+        actions:    r.actions,
+        scopes:     r.scopes ?? [],
       })),
       dailyActivity: daily.map(r => ({
         day:   r.day,
@@ -250,13 +265,14 @@ export default async function auditRoutes(fastify) {
     config: { requireAdmin: true },
     schema: {
       summary:     'All audit events by a specific actor (paginated)',
-      description: 'Case-insensitive substring match on the `actor` column. Optional `?keyId=<uuid>` narrows to a specific stored API key (exact match on actor_key_id), useful when several keys share a similar name. Optional `?scope=admin|write|read` narrows to one privilege tier.',
+      description: 'Exact match on the `actor` column by default. Pass `?like=true` for case-insensitive substring (legacy behaviour, collapses across similarly-named keys). Optional `?keyId=<uuid>` narrows to a specific stored API key (exact match on actor_key_id) — preferable to substring-name matching once you know the key id. Optional `?scope=admin|write|read` narrows to one privilege tier.',
       params:      { type: 'object', required: ['name'], properties: { name: { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$' } } },
       querystring: { type: 'object', additionalProperties: false, properties: {
         page:     { type: ['integer', 'string'] },
         pageSize: { type: ['integer', 'string'] },
         keyId:    { type: 'string', format: 'uuid' },
         scope:    { type: 'string', enum: ['admin', 'write', 'read'] },
+        like:     { type: 'string', enum: ['true', 'false'], description: 'Opt-in substring match (default false = exact match).' },
       } },
       response:    { 200: { type: 'object', additionalProperties: true } },
     },
@@ -265,7 +281,7 @@ export default async function auditRoutes(fastify) {
       return reply.badRequest('actor name must match [A-Za-z0-9._@:+-]{1,128}')
     }
     if (!pgOk()) return { rows: [], total: 0 }
-    const { page = 1, pageSize = 50, keyId, scope } = req.query
+    const { page = 1, pageSize = 50, keyId, scope, like } = req.query
     if (scope && !SCOPE_FILTER_VALUES.has(scope)) {
       return reply.badRequest(`scope must be one of ${[...SCOPE_FILTER_VALUES].join(', ')}`)
     }
@@ -273,8 +289,15 @@ export default async function auditRoutes(fastify) {
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit
 
     // Mirror the filter wiring in GET / so the param-numbering is explicit.
-    const conditions = [`actor ILIKE $1`]
-    const params     = [`%${req.params.name}%`]
+    // Substring matching is opt-in via ?like=true; default is exact match
+    // so two keys named `ci-deploy-staging` and `ci-deploy-prod` no longer
+    // collide on a query for `ci-deploy`.
+    const conditions = like === 'true'
+      ? [`actor ILIKE $1`]
+      : [`actor = $1`]
+    const params     = like === 'true'
+      ? [`%${req.params.name}%`]
+      : [req.params.name]
     let   p          = 2
     if (keyId) { conditions.push(`actor_key_id = $${p++}`); params.push(keyId) }
     if (scope) { conditions.push(`actor_scope  = $${p++}`); params.push(scope) }
