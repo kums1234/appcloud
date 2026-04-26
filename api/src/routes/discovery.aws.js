@@ -32,6 +32,7 @@
  */
 
 import { upsertInfra } from './discovery.js'
+import { parseAndValidateRegions } from '../utils/aws-regions.js'
 
 // ─── Config resourceType → AppCloud resourceType ─────────────────────────────
 const CONFIG_TYPE_MAP = {
@@ -502,8 +503,14 @@ export async function scanAWS({ credentials, regions, write, log, scanEpoch }) {
   }
 
   // Build the SQL — region filter (if any) becomes a WHERE clause.
-  const regionFilter = (regions && regions.length)
-    ? ` WHERE awsRegion IN (${regions.map(r => `'${String(r).replace(/'/g, '')}'`).join(', ')})`
+  // parseAndValidateRegions throws if anything fails the AWS region pattern,
+  // which closes the (formerly) injection-prone interpolation below: every
+  // string we emit between single quotes is now structurally constrained to
+  // [a-z0-9-]+ and a digit, so apostrophes / semicolons / newlines can't
+  // sneak in via the cloud_accounts.config.regions blob.
+  const validatedRegions = parseAndValidateRegions(regions)
+  const regionFilter = validatedRegions.length
+    ? ` WHERE awsRegion IN (${validatedRegions.map(r => `'${r}'`).join(', ')})`
     : ''
   const expression = `
     SELECT resourceId, resourceName, resourceType, awsRegion, accountId,

@@ -22,6 +22,7 @@
 // BEFORE this plugin runs, so the hook never sees them.
 import fs from 'fs'
 import { timingSafeEqual } from 'crypto'
+import { warnIfLegacyKeyEnvSet } from '../utils/encrypt.js'
 
 // Recommended minimum key length. `openssl rand -hex 32` produces 64 chars.
 // Shorter keys are accepted (don't break dev) but logged with a warning so
@@ -76,6 +77,7 @@ function attachAuth(routeOptions, auth) {
 }
 
 export async function authPlugin(fastify) {
+  warnIfLegacyKeyEnvSet(fastify.log)
   const expected = readKey()
 
   const authenticate = expected

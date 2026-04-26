@@ -5,12 +5,25 @@
 // AES-256-GCM encrypted before INSERT and decrypted on SELECT.
 
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
+import { parseAndValidateRegions } from '../utils/aws-regions.js'
 import {
   CloudAccountSchema,
   CloudAccountCreateBodySchema,
   IdParamSchema,
   StandardErrorResponses,
 } from '../schemas/openapi.js'
+
+// AWS regions reach the discovery scanner via cloud_accounts.config.regions
+// and get interpolated into the AWS Config Aggregator query language. We
+// validate at write time so a malformed value can never be stored — the
+// scanner-side validation is then a defence-in-depth backstop, not the
+// primary check. Other providers (Azure / GCP) carry their own scoping
+// fields that don't feed into a query language; those stay untouched.
+function validateProviderConfig(provider, config) {
+  if (provider === 'aws' && config?.regions) {
+    parseAndValidateRegions(config.regions)
+  }
+}
 
 // SQL to ensure the table exists — run once at startup via onReady hook
 const CREATE_TABLE_SQL = `
@@ -118,6 +131,8 @@ export default async function cloudAccountRoutes(fastify) {
       return reply.badRequest('provider and name are required')
     if (!['aws', 'azure', 'gcp'].includes(provider))
       return reply.badRequest('provider must be aws, azure, or gcp')
+    try { validateProviderConfig(provider, config) }
+    catch (e) { return reply.badRequest(e.message) }
 
     try {
       const encryptedConfig = encryptConfig({ ...config })
@@ -165,6 +180,10 @@ export default async function cloudAccountRoutes(fastify) {
 
       const current = existing[0]
       const { name, config, enabled } = req.body || {}
+      if (config) {
+        try { validateProviderConfig(current.provider, config) }
+        catch (e) { return reply.badRequest(e.message) }
+      }
       const newConfig = config
         ? encryptConfig({ ...decryptConfig(current.config || {}), ...config })
         : current.config

@@ -401,6 +401,7 @@ export default async function discoveryRoutes(fastify) {
   // Scans all configured AWS accounts from Postgres, or uses credentials
   // from the request body for a one-off scan.
   fastify.post('/scan/aws', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
     schema: {
       summary:     'Scan AWS via Config aggregator',
       description: 'Pages every aggregated resource via `SelectAggregateResourceConfig` and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied credentials; without one, scans every enabled AWS account from `/integrations/cloud`. Requires `aggregatorName` + `aggregatorRegion` (or `AWS_CONFIG_AGGREGATOR_NAME` env var). See [docs/aws-config-aggregator-coverage.md](../docs/aws-config-aggregator-coverage.md).',
@@ -482,6 +483,7 @@ export default async function discoveryRoutes(fastify) {
   // Scans all configured Azure subscriptions from Postgres, or uses
   // credentials from the request body for a one-off scan.
   fastify.post('/scan/azure', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
     schema: {
       summary:     'Scan Azure via Resource Graph',
       description: 'Pages a single ARG KQL query and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied subscription/credentials; without one, scans every enabled Azure account from `/integrations/cloud`. See [docs/azure-resource-graph-coverage.md](../docs/azure-resource-graph-coverage.md).',
@@ -558,6 +560,7 @@ export default async function discoveryRoutes(fastify) {
   // Scans all configured GCP projects from Postgres, or uses credentials
   // from the request body for a one-off scan.
   fastify.post('/scan/gcp', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
     schema: {
       summary:     'Scan GCP via Cloud Asset Inventory',
       description: 'Pages `cloudasset.assets.listAssets` for the project and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan; without one, scans every enabled GCP account from `/integrations/cloud`. See [docs/gcp-cloud-asset-coverage.md](../docs/gcp-cloud-asset-coverage.md).',
@@ -629,6 +632,7 @@ export default async function discoveryRoutes(fastify) {
   // Loads accounts from Postgres and runs the per-provider scanners.
   // Accepts optional body overrides but works with no body at all.
   fastify.post('/scan/all', {
+    config: { rateLimit: { max: 1, timeWindow: '5 minutes' } }, // most expensive — fan-out across providers
     schema: {
       summary:     'Scan every configured cloud account in parallel',
       description: 'Fans out to `scanAWS` / `scanAzure` / `scanGCP` for every enabled account configured at `/integrations/cloud`. Bootstrap runs once at the end; cleanup is per-provider. The single response covers all three clouds with per-account breakdowns under `results.<provider>[]`.',

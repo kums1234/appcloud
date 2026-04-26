@@ -2,6 +2,7 @@ import 'dotenv/config'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
+import rateLimit from '@fastify/rate-limit'
 import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
@@ -34,8 +35,26 @@ const fastify = Fastify({
 })
 
 // Core plugins (these use @fastify/cors and @fastify/sensible which handle
-// their own scoping correctly via their built-in fastify-plugin wrappers)
-await fastify.register(cors, { origin: true })
+// their own scoping correctly via their built-in fastify-plugin wrappers).
+//
+// CORS allowlist: previously `origin: true` reflected any origin, which is
+// a CSRF vector if a cross-origin script ever has access to the X-API-Key
+// (e.g. via XSS in the UI or a leaked key in localStorage). The allowlist
+// is configured via APPCLOUD_ALLOWED_ORIGINS (comma-separated). Falls back
+// to the typical local-dev set so `npm run dev` doesn't need extra config.
+const ALLOWED_ORIGINS = (
+  process.env.APPCLOUD_ALLOWED_ORIGINS
+  || 'http://localhost:3000,http://localhost:5173,http://localhost:8080,http://appcloud.local'
+).split(',').map(s => s.trim()).filter(Boolean)
+await fastify.register(cors, {
+  origin: (origin, cb) => {
+    // No origin header = same-origin / curl / server-to-server — always allow.
+    if (!origin) return cb(null, true)
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
+    cb(new Error(`origin ${origin} not in APPCLOUD_ALLOWED_ORIGINS`), false)
+  },
+  credentials: false,
+})
 await fastify.register(sensible)
 
 // Baseline security headers via @fastify/helmet. Disabling CSP because the
@@ -47,6 +66,21 @@ await fastify.register(sensible)
 await fastify.register(helmet, {
   contentSecurityPolicy: false,
   hsts: { maxAge: 31536000, includeSubDomains: true },
+})
+
+// Rate limiting — global 300 req/min per API key (or per IP if unauthed) is
+// generous for legitimate dashboards and tight enough that a leaked key can't
+// rack up millions of requests/hour. AI + discovery routes opt-in to stricter
+// limits via `config.rateLimit` on their schema (see ai.js, discovery.js):
+// LLM-touching endpoints cost real dollars, so default to 5/min there.
+await fastify.register(rateLimit, {
+  global: true,
+  max: parseInt(process.env.APPCLOUD_RATE_LIMIT_MAX || '300', 10),
+  timeWindow: process.env.APPCLOUD_RATE_LIMIT_WINDOW || '1 minute',
+  keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
+  // Don't throttle the liveness probe — k8s polls it constantly.
+  skipOnError: false,
+  allowList: ['127.0.0.1'],
 })
 
 // OpenAPI generation. @fastify/swagger derives the spec from each route's
