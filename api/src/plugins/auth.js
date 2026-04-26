@@ -260,6 +260,16 @@ export async function authPlugin(fastify) {
     }
     req.principal = principal
     touchLastUsed(pg, principal.id)
+    // X-Actor used to be the audit identity; since slice 5 the principal
+    // name is authoritative and X-Actor is silently ignored. Warn once
+    // per request so operators sending it notice the deprecation rather
+    // than wondering why their value never appears in the audit log.
+    if (req.headers['x-actor']) {
+      req.log.warn(
+        { principal: principal.name, xActor: req.headers['x-actor'] },
+        '[auth] X-Actor header is ignored on authenticated requests — audit actor comes from the API key (since slice 5)',
+      )
+    }
   }
 
   const requireScope = (need) => async (req, reply) => {

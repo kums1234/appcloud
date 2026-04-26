@@ -5264,7 +5264,7 @@
         "tags": [
           "Audit"
         ],
-        "description": "Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`.",
+        "description": "Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` (substring match) / `keyId` (exact match on the API key UUID) / `scope` (admin|write|read) / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a row can be traced back to the specific API key that performed the action.",
         "parameters": [
           {
             "schema": {
@@ -5318,6 +5318,29 @@
             },
             "in": "query",
             "name": "actor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "name": "keyId",
+            "required": false,
+            "description": "Exact match on actor_key_id — see GET /admin/api-keys for ids."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "admin",
+                "write",
+                "read"
+              ]
+            },
+            "in": "query",
+            "name": "scope",
             "required": false
           },
           {
@@ -5447,7 +5470,7 @@
         "tags": [
           "Audit"
         ],
-        "description": "Case-insensitive substring match on the `actor` column. Default actor for system-initiated calls is `system`; clients identify themselves via the `X-Actor` header.",
+        "description": "Case-insensitive substring match on the `actor` column. Optional `?keyId=<uuid>` narrows to a specific stored API key (exact match on actor_key_id), useful when several keys share a similar name. Optional `?scope=admin|write|read` narrows to one privilege tier.",
         "parameters": [
           {
             "schema": {
@@ -5469,6 +5492,28 @@
             },
             "in": "query",
             "name": "pageSize",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "name": "keyId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "admin",
+                "write",
+                "read"
+              ]
+            },
+            "in": "query",
+            "name": "scope",
             "required": false
           },
           {

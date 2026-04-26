@@ -13,19 +13,52 @@ export default async function auditRoutes(fastify) {
   // Gracefully no-op when Postgres is unavailable
   const pgOk = () => !!fastify.pg?.pool
 
+  // Shared row → response shape. Includes the slice-5 RBAC fields
+  // (actorKeyId, actorScope) so admins can trace each row back to the
+  // specific stored API key that performed the action.
+  const mapRow = (r) => ({
+    id:           r.id,
+    actor:        r.actor,
+    actorKeyId:   r.actor_key_id ?? null,
+    actorScope:   r.actor_scope  ?? null,
+    action:       r.action,
+    resourceType: r.resource_type,
+    resourceId:   r.resource_id,
+    resourceName: r.resource_name,
+    diff:         r.diff,
+    metadata:     r.metadata,
+    createdAt:    r.created_at,
+  })
+
+  // SELECT list reused across every audit query — keeping the column set
+  // here means a future evolution (more attribution columns, indexed
+  // tags, …) is one diff.
+  const SELECT_COLS = `
+    id, actor, actor_key_id, actor_scope, action,
+    resource_type, resource_id, resource_name,
+    diff, metadata, created_at
+  `
+
+  // Allowed scope values for the ?scope= filter — mirrors the auth-plugin
+  // SCOPES constant but kept inline so this file has no extra runtime
+  // dependency on the plugin.
+  const SCOPE_FILTER_VALUES = new Set(['admin', 'write', 'read'])
+
   // ── GET /audit — paginated, filterable log ──────────────────────────────────
   fastify.get('/', {
     config: { requireAdmin: true },
     schema: {
       summary:     'Paginated audit log',
-      description: 'Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`.',
-      querystring: { type: 'object', additionalProperties: true, properties: {
+      description: 'Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` (substring match) / `keyId` (exact match on the API key UUID) / `scope` (admin|write|read) / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a row can be traced back to the specific API key that performed the action.',
+      querystring: { type: 'object', additionalProperties: false, properties: {
         page:         { type: ['integer', 'string'] },
         pageSize:     { type: ['integer', 'string'] },
         action:       { type: 'string' },
         resourceType: { type: 'string' },
         resourceId:   { type: 'string' },
         actor:        { type: 'string' },
+        keyId:        { type: 'string', format: 'uuid', description: 'Exact match on actor_key_id — see GET /admin/api-keys for ids.' },
+        scope:        { type: 'string', enum: ['admin', 'write', 'read'] },
         from:         { type: 'string', format: 'date-time' },
         to:           { type: 'string', format: 'date-time' },
         q:            { type: 'string' },
@@ -41,11 +74,17 @@ export default async function auditRoutes(fastify) {
       action,          // filter by action: create|update|delete|approve|reject|login|...
       resourceType,    // filter by resource_type: Application|Component|Infra|User|...
       resourceId,      // filter by specific resource
-      actor,           // filter by actor name
+      actor,           // filter by actor name (substring)
+      keyId,           // filter by actor_key_id (exact)
+      scope,           // filter by actor_scope (admin|write|read)
       from,            // ISO date string — lower bound on created_at
       to,              // ISO date string — upper bound on created_at
       q,               // free-text search on resource_name + actor
     } = req.query
+
+    if (scope && !SCOPE_FILTER_VALUES.has(scope)) {
+      return reply.badRequest(`scope must be one of ${[...SCOPE_FILTER_VALUES].join(', ')}`)
+    }
 
     const limit  = Math.min(parseInt(pageSize) || 50, 200)
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit
@@ -59,6 +98,8 @@ export default async function auditRoutes(fastify) {
     if (resourceType) { conditions.push(`resource_type = $${p++}`) ; params.push(resourceType) }
     if (resourceId)   { conditions.push(`resource_id = $${p++}`)   ; params.push(resourceId) }
     if (actor)        { conditions.push(`actor ILIKE $${p++}`)      ; params.push(`%${actor}%`) }
+    if (keyId)        { conditions.push(`actor_key_id = $${p++}`)  ; params.push(keyId) }
+    if (scope)        { conditions.push(`actor_scope = $${p++}`)   ; params.push(scope) }
     if (from)         { conditions.push(`created_at >= $${p++}`)   ; params.push(from) }
     if (to)           { conditions.push(`created_at <= $${p++}`)   ; params.push(to) }
     if (q) {
@@ -71,8 +112,7 @@ export default async function auditRoutes(fastify) {
 
     const [rows, countRows] = await Promise.all([
       fastify.pg.query(
-        `SELECT id, actor, action, resource_type, resource_id,
-                resource_name, diff, metadata, created_at
+        `SELECT ${SELECT_COLS}
          FROM audit_log
          ${where}
          ORDER BY created_at DESC
@@ -87,17 +127,7 @@ export default async function auditRoutes(fastify) {
 
     const total = parseInt(countRows[0]?.total || 0)
     return {
-      rows: rows.map(r => ({
-        id:           r.id,
-        actor:        r.actor,
-        action:       r.action,
-        resourceType: r.resource_type,
-        resourceId:   r.resource_id,
-        resourceName: r.resource_name,
-        diff:         r.diff,
-        metadata:     r.metadata,
-        createdAt:    r.created_at,
-      })),
+      rows: rows.map(mapRow),
       total,
       page:     parseInt(page),
       pageSize: limit,
@@ -115,11 +145,11 @@ export default async function auditRoutes(fastify) {
       response:    { 200: { type: 'object', additionalProperties: true } },
     },
   }, async (req, reply) => {
-    if (!pgOk()) return { byAction: {}, byResourceType: {}, byActor: [], recentActivity: [] }
+    if (!pgOk()) return { byAction: {}, byResourceType: {}, byActor: [], byScope: {}, recentActivity: [] }
 
     const { days = 30 } = req.query
 
-    const [byAction, byType, byActor, daily] = await Promise.all([
+    const [byAction, byType, byActor, byScope, daily] = await Promise.all([
       // Count by action
       fastify.pg.query(`
         SELECT action, COUNT(*) AS cnt
@@ -136,14 +166,26 @@ export default async function auditRoutes(fastify) {
         GROUP BY resource_type ORDER BY cnt DESC
       `, [parseInt(days)]),
 
-      // Top actors
+      // Top actors — also surface the actor's principal-scope so a list
+      // of actors is decipherable without joining back to api_keys.
       fastify.pg.query(`
-        SELECT actor, COUNT(*) AS cnt,
-               array_agg(DISTINCT action ORDER BY action) AS actions
+        SELECT actor,
+               COUNT(*) AS cnt,
+               array_agg(DISTINCT action       ORDER BY action)       AS actions,
+               array_agg(DISTINCT actor_scope) FILTER (WHERE actor_scope IS NOT NULL) AS scopes
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
           AND actor IS NOT NULL
         GROUP BY actor ORDER BY cnt DESC LIMIT 20
+      `, [parseInt(days)]),
+
+      // Count by actor_scope — pre-RBAC rows show up under '(none)' so
+      // operators can see the migration progress.
+      fastify.pg.query(`
+        SELECT COALESCE(actor_scope, '(none)') AS scope, COUNT(*) AS cnt
+        FROM audit_log
+        WHERE created_at >= now() - ($1 || ' days')::interval
+        GROUP BY actor_scope ORDER BY cnt DESC
       `, [parseInt(days)]),
 
       // Daily activity for sparkline (last 30 days)
@@ -160,10 +202,12 @@ export default async function auditRoutes(fastify) {
       period:         `${days}d`,
       byAction:       Object.fromEntries(byAction.map(r => [r.action, parseInt(r.cnt)])),
       byResourceType: Object.fromEntries(byType.map(r => [r.resource_type, parseInt(r.cnt)])),
+      byScope:        Object.fromEntries(byScope.map(r => [r.scope, parseInt(r.cnt)])),
       topActors:      byActor.map(r => ({
         actor:   r.actor,
         count:   parseInt(r.cnt),
         actions: r.actions,
+        scopes:  r.scopes ?? [],
       })),
       dailyActivity: daily.map(r => ({
         day:   r.day,
@@ -184,25 +228,14 @@ export default async function auditRoutes(fastify) {
   }, async (req, reply) => {
     if (!pgOk()) return []
     const rows = await fastify.pg.query(`
-      SELECT id, actor, action, resource_type, resource_id,
-             resource_name, diff, metadata, created_at
+      SELECT ${SELECT_COLS}
       FROM audit_log
       WHERE resource_type = $1 AND resource_id = $2
       ORDER BY created_at DESC
       LIMIT 500
     `, [req.params.type, req.params.id])
 
-    return rows.map(r => ({
-      id:           r.id,
-      actor:        r.actor,
-      action:       r.action,
-      resourceType: r.resource_type,
-      resourceId:   r.resource_id,
-      resourceName: r.resource_name,
-      diff:         r.diff,
-      metadata:     r.metadata,
-      createdAt:    r.created_at,
-    }))
+    return rows.map(mapRow)
   })
 
   // ── GET /audit/actor/:name — all actions by a specific actor ──────────────
@@ -217,9 +250,14 @@ export default async function auditRoutes(fastify) {
     config: { requireAdmin: true },
     schema: {
       summary:     'All audit events by a specific actor (paginated)',
-      description: 'Case-insensitive substring match on the `actor` column. Default actor for system-initiated calls is `system`; clients identify themselves via the `X-Actor` header.',
+      description: 'Case-insensitive substring match on the `actor` column. Optional `?keyId=<uuid>` narrows to a specific stored API key (exact match on actor_key_id), useful when several keys share a similar name. Optional `?scope=admin|write|read` narrows to one privilege tier.',
       params:      { type: 'object', required: ['name'], properties: { name: { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$' } } },
-      querystring: { type: 'object', properties: { page: { type: ['integer', 'string'] }, pageSize: { type: ['integer', 'string'] } } },
+      querystring: { type: 'object', additionalProperties: false, properties: {
+        page:     { type: ['integer', 'string'] },
+        pageSize: { type: ['integer', 'string'] },
+        keyId:    { type: 'string', format: 'uuid' },
+        scope:    { type: 'string', enum: ['admin', 'write', 'read'] },
+      } },
       response:    { 200: { type: 'object', additionalProperties: true } },
     },
   }, async (req, reply) => {
@@ -227,37 +265,37 @@ export default async function auditRoutes(fastify) {
       return reply.badRequest('actor name must match [A-Za-z0-9._@:+-]{1,128}')
     }
     if (!pgOk()) return { rows: [], total: 0 }
-    const { page = 1, pageSize = 50 } = req.query
+    const { page = 1, pageSize = 50, keyId, scope } = req.query
+    if (scope && !SCOPE_FILTER_VALUES.has(scope)) {
+      return reply.badRequest(`scope must be one of ${[...SCOPE_FILTER_VALUES].join(', ')}`)
+    }
     const limit  = Math.min(parseInt(pageSize) || 50, 200)
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit
 
+    // Mirror the filter wiring in GET / so the param-numbering is explicit.
+    const conditions = [`actor ILIKE $1`]
+    const params     = [`%${req.params.name}%`]
+    let   p          = 2
+    if (keyId) { conditions.push(`actor_key_id = $${p++}`); params.push(keyId) }
+    if (scope) { conditions.push(`actor_scope  = $${p++}`); params.push(scope) }
+    const where = `WHERE ${conditions.join(' AND ')}`
+
     const [rows, countRows] = await Promise.all([
       fastify.pg.query(`
-        SELECT id, actor, action, resource_type, resource_id,
-               resource_name, diff, metadata, created_at
+        SELECT ${SELECT_COLS}
         FROM audit_log
-        WHERE actor ILIKE $1
+        ${where}
         ORDER BY created_at DESC
-        LIMIT $2 OFFSET $3
-      `, [`%${req.params.name}%`, limit, offset]),
+        LIMIT $${p} OFFSET $${p + 1}
+      `, [...params, limit, offset]),
       fastify.pg.query(
-        `SELECT COUNT(*) AS total FROM audit_log WHERE actor ILIKE $1`,
-        [`%${req.params.name}%`]
+        `SELECT COUNT(*) AS total FROM audit_log ${where}`,
+        params
       ),
     ])
 
     return {
-      rows: rows.map(r => ({
-        id:           r.id,
-        actor:        r.actor,
-        action:       r.action,
-        resourceType: r.resource_type,
-        resourceId:   r.resource_id,
-        resourceName: r.resource_name,
-        diff:         r.diff,
-        metadata:     r.metadata,
-        createdAt:    r.created_at,
-      })),
+      rows:     rows.map(mapRow),
       total:    parseInt(countRows[0]?.total || 0),
       page:     parseInt(page),
       pageSize: limit,

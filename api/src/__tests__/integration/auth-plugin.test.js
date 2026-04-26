@@ -84,6 +84,12 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     const { default: adminApiKeyRoutes } = await import('../../routes/admin-api-keys.js')
     await fastify.register(adminApiKeyRoutes, { prefix: '/admin' })
 
+    // Register the audit query routes too — needed for the audit-filter
+    // integration tests that exercise the new actor_key_id / actor_scope
+    // exposure + the ?keyId= / ?scope= filters.
+    const { default: auditRoutes } = await import('../../routes/audit.js')
+    await fastify.register(auditRoutes, { prefix: '/audit' })
+
     // Audit-emitter route — used by the audit-attribution test to write a
     // real audit_log row from inside an authenticated request, exercising
     // the actorFromReq → pg.audit pipeline. Registered here (before
@@ -429,6 +435,105 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
       `SELECT id FROM api_keys WHERE name = 'bootstrap-admin-key'`,
     )
     expect(rows.rows[0].actor_key_id).toBe(keyRow.rows[0].id)
+  })
+
+  test('GET /audit rows expose actorKeyId + actorScope', async () => {
+    // Emit a fresh row so we have something to query.
+    await fastify.inject({
+      method: 'POST', url: '/audit-emitter',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    const r = await fastify.inject({
+      method: 'GET', url: '/audit?action=test-emit&pageSize=5',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(r.statusCode).toBe(200)
+    const body = JSON.parse(r.payload)
+    expect(body.rows.length).toBeGreaterThan(0)
+    const row = body.rows[0]
+    expect(row.actor).toBe('bootstrap-admin-key')
+    expect(row.actorScope).toBe('admin')
+    expect(row.actorKeyId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  test('GET /audit?keyId= filters by actor_key_id', async () => {
+    // Emit a couple of rows under the bootstrap admin key.
+    await fastify.inject({
+      method: 'POST', url: '/audit-emitter',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    // Find the bootstrap admin key's id.
+    const adminRows = await pgClient.query(
+      `SELECT id FROM api_keys WHERE name = 'bootstrap-admin-key'`,
+    )
+    const adminKeyId = adminRows.rows[0].id
+
+    const matched = await fastify.inject({
+      method: 'GET', url: `/audit?keyId=${adminKeyId}&pageSize=5`,
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(matched.statusCode).toBe(200)
+    const matchedBody = JSON.parse(matched.payload)
+    expect(matchedBody.rows.length).toBeGreaterThan(0)
+    for (const row of matchedBody.rows) expect(row.actorKeyId).toBe(adminKeyId)
+
+    // A bogus UUID returns zero rows but still 200.
+    const empty = await fastify.inject({
+      method: 'GET', url: '/audit?keyId=00000000-0000-0000-0000-000000000000',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(empty.statusCode).toBe(200)
+    expect(JSON.parse(empty.payload).rows).toEqual([])
+  })
+
+  test('GET /audit?scope=admin filters by actor_scope', async () => {
+    const r = await fastify.inject({
+      method: 'GET', url: '/audit?scope=admin&pageSize=5',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(r.statusCode).toBe(200)
+    const body = JSON.parse(r.payload)
+    for (const row of body.rows) expect(row.actorScope).toBe('admin')
+  })
+
+  test('GET /audit?scope=garbage returns 400', async () => {
+    const r = await fastify.inject({
+      method: 'GET', url: '/audit?scope=garbage',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(r.statusCode).toBe(400)
+  })
+
+  test('X-Actor header on an authenticated request is ignored + warned', async () => {
+    // The principal is determined by the API key (bootstrap-admin-key),
+    // not by the X-Actor header. Verify (a) the audit row records the
+    // principal, (b) the X-Actor value does NOT leak into actor.
+    //
+    // The req.log.warn that fires alongside is the operator-facing
+    // signal; we don't assert on log output here (the test fastify uses
+    // logger:false), but the audit-row check is the load-bearing part.
+    const r = await fastify.inject({
+      method: 'POST', url: '/audit-emitter',
+      headers: {
+        'x-api-key':   bootstrapAdminKey,
+        'x-actor':     'imposter@evil.test',
+        'content-type': 'application/json',
+      },
+      payload: '{}',
+    })
+    expect(r.statusCode).toBe(200)
+
+    const rows = await pgClient.query(`
+      SELECT actor, actor_key_id
+      FROM audit_log
+      WHERE action = 'test-emit'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+    expect(rows.rows[0].actor).toBe('bootstrap-admin-key')
+    expect(rows.rows[0].actor).not.toBe('imposter@evil.test')
   })
 
   test('rotating the bootstrap env var refreshes the row hash', async () => {
