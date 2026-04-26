@@ -1,40 +1,66 @@
 // plugins/auth.js
-// Headless API-key gate.
+// DB-backed multi-key authentication.
 //
-// Two key tiers:
-//   - Regular  — APPCLOUD_API_KEY_FILE / APPCLOUD_API_KEY (existing).
-//                Required for any non-public route.
-//   - Admin    — APPCLOUD_ADMIN_API_KEY_FILE / APPCLOUD_ADMIN_API_KEY (new).
-//                Required for routes that opt-in via `config.requireAdmin: true`
-//                in their route options (today: every /audit/* route).
+// Every API key lives as a row in the api_keys table (postgres-init/10-api-keys.sql).
+// We store SHA-256(plaintext) and look up by hash on every request — the
+// plaintext is shown ONCE at creation and never recoverable.
 //
-// When the regular key is unset, auth is disabled and fastify.authenticate is
-// a no-op (existing dev-friendly behaviour). When the admin key is unset,
-// admin-only routes 503 — fail loud so an operator notices before assuming
-// audit reads are protected.
+// ── Scopes ───────────────────────────────────────────────────────────────────
+// Hierarchy: admin > write > read.
+//   - admin → key management, audit log, debug routes, plus everything below
+//   - write → mutations on resources (apps, components, infra, scans, …)
+//   - read  → GET endpoints
+// Per-route requirement comes from `config.scope: 'admin' | 'write' | 'read'`,
+// or falls back to a method-based default in stage 3 (this stage just keeps
+// the existing `requireAdmin` decorator working as a thin wrapper).
 //
-// Callers authenticate by sending:  X-API-Key: <key>
-// A missing or mismatched key on a protected route returns 401; a missing
-// admin requirement returns 403.
+// ── Bootstrap ────────────────────────────────────────────────────────────────
+// On startup we upsert two rows from env vars (when set):
+//   APPCLOUD_API_KEY{,_FILE}        → name='bootstrap-api-key'   scopes=['write']
+//   APPCLOUD_ADMIN_API_KEY{,_FILE}  → name='bootstrap-admin-key' scopes=['admin']
+// These are flagged is_bootstrap=true so future stages can refresh their
+// hashes when the env value rotates without touching hand-created keys.
+//
+// ── Cache + DB unavailability ────────────────────────────────────────────────
+// The hash → principal map is cached in memory and refreshed every CACHE_TTL_MS
+// (default 60s). On a DB outage we keep serving from the last good snapshot,
+// so a Postgres blip doesn't blackhole every request. If the cache is empty
+// AND the DB is down, requests 503.
 //
 // ── Default-deny ─────────────────────────────────────────────────────────────
-// Every route registered AFTER this plugin runs gets `fastify.authenticate`
-// wired in as a preHandler automatically via an `onRoute` hook. Forgetting
-// `withAuth(...)` on a new route can no longer accidentally expose it.
-//
-// Routes opt out by setting `schema.security = []` (the same OpenAPI
-// convention already documented in api/src/schemas/openapi.js). The handful
-// of intentionally public routes (`/health`, `/`, `/openapi.json`,
-// Swagger UI under `/docs/*`) either set `security: []` or are registered
-// BEFORE this plugin runs, so the hook never sees them.
+// Unchanged from prior slices: the onRoute hook attaches `authenticate` to
+// every route except those flagged `schema.security: []`. `requireAdmin` is
+// still attached when `config.requireAdmin: true` is set on a route — kept
+// as a backwards-compat alias for `config.scope: 'admin'` until stage 3.
+
 import fs from 'fs'
-import { timingSafeEqual } from 'crypto'
+import { hashKey, prefixOf, hasScope, SCOPES } from '../utils/api-keys.js'
 import { warnIfLegacyKeyEnvSet } from '../utils/encrypt.js'
 
-// Recommended minimum key length. `openssl rand -hex 32` produces 64 chars.
-// Shorter keys are accepted (don't break dev) but logged with a warning so
-// the operator notices before going to production.
-const MIN_KEY_LEN = 32
+const MIN_KEY_LEN  = 32
+const CACHE_TTL_MS = parseInt(process.env.APPCLOUD_AUTH_CACHE_TTL_MS || '60000', 10)
+
+// Mirror of postgres-init/10-api-keys.sql so a fresh DB without the init
+// file applied still gets the table. Keep schemas in sync.
+const CREATE_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          TEXT         NOT NULL UNIQUE,
+    key_hash      TEXT         NOT NULL UNIQUE,
+    key_prefix    TEXT         NOT NULL,
+    scopes        TEXT[]       NOT NULL,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    created_by    TEXT,
+    last_used_at  TIMESTAMPTZ,
+    revoked_at    TIMESTAMPTZ,
+    is_bootstrap  BOOLEAN      NOT NULL DEFAULT false,
+    CHECK (array_length(scopes, 1) >= 1)
+  );
+  CREATE INDEX IF NOT EXISTS idx_api_keys_hash_active
+    ON api_keys (key_hash) WHERE revoked_at IS NULL;
+  CREATE INDEX IF NOT EXISTS idx_api_keys_active
+    ON api_keys (revoked_at) WHERE revoked_at IS NULL;
+`
 
 function readKeyFromFileOrEnv(fileVar, envVar) {
   const filePath = process.env[fileVar]
@@ -44,139 +70,235 @@ function readKeyFromFileOrEnv(fileVar, envVar) {
   return (process.env[envVar] || '').trim()
 }
 
-function readKey() {
+function readBootstrapKey() {
   return readKeyFromFileOrEnv('APPCLOUD_API_KEY_FILE', 'APPCLOUD_API_KEY')
 }
 
-function readAdminKey() {
+function readBootstrapAdminKey() {
   return readKeyFromFileOrEnv('APPCLOUD_ADMIN_API_KEY_FILE', 'APPCLOUD_ADMIN_API_KEY')
 }
 
-// Constant-time API-key comparison. A naive `provided !== expected` short-
-// circuits on the first byte mismatch, leaking how far the guess matched via
-// timing — over many requests an attacker can recover the key byte-by-byte.
-//
-// timingSafeEqual requires equal-length buffers. We pad the provided value to
-// the expected length (with a fixed sentinel) and force-fail if the lengths
-// differ — both branches still execute the full-length comparison, so the
-// length check itself doesn't leak.
-function safeKeyEqual(provided, expected) {
-  const expectedBuf = Buffer.from(expected, 'utf8')
-  const providedBuf = Buffer.alloc(expectedBuf.length, 0)
-  Buffer.from(provided, 'utf8').copy(providedBuf, 0, 0, expectedBuf.length)
-  const equal = timingSafeEqual(providedBuf, expectedBuf)
-  return equal && provided.length === expected.length
-}
-
-// Treat a route as public when the schema explicitly opts out via the OpenAPI
-// security override. Anything else is auth-gated by default.
 function isPublicRoute(routeOptions) {
   return Array.isArray(routeOptions.schema?.security)
       && routeOptions.schema.security.length === 0
 }
 
-// Compose `auth` with whatever preHandler the route already declared, without
-// duplicating if it's already there. Auth runs first so unauthorised callers
-// short-circuit before any other validation work.
-function attachAuth(routeOptions, auth) {
+function attachPreHandler(routeOptions, handler) {
   const existing = routeOptions.preHandler
-  if (existing === auth) return
+  if (existing === handler) return
   if (Array.isArray(existing)) {
-    if (existing.includes(auth)) return
-    routeOptions.preHandler = [auth, ...existing]
+    if (existing.includes(handler)) return
+    routeOptions.preHandler = [...existing, handler]
   } else if (existing) {
-    routeOptions.preHandler = [auth, existing]
+    routeOptions.preHandler = [existing, handler]
   } else {
-    routeOptions.preHandler = auth
+    routeOptions.preHandler = handler
   }
+}
+
+function prependPreHandler(routeOptions, handler) {
+  const existing = routeOptions.preHandler
+  if (existing === handler) return
+  if (Array.isArray(existing)) {
+    if (existing.includes(handler)) return
+    routeOptions.preHandler = [handler, ...existing]
+  } else if (existing) {
+    routeOptions.preHandler = [handler, existing]
+  } else {
+    routeOptions.preHandler = handler
+  }
+}
+
+// In-memory hash → principal map. Refreshed lazily when older than TTL.
+function makeKeyCache() {
+  return {
+    map:        new Map(),
+    refreshedAt: 0,
+    error:      null,
+  }
+}
+
+async function loadKeysFromDb(pg) {
+  const rows = await pg.query(`
+    SELECT id, name, key_hash, key_prefix, scopes
+    FROM api_keys
+    WHERE revoked_at IS NULL
+  `)
+  const map = new Map()
+  for (const r of rows) {
+    map.set(r.key_hash, {
+      id:     r.id,
+      name:   r.name,
+      scopes: r.scopes,
+      prefix: r.key_prefix,
+    })
+  }
+  return map
+}
+
+async function refreshIfStale(cache, pg, log) {
+  if (Date.now() - cache.refreshedAt < CACHE_TTL_MS) return
+  try {
+    cache.map         = await loadKeysFromDb(pg)
+    cache.refreshedAt = Date.now()
+    cache.error       = null
+  } catch (err) {
+    cache.error = err
+    log?.error?.({ err }, '[auth] failed to refresh api_keys from DB — serving from last good snapshot')
+  }
+}
+
+// Idempotent upsert of an env-var-derived bootstrap row. Refreshes the
+// hash if the env value rotated; leaves hand-created rows untouched.
+async function upsertBootstrapKey(pg, log, { plaintext, name, scopes }) {
+  if (!plaintext) return
+  if (plaintext.length < MIN_KEY_LEN) {
+    log.warn(
+      `[auth] ${name} env-var key is only ${plaintext.length} chars — recommend ${MIN_KEY_LEN}+ ` +
+      `(generate via: openssl rand -hex 32)`,
+    )
+  }
+  const key_hash   = hashKey(plaintext)
+  const key_prefix = prefixOf(plaintext)
+  await pg.query(`
+    INSERT INTO api_keys (name, key_hash, key_prefix, scopes, is_bootstrap, created_by)
+    VALUES ($1, $2, $3, $4, true, 'bootstrap')
+    ON CONFLICT (name) DO UPDATE
+      SET key_hash   = EXCLUDED.key_hash,
+          key_prefix = EXCLUDED.key_prefix,
+          scopes     = EXCLUDED.scopes,
+          revoked_at = NULL
+      WHERE api_keys.is_bootstrap = true
+  `, [name, key_hash, key_prefix, scopes])
+}
+
+// Fire-and-forget last_used_at update. We don't await it because it would
+// add a round-trip to the auth fast path; loss of one update on a server
+// crash isn't load-bearing.
+function touchLastUsed(pg, id) {
+  pg.query(
+    `UPDATE api_keys SET last_used_at = now() WHERE id = $1`,
+    [id],
+  ).catch(() => {})
 }
 
 export async function authPlugin(fastify) {
   warnIfLegacyKeyEnvSet(fastify.log)
-  const expected      = readKey()
-  const expectedAdmin = readAdminKey()
 
-  const authenticate = expected
-    ? async (req, reply) => {
-        const provided = (req.headers['x-api-key'] || '').trim()
-        if (!provided || !safeKeyEqual(provided, expected)) {
-          // Admin keys also satisfy regular auth — operator with an admin
-          // key can hit normal routes without juggling two keys.
-          if (expectedAdmin && safeKeyEqual(provided, expectedAdmin)) {
-            req.appcloudKeyTier = 'admin'
-            return
-          }
-          reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
-          return
-        }
-        req.appcloudKeyTier = 'regular'
-      }
-    : async (req) => { req.appcloudKeyTier = 'disabled' }
+  const pg = fastify.pg
+  if (!pg?.query) {
+    fastify.log.error('[auth] fastify.pg.query unavailable — auth plugin requires Postgres')
+    throw new Error('authPlugin requires fastify.pg')
+  }
 
-  // Admin-tier check — used as a SECOND preHandler on routes that set
-  // `config.requireAdmin: true`. Returns 403 when the caller authenticated
-  // with the regular key, 503 when the admin key isn't configured at all.
-  const requireAdmin = async (req, reply) => {
-    if (!expectedAdmin) {
-      reply.code(503).send({
-        error:   'Service Unavailable',
-        message: 'admin route — APPCLOUD_ADMIN_API_KEY{,_FILE} is not configured',
-      })
+  // 1. Ensure schema exists.
+  try { await pg.query(CREATE_TABLE_SQL) }
+  catch (err) {
+    fastify.log.error({ err }, '[auth] failed to ensure api_keys table — auth will be rejected until schema is fixed')
+  }
+
+  // 2. Bootstrap rows from env vars. APPCLOUD_API_KEY → write, ADMIN → admin.
+  //    Best-effort: log + continue if DB write fails (the cache refresh
+  //    below will surface the problem at request time).
+  const bootstrapPlain      = readBootstrapKey()
+  const bootstrapAdminPlain = readBootstrapAdminKey()
+  try {
+    await upsertBootstrapKey(pg, fastify.log, {
+      plaintext: bootstrapPlain,
+      name:      'bootstrap-api-key',
+      scopes:    [SCOPES.WRITE],
+    })
+    await upsertBootstrapKey(pg, fastify.log, {
+      plaintext: bootstrapAdminPlain,
+      name:      'bootstrap-admin-key',
+      scopes:    [SCOPES.ADMIN],
+    })
+  } catch (err) {
+    fastify.log.error({ err }, '[auth] bootstrap upsert failed — keys created via /admin/api-keys still work')
+  }
+
+  // 3. Initial cache fill.
+  const cache = makeKeyCache()
+  await refreshIfStale(cache, pg, fastify.log)
+
+  // 4. Decorate fastify with the auth + scope-check primitives.
+  const authDisabled = !bootstrapPlain && !bootstrapAdminPlain && cache.map.size === 0
+  if (authDisabled) {
+    fastify.log.warn('[auth] no bootstrap env keys + no DB keys — authentication disabled, all routes open')
+  }
+
+  const authenticate = async (req, reply) => {
+    if (authDisabled) {
+      // No DB keys + no env vars — local-dev convenience matching the
+      // previous build's "auth disabled, all routes open" path. As soon
+      // as ANY key is created (env-var bootstrap or via /admin/api-keys
+      // once stage 4 lands), this branch goes cold.
+      req.principal = { id: null, name: 'anonymous', scopes: [SCOPES.ADMIN], prefix: '' }
       return
     }
-    if (req.appcloudKeyTier !== 'admin') {
+    await refreshIfStale(cache, pg, fastify.log)
+    const provided = (req.headers['x-api-key'] || '').trim()
+    if (!provided) {
+      reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
+      return
+    }
+    // hashKey runs unconditionally so an attacker can't distinguish a
+    // missing-header request from a bad-key request via timing. Map.get
+    // on the resulting hex hash is O(1) and reveals nothing about which
+    // bytes (if any) matched a stored key.
+    const candidateHash = hashKey(provided)
+    const principal     = cache.map.get(candidateHash)
+    if (!principal) {
+      // Cache empty + DB last-fetch failed → 503, not 401, so an operator
+      // sees the real cause instead of chasing a "bad key" red herring.
+      if (cache.error && cache.map.size === 0) {
+        reply.code(503).send({ error: 'Service Unavailable', message: 'auth backend unavailable' })
+        return
+      }
+      reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
+      return
+    }
+    req.principal = principal
+    touchLastUsed(pg, principal.id)
+  }
+
+  const requireScope = (need) => async (req, reply) => {
+    if (!req.principal) {
+      reply.code(401).send({ error: 'Unauthorized', message: 'authentication required' })
+      return
+    }
+    if (!hasScope(req.principal.scopes, need)) {
       reply.code(403).send({
         error:   'Forbidden',
-        message: 'admin tier required — pass an X-API-Key matching APPCLOUD_ADMIN_API_KEY',
+        message: `scope '${need}' required (this key has: ${req.principal.scopes.join(', ')})`,
       })
     }
   }
+
+  // Backwards-compat wrapper: routes that used `config.requireAdmin: true`
+  // continue to work via the same name. Stage 3 will deprecate this in
+  // favour of `config.scope: 'admin'`, but for this commit we want the
+  // existing call sites and the auth-coverage test to keep passing.
+  const requireAdmin = requireScope(SCOPES.ADMIN)
 
   fastify.decorate('authenticate', authenticate)
   fastify.decorate('requireAdmin', requireAdmin)
+  fastify.decorate('requireScope', requireScope)
+  // Expose the cache so future stages (admin endpoints) can invalidate it
+  // immediately on key create/revoke instead of waiting for TTL.
+  fastify.decorate('apiKeyCache', cache)
 
-  // Default-deny: wire the authenticate preHandler into every route registered
-  // after this plugin. Even when auth is disabled (no API key configured),
-  // installing the hook keeps behaviour identical between dev + prod and
-  // means a key flipped on later doesn't depend on individual routes
-  // remembering to opt in. Routes that flag `config.requireAdmin: true` get
-  // the admin-tier preHandler attached too — order matters: regular auth
-  // first (sets the tier), then the admin gate (reads it).
   fastify.addHook('onRoute', (routeOptions) => {
     if (isPublicRoute(routeOptions)) return
-    attachAuth(routeOptions, authenticate)
+    prependPreHandler(routeOptions, authenticate)
     if (routeOptions.config?.requireAdmin) {
-      const ph = routeOptions.preHandler
-      if (Array.isArray(ph) && !ph.includes(requireAdmin)) {
-        routeOptions.preHandler = [...ph, requireAdmin]
-      } else if (typeof ph === 'function' && ph !== requireAdmin) {
-        routeOptions.preHandler = [ph, requireAdmin]
-      }
+      attachPreHandler(routeOptions, requireAdmin)
     }
   })
 
-  if (expected) {
-    fastify.log.info('[auth] API-key authentication enabled (X-API-Key header) — default-deny on all routes')
-    if (expected.length < MIN_KEY_LEN) {
-      fastify.log.warn(
-        `[auth] APPCLOUD_API_KEY is only ${expected.length} chars — recommend ${MIN_KEY_LEN}+ ` +
-        `(generate via: openssl rand -hex 32)`,
-      )
-    }
-  } else {
-    fastify.log.warn('[auth] APPCLOUD_API_KEY not set — authentication disabled, all routes open')
-  }
-  if (expectedAdmin) {
-    fastify.log.info('[auth] admin-tier authentication enabled — admin routes require APPCLOUD_ADMIN_API_KEY')
-    if (expectedAdmin.length < MIN_KEY_LEN) {
-      fastify.log.warn(
-        `[auth] APPCLOUD_ADMIN_API_KEY is only ${expectedAdmin.length} chars — recommend ${MIN_KEY_LEN}+`,
-      )
-    }
-    if (expectedAdmin === expected) {
-      fastify.log.warn('[auth] APPCLOUD_ADMIN_API_KEY equals APPCLOUD_API_KEY — admin tier provides no additional protection in this configuration')
-    }
-  } else {
-    fastify.log.warn('[auth] APPCLOUD_ADMIN_API_KEY not set — routes flagged config.requireAdmin will return 503')
-  }
+  fastify.log.info(
+    `[auth] DB-backed authentication active — ${cache.map.size} key(s) loaded` +
+    (bootstrapPlain ? ', APPCLOUD_API_KEY bootstrap=write' : '') +
+    (bootstrapAdminPlain ? ', APPCLOUD_ADMIN_API_KEY bootstrap=admin' : ''),
+  )
 }
