@@ -12,7 +12,8 @@
     "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --runInBand --testPathPattern '/integration/'",
     "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
     "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
-    "openapi:export": "node scripts/export-openapi.js"
+    "openapi:export": "node scripts/export-openapi.js",
+    "prepare": "bash ../scripts/install-hooks.sh || true"
   },
   "dependencies": {
     "@aws-sdk/client-config-service": "^3.1037.0",
