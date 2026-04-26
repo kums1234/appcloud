@@ -35,7 +35,7 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     // 01-schema.sql sets up extensions; 10-api-keys.sql is the table this
     // plugin needs. The plugin's own CREATE TABLE IF NOT EXISTS would also
     // create it, but we apply the canonical file so any drift is loud.
-    await applyPostgresInitFiles(pgClient, ['01-schema.sql', '10-api-keys.sql'])
+    await applyPostgresInitFiles(pgClient, ['01-schema.sql', '10-api-keys.sql', '11-audit-evolution.sql'])
 
     // Set env vars *before* the auth plugin starts — its bootstrap path
     // upserts rows from these.
@@ -83,6 +83,21 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     // end-to-end with the same auth + principal wiring it'll see in prod.
     const { default: adminApiKeyRoutes } = await import('../../routes/admin-api-keys.js')
     await fastify.register(adminApiKeyRoutes, { prefix: '/admin' })
+
+    // Audit-emitter route — used by the audit-attribution test to write a
+    // real audit_log row from inside an authenticated request, exercising
+    // the actorFromReq → pg.audit pipeline. Registered here (before
+    // ready()) because Fastify rejects route additions post-listen.
+    const { actorFromReq } = await import('../../utils/audit.js')
+    fastify.post('/audit-emitter', async (req) => {
+      const a = actorFromReq(req)
+      await pgClient.query(
+        `INSERT INTO audit_log(actor, actor_key_id, actor_scope, action, resource_type, resource_id)
+         VALUES ($1, $2, $3, 'test-emit', 'TestResource', 'test-id')`,
+        [a.name, a.keyId, a.scope],
+      )
+      return { ok: true }
+    })
     await fastify.ready()
   }, 180_000)
 
@@ -384,6 +399,36 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
       method: 'DELETE', url: `/admin/api-keys/${id}`,
       headers: { 'x-api-key': bootstrapAdminKey },
     })
+  })
+
+  test('audit row records actor_key_id + actor_scope when principal is set', async () => {
+    // /audit-emitter is registered in beforeAll. Each call writes a row
+    // built from actorFromReq(req), so this test verifies the end-to-end
+    // path: auth plugin → req.principal → actorFromReq → audit_log
+    // columns.
+    const r = await fastify.inject({
+      method: 'POST', url: '/audit-emitter',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    expect(r.statusCode).toBe(200)
+
+    const rows = await pgClient.query(`
+      SELECT actor, actor_key_id, actor_scope
+      FROM audit_log
+      WHERE action = 'test-emit'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+    expect(rows.rows[0].actor).toBe('bootstrap-admin-key')
+    expect(rows.rows[0].actor_scope).toBe('admin')
+    expect(rows.rows[0].actor_key_id).toBeTruthy()                    // a real UUID
+
+    // The recorded actor_key_id matches the api_keys row.
+    const keyRow = await pgClient.query(
+      `SELECT id FROM api_keys WHERE name = 'bootstrap-admin-key'`,
+    )
+    expect(rows.rows[0].actor_key_id).toBe(keyRow.rows[0].id)
   })
 
   test('rotating the bootstrap env var refreshes the row hash', async () => {

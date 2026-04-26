@@ -6,6 +6,7 @@
 
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { parseAndValidateRegions } from '../utils/aws-regions.js'
+import { actorFromReq } from '../utils/audit.js'
 import {
   CloudAccountSchema,
   CloudAccountCreateBodySchema,
@@ -46,7 +47,7 @@ const CREATE_TABLE_SQL = `
 
 export default async function cloudAccountRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
 
   // Ensure table exists when server starts — non-fatal if Postgres unavailable
   fastify.addHook('onReady', async () => {

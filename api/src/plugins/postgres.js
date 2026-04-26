@@ -44,15 +44,51 @@ export async function postgresPlugin(fastify) {
     return
   }
 
+  // Apply the audit_log evolution that adds actor_key_id + actor_scope
+  // columns. Idempotent (`ALTER TABLE … ADD COLUMN IF NOT EXISTS …`) so
+  // it's safe to run on every startup; mirrors postgres-init/11-audit-evolution.sql.
+  try {
+    await pool.query(`
+      ALTER TABLE audit_log
+        ADD COLUMN IF NOT EXISTS actor_key_id UUID
+          REFERENCES api_keys(id) ON DELETE SET NULL;
+      ALTER TABLE audit_log
+        ADD COLUMN IF NOT EXISTS actor_scope TEXT;
+      CREATE INDEX IF NOT EXISTS idx_audit_log_actor_key
+        ON audit_log(actor_key_id) WHERE actor_key_id IS NOT NULL;
+    `)
+  } catch (err) {
+    // The api_keys FK may not exist yet on a brand-new DB if the auth
+    // plugin runs after this. Log + continue; the auth plugin's CREATE
+    // TABLE IF NOT EXISTS api_keys runs before any audit() call.
+    fastify.log.warn(`[pg] audit_log evolution skipped: ${err.message}`)
+  }
+
   fastify.decorate('pg', {
     pool,
     query: async (sql, params = []) => (await pool.query(sql, params)).rows,
+    // audit() accepts the actor as a string (legacy) OR an object of the
+    // shape { name, keyId, scope } (since slice 5 — RBAC). The object form
+    // populates the new audit_log columns; the string form leaves them
+    // NULL, which means rows from system jobs / schedulers stay readable
+    // but with no key attribution.
     audit: async (actor, action, resourceType, resourceId, resourceName, metadata = {}, diff = null) => {
       try {
+        let actorName, actorKeyId = null, actorScope = null
+        if (typeof actor === 'string') {
+          actorName = actor
+        } else if (actor && typeof actor === 'object') {
+          actorName  = actor.name  || 'system'
+          actorKeyId = actor.keyId || null
+          actorScope = actor.scope || null
+        } else {
+          actorName = 'system'
+        }
         await pool.query(
-          `INSERT INTO audit_log(actor,action,resource_type,resource_id,resource_name,metadata,diff)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [actor, action, resourceType, resourceId, resourceName,
+          `INSERT INTO audit_log(actor, actor_key_id, actor_scope, action, resource_type, resource_id, resource_name, metadata, diff)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [actorName, actorKeyId, actorScope,
+           action, resourceType, resourceId, resourceName,
            JSON.stringify(metadata), diff ? JSON.stringify(diff) : null]
         )
       } catch {}

@@ -14,6 +14,7 @@
 
 import { props, serialize } from '../utils/serialize.js'
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
+import { actorFromReq } from '../utils/audit.js'
 import { bootstrapDiscovery } from './discovery.bootstrap.js'
 import { bootstrapSuggestFallback } from './discovery.suggest.patch.js'
 import { startEpisode, finishEpisode } from '../services/episodes.js'
@@ -368,7 +369,7 @@ export default async function discoveryRoutes(fastify) {
   }
   const { write, query } = fastify.neo4j
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
 
   // Cloud-account CRUD lives in `routes/integrations-cloud.js` under
   // `/integrations/cloud`. Discovery is a *consumer* of those records —
