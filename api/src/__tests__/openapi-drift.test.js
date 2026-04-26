@@ -82,6 +82,7 @@ async function buildSpec() {
     ['./routes/audit.js',                 { prefix: '/audit'        }],
     ['./routes/cmdb.js',                  { prefix: '/cmdb'         }],
     ['./routes/ai.js',                    { prefix: '/ai'           }],
+    ['./routes/admin-api-keys.js',        { prefix: '/admin'        }],
   ]
   for (const [rel, opts] of modules) {
     const mod = await import(path.join(apiSrc, rel))

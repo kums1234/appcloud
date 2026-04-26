@@ -3752,9 +3752,16 @@ paths:
       summary: Paginated audit log
       tags:
         - Audit
-      description: Every mutation API call writes a row here. Filterable by `action` /
-        `resourceType` / `resourceId` / `actor` / time window (`from`, `to`) /
-        free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`.
+      description: "Every mutation API call writes a row here. `actor` is exact-match
+        by default — pass `?like=true` to opt into the legacy substring/ILIKE
+        behaviour (separate keys with similar names like `ci-deploy-staging` /
+        `ci-deploy-prod` previously collapsed into one query, which is now
+        opt-in). Other filters: `action`, `resourceType`, `resourceId`, `keyId`
+        (exact UUID), `scope` (admin|write|read), `from`/`to` (ISO date), `q`
+        (substring on `resource_name` OR `actor`). Returns `{ rows, total, page,
+        pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a
+        row can be traced back to the specific API key that performed the
+        action."
       parameters:
         - schema:
             type:
@@ -3789,6 +3796,33 @@ paths:
             type: string
           in: query
           name: actor
+          required: false
+          description: Exact match by default. Set `like=true` for case-insensitive
+            substring (legacy).
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+          in: query
+          name: like
+          required: false
+          description: Opt-in substring match for `actor` (default false = exact match).
+        - schema:
+            type: string
+            format: uuid
+          in: query
+          name: keyId
+          required: false
+          description: Exact match on actor_key_id — see GET /admin/api-keys for ids.
+        - schema:
+            type: string
+            enum:
+              - admin
+              - write
+              - read
+          in: query
+          name: scope
           required: false
         - schema:
             type: string
@@ -3874,9 +3908,12 @@ paths:
       summary: All audit events by a specific actor (paginated)
       tags:
         - Audit
-      description: Case-insensitive substring match on the `actor` column. Default
-        actor for system-initiated calls is `system`; clients identify
-        themselves via the `X-Actor` header.
+      description: Exact match on the `actor` column by default. Pass `?like=true` for
+        case-insensitive substring (legacy behaviour, collapses across
+        similarly-named keys). Optional `?keyId=<uuid>` narrows to a specific
+        stored API key (exact match on actor_key_id) — preferable to
+        substring-name matching once you know the key id. Optional
+        `?scope=admin|write|read` narrows to one privilege tier.
       parameters:
         - schema:
             type:
@@ -3892,6 +3929,30 @@ paths:
           in: query
           name: pageSize
           required: false
+        - schema:
+            type: string
+            format: uuid
+          in: query
+          name: keyId
+          required: false
+        - schema:
+            type: string
+            enum:
+              - admin
+              - write
+              - read
+          in: query
+          name: scope
+          required: false
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+          in: query
+          name: like
+          required: false
+          description: Opt-in substring match (default false = exact match).
         - schema:
             type: string
             pattern: ^[A-Za-z0-9._@:+-]{1,128}$
@@ -4216,6 +4277,363 @@ paths:
                 type: object
                 additionalProperties: true
         "503":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - statusCode
+                  - error
+                  - message
+                additionalProperties: true
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  error:
+                    type: string
+                    example: Bad Request
+                  message:
+                    type: string
+                    example: infraId required
+  /admin/api-keys:
+    post:
+      summary: Create a new API key
+      tags:
+        - Admin
+      description: Generates a fresh `ak_…` plaintext, stores SHA-256(plaintext) + the
+        requested scopes, and returns the plaintext **once**. Save it
+        immediately — it is never recoverable.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - scopes
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  pattern: ^[A-Za-z0-9._@:+-]{1,128}$
+                  description: Human-readable identifier — appears in audit logs as the actor.
+                scopes:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum:
+                      - admin
+                      - write
+                      - read
+                expiresAt:
+                  type:
+                    - string
+                    - "null"
+                  format: date-time
+                  description: Optional expiry. Omit (or pass null) for never-expires. The key
+                    stops working at the moment now() crosses this instant.
+              example:
+                name: ci-deploy-bot
+                scopes:
+                  - write
+                expiresAt: 2026-12-31T23:59:59Z
+        required: true
+      responses:
+        "201":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  key_prefix:
+                    type: string
+                  scopes:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        - admin
+                        - write
+                        - read
+                  created_at:
+                    type: string
+                    format: date-time
+                  created_by:
+                    type:
+                      - "null"
+                      - string
+                  last_used_at:
+                    type:
+                      - "null"
+                      - string
+                    format: date-time
+                  revoked_at:
+                    type:
+                      - "null"
+                      - string
+                    format: date-time
+                  expires_at:
+                    type:
+                      - "null"
+                      - string
+                    format: date-time
+                    description: NULL = never expires; otherwise the key is rejected once now()
+                      crosses this instant.
+                  is_bootstrap:
+                    type: boolean
+                  plaintext:
+                    type: string
+                    description: The generated key. Shown ONCE; copy it now.
+    get:
+      summary: List API keys
+      tags:
+        - Admin
+      description: Returns every row including revoked ones, sorted by creation time
+        (newest first). Plaintext is **never** returned — only the prefix and
+        metadata.
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+          in: query
+          name: includeRevoked
+          required: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
+                    key_prefix:
+                      type: string
+                    scopes:
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - admin
+                          - write
+                          - read
+                    created_at:
+                      type: string
+                      format: date-time
+                    created_by:
+                      type:
+                        - "null"
+                        - string
+                    last_used_at:
+                      type:
+                        - "null"
+                        - string
+                      format: date-time
+                    revoked_at:
+                      type:
+                        - "null"
+                        - string
+                      format: date-time
+                    expires_at:
+                      type:
+                        - "null"
+                        - string
+                      format: date-time
+                      description: NULL = never expires; otherwise the key is rejected once now()
+                        crosses this instant.
+                    is_bootstrap:
+                      type: boolean
+  /admin/api-keys/{id}:
+    delete:
+      summary: Revoke an API key
+      tags:
+        - Admin
+      description: Soft-deletes the key by setting `revoked_at = now()`. Bootstrap
+        rows (env-var-derived) cannot be revoked here — rotate the env var
+        instead.
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          in: path
+          name: id
+          required: true
+      responses:
+        "204":
+          description: Default Response
+        "404":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - statusCode
+                  - error
+                  - message
+                additionalProperties: true
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  error:
+                    type: string
+                    example: Bad Request
+                  message:
+                    type: string
+                    example: infraId required
+        "409":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - statusCode
+                  - error
+                  - message
+                additionalProperties: true
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  error:
+                    type: string
+                    example: Bad Request
+                  message:
+                    type: string
+                    example: infraId required
+    patch:
+      summary: Update an API key (name / scopes / expiresAt)
+      tags:
+        - Admin
+      description: "Updates the row metadata. The secret cannot be patched — generate
+        a new key and revoke the old one. Bootstrap rows are read-only. Pass
+        `expiresAt: null` to clear an expiry, or an ISO instant to set/extend."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  pattern: ^[A-Za-z0-9._@:+-]{1,128}$
+                scopes:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum:
+                      - admin
+                      - write
+                      - read
+                expiresAt:
+                  type:
+                    - string
+                    - "null"
+                  format: date-time
+                  description: Pass null to clear (never-expires). Pass an ISO date-time to set or
+                    extend.
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          in: path
+          name: id
+          required: true
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  key_prefix:
+                    type: string
+                  scopes:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        - admin
+                        - write
+                        - read
+                  created_at:
+                    type: string
+                    format: date-time
+                  created_by:
+                    type:
+                      - "null"
+                      - string
+                  last_used_at:
+                    type:
+                      - "null"
+                      - string
+                    format: date-time
+                  revoked_at:
+                    type:
+                      - "null"
+                      - string
+                    format: date-time
+                  expires_at:
+                    type:
+                      - "null"
+                      - string
+                    format: date-time
+                    description: NULL = never expires; otherwise the key is rejected once now()
+                      crosses this instant.
+                  is_bootstrap:
+                    type: boolean
+        "404":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - statusCode
+                  - error
+                  - message
+                additionalProperties: true
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  error:
+                    type: string
+                    example: Bad Request
+                  message:
+                    type: string
+                    example: infraId required
+        "409":
           description: Default Response
           content:
             application/json:

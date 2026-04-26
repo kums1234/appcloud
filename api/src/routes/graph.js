@@ -1,4 +1,5 @@
 import { props, serialize } from '../utils/serialize.js'
+import { actorFromReq } from '../utils/audit.js'
 import {
   GraphTopologyResponseSchema,
   GraphImpactResponseSchema,
@@ -6,7 +7,7 @@ import {
 
 export default async function graphRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
   const { query } = fastify.neo4j
 
   // GET /graph/summary

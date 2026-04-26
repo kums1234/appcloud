@@ -7,6 +7,7 @@ import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
 import { authPlugin } from './plugins/auth.js'
+import { auditCleanupPlugin } from './plugins/audit-cleanup.js'
 import applicationRoutes from './routes/applications.js'
 import componentRoutes from './routes/components.js'
 import infraRoutes from './routes/infra.js'
@@ -23,6 +24,7 @@ import discoveryRoutes from './routes/discovery.js'
 import discoveryMetadataRoutes from './routes/discovery.metadata.js'
 import auditRoutes from './routes/audit.js'
 import cmdbRoutes from './routes/cmdb.js'
+import adminApiKeyRoutes from './routes/admin-api-keys.js'
 import { aiPlugin } from './plugins/ai.js'
 import aiRoutes from './routes/ai.js'
 
@@ -137,6 +139,7 @@ const PATH_SEG_TO_TAG = {
   ai:           'AI',
   audit:        'Audit',
   cmdb:         'CMDB',
+  admin:        'Admin',
   discovery:    'Discovery',
   integrations: 'Integrations',
   connectors:   'Connectors',
@@ -185,6 +188,11 @@ await postgresPlugin(fastify)
 // Auth plugin — must come after DB plugins (uses User nodes) and before routes
 await authPlugin(fastify)
 
+// Audit retention — periodic DELETE of audit_log rows older than
+// APPCLOUD_AUDIT_RETENTION_DAYS (default 365). Direct call (not register())
+// so it shares the root fastify decorators with no encapsulation barrier.
+await auditCleanupPlugin(fastify)
+
 // Connector framework — loads registry, applies integrations-table evolution
 // DDL, and registers push-style receivers (e.g. OTel ingest). Must come after
 // pg + neo4j plugins and before routes that reference fastify.connectors.
@@ -223,6 +231,7 @@ await fastify.register(discoveryRoutes,         { prefix: '/discovery' })
 await fastify.register(discoveryMetadataRoutes, { prefix: '/discovery' })
 await fastify.register(auditRoutes,         { prefix: '/audit' })
 await fastify.register(cmdbRoutes,          { prefix: '/cmdb' })
+await fastify.register(adminApiKeyRoutes,   { prefix: '/admin' })
 // AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
 // and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.
 await aiPlugin(fastify)

@@ -1,5 +1,6 @@
 import { props, serialize } from '../utils/serialize.js'
 import { makeRouteHelpers } from '../utils/route-helpers.js'
+import { actorFromReq } from '../utils/audit.js'
 import {
   ApplicationSchema,
   ApplicationCreateBodySchema,
@@ -14,8 +15,10 @@ export default async function applicationRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const { withAuth } = makeRouteHelpers(fastify)
 
-  // ── actor helper — operator identity via X-Actor header, defaults to 'system'
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  // ── actor helper — derives the audit actor from the authenticated principal
+  // (req.principal, populated by the auth plugin). Falls back to X-Actor for
+  // unauthenticated dev paths only. See utils/audit.js.
+  const actor = actorFromReq
 
   // GET /applications
   fastify.get('/', {

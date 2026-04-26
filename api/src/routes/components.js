@@ -1,5 +1,6 @@
 import { props } from '../utils/serialize.js'
 import { makeRouteHelpers } from '../utils/route-helpers.js'
+import { actorFromReq } from '../utils/audit.js'
 import {
   ComponentSchema,
   ComponentCreateBodySchema,
@@ -48,7 +49,7 @@ export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const { withAuth } = makeRouteHelpers(fastify)
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
 
   // GET /components/metadata — taxonomy + enums for form builders
   fastify.get('/metadata', {

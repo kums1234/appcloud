@@ -5,6 +5,7 @@
 
 import { encrypt, decrypt } from '../utils/encrypt.js'
 import { createCloudProviderFromOptions } from '../utils/ai-providers.js'
+import { actorFromReq } from '../utils/audit.js'
 
 const CREATE_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS ai_config (
@@ -42,7 +43,7 @@ function decryptAiConfig(config) {
 
 export default async function aiConfigRoutes(fastify) {
   const audit = (...a) => fastify.pg?.audit?.(...a).catch(() => {})
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
 
   // Ensure table exists
   fastify.addHook('onReady', async () => {
