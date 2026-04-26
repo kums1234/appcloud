@@ -401,6 +401,7 @@ export default async function discoveryRoutes(fastify) {
   // Scans all configured AWS accounts from Postgres, or uses credentials
   // from the request body for a one-off scan.
   fastify.post('/scan/aws', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
     schema: {
       summary:     'Scan AWS via Config aggregator',
       description: 'Pages every aggregated resource via `SelectAggregateResourceConfig` and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied credentials; without one, scans every enabled AWS account from `/integrations/cloud`. Requires `aggregatorName` + `aggregatorRegion` (or `AWS_CONFIG_AGGREGATOR_NAME` env var). See [docs/aws-config-aggregator-coverage.md](../docs/aws-config-aggregator-coverage.md).',
@@ -482,6 +483,7 @@ export default async function discoveryRoutes(fastify) {
   // Scans all configured Azure subscriptions from Postgres, or uses
   // credentials from the request body for a one-off scan.
   fastify.post('/scan/azure', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
     schema: {
       summary:     'Scan Azure via Resource Graph',
       description: 'Pages a single ARG KQL query and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied subscription/credentials; without one, scans every enabled Azure account from `/integrations/cloud`. See [docs/azure-resource-graph-coverage.md](../docs/azure-resource-graph-coverage.md).',
@@ -558,6 +560,7 @@ export default async function discoveryRoutes(fastify) {
   // Scans all configured GCP projects from Postgres, or uses credentials
   // from the request body for a one-off scan.
   fastify.post('/scan/gcp', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
     schema: {
       summary:     'Scan GCP via Cloud Asset Inventory',
       description: 'Pages `cloudasset.assets.listAssets` for the project and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan; without one, scans every enabled GCP account from `/integrations/cloud`. See [docs/gcp-cloud-asset-coverage.md](../docs/gcp-cloud-asset-coverage.md).',
@@ -629,6 +632,7 @@ export default async function discoveryRoutes(fastify) {
   // Loads accounts from Postgres and runs the per-provider scanners.
   // Accepts optional body overrides but works with no body at all.
   fastify.post('/scan/all', {
+    config: { rateLimit: { max: 1, timeWindow: '5 minutes' } }, // most expensive — fan-out across providers
     schema: {
       summary:     'Scan every configured cloud account in parallel',
       description: 'Fans out to `scanAWS` / `scanAzure` / `scanGCP` for every enabled account configured at `/integrations/cloud`. Bootstrap runs once at the end; cleanup is per-provider. The single response covers all three clouds with per-account breakdowns under `results.<provider>[]`.',
@@ -923,16 +927,29 @@ export default async function discoveryRoutes(fastify) {
 
 
   // ── GET /discovery/debug/:id — inspect raw Neo4j data for a resource ──
-  // Use this to verify tags and raw are being stored correctly.
-  // curl http://localhost:3000/discovery/debug/INFRA_ID
+  // Returns full raw cloud-API responses + every `:CONNECTS_TO` edge with
+  // properties. Useful for understanding scanner / autolink decisions, but
+  // it leaks tag values that may carry PII (`appcloud:owner`, slack-channel
+  // tags, etc.) and the truncated `raw` blob may carry sensitive metadata.
+  //
+  // Gated behind admin-tier auth AND APPCLOUD_DEBUG=1 so it can't be hit by
+  // a regular API key in production. In dev (NODE_ENV !== 'production') the
+  // env-flag gate is relaxed since debugging is the whole point there.
   fastify.get('/debug/:id', {
+    config: { requireAdmin: true },
     schema: {
-      summary:     'Per-resource debug dump',
-      description: 'Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call.',
+      summary:     'Per-resource debug dump (admin + APPCLOUD_DEBUG only)',
+      description: 'Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call. **Admin-tier only**, and in production must also have `APPCLOUD_DEBUG=1` set.',
       params:      IdParamSchema,
       response: { 200: { type: 'object', additionalProperties: true } },
     },
   }, async (req, reply) => {
+    if (process.env.NODE_ENV === 'production' && process.env.APPCLOUD_DEBUG !== '1') {
+      return reply.code(403).send({
+        error:   'Forbidden',
+        message: 'debug endpoint disabled in production — set APPCLOUD_DEBUG=1 to enable temporarily',
+      })
+    }
     const records = await query(
       `MATCH (i:Infra) WHERE i.id = $id OR i.cloud_id = $id RETURN i LIMIT 1`,
       { id: req.params.id }

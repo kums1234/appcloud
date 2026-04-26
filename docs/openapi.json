@@ -95,7 +95,7 @@
                   "name",
                   "tier"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string",
@@ -492,7 +492,7 @@
               "schema": {
                 "type": "object",
                 "required": [],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string",
@@ -1074,7 +1074,7 @@
                 "required": [
                   "name"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string",
@@ -1450,7 +1450,7 @@
                 "required": [
                   "targetId"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "targetId": {
                     "type": "string",
@@ -1525,7 +1525,7 @@
                 "required": [
                   "infraId"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "infraId": {
                     "type": "string",
@@ -1688,7 +1688,7 @@
                   "provider",
                   "resource_type"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string",
@@ -1911,7 +1911,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string"
@@ -2849,7 +2849,7 @@
                   "provider",
                   "name"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "provider": {
                     "type": "string",
@@ -4529,11 +4529,11 @@
     },
     "/discovery/debug/{id}": {
       "get": {
-        "summary": "Per-resource debug dump",
+        "summary": "Per-resource debug dump (admin + APPCLOUD_DEBUG only)",
         "tags": [
           "Discovery"
         ],
-        "description": "Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call.",
+        "description": "Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call. **Admin-tier only**, and in production must also have `APPCLOUD_DEBUG=1` set.",
         "parameters": [
           {
             "schema": {
@@ -4650,16 +4650,17 @@
                 "required": [
                   "actions"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                   "actions": {
                     "type": "array",
+                    "maxItems": 1000,
                     "items": {
                       "type": "object",
                       "required": [
                         "action"
                       ],
-                      "additionalProperties": true,
+                      "additionalProperties": false,
                       "properties": {
                         "action": {
                           "type": "string",
@@ -5472,7 +5473,8 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._@:+-]{1,128}$"
             },
             "in": "path",
             "name": "name",

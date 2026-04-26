@@ -145,6 +145,7 @@ export default async function aiRoutes(fastify) {
 
   // ── GET /ai/architecture/plan ───────────────────────────────────────────────
   fastify.get('/architecture/plan', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, // LLM cost guard
     schema: {
       summary:     'High-level architectural plan over the whole graph (cloud LLM)',
       description: 'Fetches a graph snapshot (apps, infra summary, cross-app dependencies) and asks the configured cloud LLM for an architectural review. Returns 503 when no cloud AI is configured.',
@@ -206,6 +207,7 @@ export default async function aiRoutes(fastify) {
 
   // ── POST /ai/drift/remediation-plan ────────────────────────────────────────
   fastify.post('/drift/remediation-plan', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, // LLM cost guard
     schema: {
       summary:     'Remediation plan for unmapped/drifted Infra (cloud LLM)',
       description: 'Without a body, picks up to 50 unmapped discovered Infra nodes and asks the cloud LLM to propose mappings or tag changes. With a body, scores the supplied items.',
@@ -252,6 +254,7 @@ export default async function aiRoutes(fastify) {
 
   // ── GET /ai/dependencies/analysis ──────────────────────────────────────────
   fastify.get('/dependencies/analysis', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, // LLM cost guard
     schema: {
       summary:     'Cross-app dependency analysis (cloud LLM)',
       description: 'Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.',
@@ -592,6 +595,7 @@ export default async function aiRoutes(fastify) {
   }
 
   fastify.post('/chat', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, // LLM cost guard
     schema: {
       summary:     'Conversational chat with live graph context',
       description: 'Injects a fresh snapshot of applications + infra + unmapped resources + cross-app deps into the system prompt before forwarding the conversation. Returns the assistant\'s reply plus a reference to the context used.',

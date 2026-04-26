@@ -325,10 +325,16 @@ export class GeminiProvider {
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`
+    // Gemini accepts the key as `?key=` OR an `x-goog-api-key` header. Header
+    // form keeps the key out of access logs / proxy logs / Referer headers
+    // that often capture full URLs.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`
     const res = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type':    'application/json',
+        'x-goog-api-key':  this.apiKey,
+      },
       body:    JSON.stringify(body),
       signal:  AbortSignal.timeout(120_000),
     })

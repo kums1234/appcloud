@@ -4,72 +4,39 @@
 //
 // Run explicitly with:
 //   cd api && npm run test:integration
-import { describe, test, expect, beforeAll, afterAll, jest } from '@jest/globals'
+import { test, expect, beforeAll, afterAll, jest } from '@jest/globals'
 import { randomUUID } from 'crypto'
+import {
+  getMaybeDescribe,
+  startNeo4j,
+  startPostgres,
+  wrapNeo4jDriver,
+  applyPostgresInitFiles,
+} from './helpers.js'
 
 jest.setTimeout(600_000)
 
-// Detect docker + a supported Node version up-front so failures surface as
-// skips, not timeouts. Testcontainers 10.x has a known bug on Node 24+
-// (createEmptyTmpFile calls path.resolve(undefined)), so we pin to Node 20/22
-// LTS. CI environments hitting this test should use those versions.
-const NODE_MAJOR = parseInt(process.versions.node.split('.')[0], 10)
-const NODE_SUPPORTED = NODE_MAJOR >= 18 && NODE_MAJOR <= 22
-let DOCKER_AVAILABLE = false
-try {
-  const { execSync } = await import('child_process')
-  execSync('docker info', { stdio: 'ignore', timeout: 5000 })
-  DOCKER_AVAILABLE = true
-} catch { /* docker not available — test below becomes a skip */ }
-
-const maybeDescribe = (DOCKER_AVAILABLE && NODE_SUPPORTED) ? describe : describe.skip
-if (DOCKER_AVAILABLE && !NODE_SUPPORTED) {
-  // eslint-disable-next-line no-console
-  console.warn(`[otel-pipeline integration] skipped: Node ${NODE_MAJOR} not supported by Testcontainers 10.x; use Node 20 or 22 LTS`)
-}
+const maybeDescribe = getMaybeDescribe('otel-pipeline integration')
 
 maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
   let pgContainer, neo4jContainer, pgClient, neo4jDriver
   let fakeFastify
 
   beforeAll(async () => {
-    const { PostgreSqlContainer } = await import('@testcontainers/postgresql')
-    const { Neo4jContainer }      = await import('@testcontainers/neo4j')
-    const pgModule                = await import('pg')
-    const neo4jModule             = await import('neo4j-driver')
-    const Client                  = pgModule.default?.Client || pgModule.Client
-    const neo4j                   = neo4jModule.default || neo4jModule
-
     // Start containers in parallel — saves ~1 min on a cold Docker.
-    // @testcontainers/neo4j v10.28+ requires withPassword() — withoutAuthentication() was removed.
-    ;[pgContainer, neo4jContainer] = await Promise.all([
-      new PostgreSqlContainer('postgres:16-alpine')
-        .withDatabase('appcloud').withUsername('appcloud').withPassword('pw').start(),
-      new Neo4jContainer('neo4j:5').withPassword('test1234').start(),
-    ])
-
-    pgClient = new Client({
-      host: pgContainer.getHost(), port: pgContainer.getMappedPort(5432),
-      database: 'appcloud', user: 'appcloud', password: 'pw',
-    })
-    await pgClient.connect()
+    const [pg, neo] = await Promise.all([startPostgres(), startNeo4j()])
+    pgContainer    = pg.container
+    pgClient       = pg.client
+    neo4jContainer = neo.container
+    neo4jDriver    = neo.driver
 
     // Apply the baseline schema + evolutions + staging DDL in the same order
     // postgres-init applies them on a fresh volume.
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    const { fileURLToPath } = await import('node:url')
-    const here = path.dirname(fileURLToPath(import.meta.url))
-    const initDir = path.resolve(here, '../../../../postgres-init')
-    for (const f of ['01-schema.sql', '07-integrations-evolution.sql', '08-otel-staging.sql']) {
-      const sql = await fs.readFile(path.join(initDir, f), 'utf8')
-      await pgClient.query(sql)
-    }
-
-    neo4jDriver = neo4j.driver(
-      neo4jContainer.getBoltUri(),
-      neo4j.auth.basic(neo4jContainer.getUsername(), neo4jContainer.getPassword()),
-    )
+    await applyPostgresInitFiles(pgClient, [
+      '01-schema.sql',
+      '07-integrations-evolution.sql',
+      '08-otel-staging.sql',
+    ])
 
     // Fake the decorators that the aggregator plugin expects on `fastify`.
     fakeFastify = {
@@ -78,18 +45,7 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
         pool: pgClient,
         query: async (sql, params = []) => (await pgClient.query(sql, params)).rows,
       },
-      neo4j: {
-        write: async (cypher, params = {}) => {
-          const session = neo4jDriver.session()
-          try { return (await session.run(cypher, params)).records }
-          finally { await session.close() }
-        },
-        query: async (cypher, params = {}) => {
-          const session = neo4jDriver.session()
-          try { return (await session.run(cypher, params)).records }
-          finally { await session.close() }
-        },
-      },
+      neo4j: wrapNeo4jDriver(neo4jDriver),
     }
   }, 180_000)
 

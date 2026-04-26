@@ -3,6 +3,11 @@
 // GET /audit/stats            — counts by action, resource_type, actor
 // GET /audit/resource/:type/:id — full history for one resource
 // GET /audit/actor/:name      — all actions by one actor
+//
+// All routes here are flagged `config.requireAdmin: true` — the audit log
+// reveals operational patterns (who-did-what-when), so it shouldn't be
+// readable with a regular API key. Admin tier comes from
+// APPCLOUD_ADMIN_API_KEY{,_FILE}; when unset the routes return 503.
 
 export default async function auditRoutes(fastify) {
   // Gracefully no-op when Postgres is unavailable
@@ -10,6 +15,7 @@ export default async function auditRoutes(fastify) {
 
   // ── GET /audit — paginated, filterable log ──────────────────────────────────
   fastify.get('/', {
+    config: { requireAdmin: true },
     schema: {
       summary:     'Paginated audit log',
       description: 'Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`.',
@@ -101,6 +107,7 @@ export default async function auditRoutes(fastify) {
 
   // ── GET /audit/stats — aggregated counts ──────────────────────────────────
   fastify.get('/stats', {
+    config: { requireAdmin: true },
     schema: {
       summary:     'Audit-log analytics for the last N days',
       description: 'Returns counts grouped by action / resource_type / actor plus a daily-activity series for sparklines. Default window is 30 days; pass `?days=N` to widen.',
@@ -167,6 +174,7 @@ export default async function auditRoutes(fastify) {
 
   // ── GET /audit/resource/:type/:id — full history for one resource ──────────
   fastify.get('/resource/:type/:id', {
+    config: { requireAdmin: true },
     schema: {
       summary:     'Full audit history for a specific resource',
       description: 'Up to the last 500 events for one (resource_type, resource_id) pair, newest first. `resource_type` is one of `Application`, `Component`, `Infra`, `CloudAccount`, etc.',
@@ -198,15 +206,26 @@ export default async function auditRoutes(fastify) {
   })
 
   // ── GET /audit/actor/:name — all actions by a specific actor ──────────────
+  // Constrain the actor name to a sane character set. The Postgres query
+  // itself is parameterised so this is not an injection guard — it's a log-
+  // injection guard for downstream log aggregators (ELK, Splunk) that often
+  // splat `actor=<value>` into a single line; a value containing a newline
+  // would forge a fake audit entry in those systems.
+  const ACTOR_NAME_RE = /^[A-Za-z0-9._@:+-]{1,128}$/
+
   fastify.get('/actor/:name', {
+    config: { requireAdmin: true },
     schema: {
       summary:     'All audit events by a specific actor (paginated)',
       description: 'Case-insensitive substring match on the `actor` column. Default actor for system-initiated calls is `system`; clients identify themselves via the `X-Actor` header.',
-      params:      { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+      params:      { type: 'object', required: ['name'], properties: { name: { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$' } } },
       querystring: { type: 'object', properties: { page: { type: ['integer', 'string'] }, pageSize: { type: ['integer', 'string'] } } },
       response:    { 200: { type: 'object', additionalProperties: true } },
     },
   }, async (req, reply) => {
+    if (!ACTOR_NAME_RE.test(req.params.name)) {
+      return reply.badRequest('actor name must match [A-Za-z0-9._@:+-]{1,128}')
+    }
     if (!pgOk()) return { rows: [], total: 0 }
     const { page = 1, pageSize = 50 } = req.query
     const limit  = Math.min(parseInt(pageSize) || 50, 200)

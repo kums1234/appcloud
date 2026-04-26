@@ -72,7 +72,12 @@ export const ApplicationSchema = {
 export const ApplicationCreateBodySchema = {
   type: 'object',
   required: ['name', 'tier'],
-  additionalProperties: true,
+  // Body schemas are now strict — unknown fields are rejected (Ajv 400). The
+  // previous `true` setting silently accepted (and then dropped) keys like
+  // `__proto__` / `internal_admin_flag`, which is a small but real
+  // mass-assignment / prototype-pollution surface. Response schemas
+  // elsewhere in this file stay permissive; only request bodies tightened.
+  additionalProperties: false,
   properties: {
     name:            { type: 'string', minLength: 1 },
     tier:            { type: 'integer', minimum: 1, maximum: 3 },
@@ -113,7 +118,7 @@ export const ComponentSchema = {
 export const ComponentCreateBodySchema = {
   type: 'object',
   required: ['name'],
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     name:          { type: 'string', minLength: 1 },
     type:          { type: 'string' },
@@ -132,7 +137,7 @@ export const ComponentCreateBodySchema = {
 export const ComponentConnectionBodySchema = {
   type: 'object',
   required: ['targetId'],
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     targetId: { type: 'string', format: 'uuid', description: 'The other Component to connect to' },
     protocol: { type: 'string', example: 'https' },
@@ -148,7 +153,7 @@ export const ComponentConnectionBodySchema = {
 export const ComponentDeployBodySchema = {
   type: 'object',
   required: ['infraId'],
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     infraId: { type: 'string', format: 'uuid', description: 'Infra node to MERGE a :CONNECTS_TO {via:component-mapping} edge to' },
   },
@@ -177,7 +182,7 @@ export const InfraSchema = {
 export const InfraCreateBodySchema = {
   type: 'object',
   required: ['name', 'provider', 'resource_type'],
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     name:          { type: 'string', minLength: 1 },
     provider:      { type: 'string', enum: ['aws', 'azure', 'gcp'] },
@@ -196,7 +201,7 @@ export const InfraCreateBodySchema = {
 
 export const InfraPatchBodySchema = {
   type: 'object',
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     name:   { type: 'string' },
     region: { type: 'string' },
@@ -229,7 +234,11 @@ export const CloudAccountSchema = {
 export const CloudAccountCreateBodySchema = {
   type: 'object',
   required: ['provider', 'name'],
-  additionalProperties: true,
+  // Outer envelope is strict; the nested `config` stays permissive because
+  // it's polymorphic across providers (Azure SP, GCP service-account JSON,
+  // AWS access keys + aggregator coords). Per-field validation happens in
+  // the route handler (see integrations-cloud.js validateProviderConfig).
+  additionalProperties: false,
   properties: {
     provider: { type: 'string', enum: ['aws', 'azure', 'gcp'] },
     name:     { type: 'string', minLength: 1 },
@@ -310,14 +319,19 @@ export const SuggestionSchema = {
 export const SuggestApplyAllBodySchema = {
   type: 'object',
   required: ['actions'],
-  additionalProperties: true,
+  additionalProperties: false,
   properties: {
     actions: {
       type: 'array',
+      // M3 — bound the bulk-action surface so a request can't pin the
+      // server with a 100k-element array. 1000 mappings per call is far
+      // beyond any realistic operator workflow and well below the JSON
+      // body limit (~1 MB). Clients hitting this should batch.
+      maxItems: 1000,
       items: {
         type: 'object',
         required: ['action'],
-        additionalProperties: true,
+        additionalProperties: false,
         properties: {
           action:        { type: 'string', enum: ['link_component', 'create_component', 'create_application'] },
           infraId:       { type: 'string' },
@@ -329,6 +343,7 @@ export const SuggestApplyAllBodySchema = {
           suggestedEnv:  { type: 'string' },
           suggestedOwner:{ type: 'string' },
           suggestedType: { type: 'string' },
+          // Nested components array is polymorphic input — leave permissive.
           components:    { type: 'array', items: { type: 'object', additionalProperties: true } },
         },
       },
