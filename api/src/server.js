@@ -23,6 +23,7 @@ import discoveryRoutes from './routes/discovery.js'
 import discoveryMetadataRoutes from './routes/discovery.metadata.js'
 import auditRoutes from './routes/audit.js'
 import cmdbRoutes from './routes/cmdb.js'
+import adminApiKeyRoutes from './routes/admin-api-keys.js'
 import { aiPlugin } from './plugins/ai.js'
 import aiRoutes from './routes/ai.js'
 
@@ -137,6 +138,7 @@ const PATH_SEG_TO_TAG = {
   ai:           'AI',
   audit:        'Audit',
   cmdb:         'CMDB',
+  admin:        'Admin',
   discovery:    'Discovery',
   integrations: 'Integrations',
   connectors:   'Connectors',
@@ -223,6 +225,7 @@ await fastify.register(discoveryRoutes,         { prefix: '/discovery' })
 await fastify.register(discoveryMetadataRoutes, { prefix: '/discovery' })
 await fastify.register(auditRoutes,         { prefix: '/audit' })
 await fastify.register(cmdbRoutes,          { prefix: '/cmdb' })
+await fastify.register(adminApiKeyRoutes,   { prefix: '/admin' })
 // AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
 // and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.
 await aiPlugin(fastify)

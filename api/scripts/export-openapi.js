@@ -43,6 +43,7 @@ const PATH_SEG_TO_TAG = {
   graph: 'Graph', ai: 'AI', audit: 'Audit', cmdb: 'CMDB',
   discovery: 'Discovery', integrations: 'Integrations',
   connectors: 'Connectors', health: 'Health', docs: 'OpenAPI', openapi: 'OpenAPI',
+  admin: 'Admin',
 }
 function autoTagRoute({ schema, url }) {
   if (schema?.tags?.length) return { schema, url }
@@ -89,6 +90,7 @@ const modules = [
   ['./routes/audit.js',                 { prefix: '/audit'        }],
   ['./routes/cmdb.js',                  { prefix: '/cmdb'         }],
   ['./routes/ai.js',                    { prefix: '/ai'           }],
+  ['./routes/admin-api-keys.js',        { prefix: '/admin'        }],
 ]
 for (const [rel, opts] of modules) {
   try {

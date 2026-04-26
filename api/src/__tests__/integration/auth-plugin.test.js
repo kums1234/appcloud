@@ -49,7 +49,16 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     // for a minute.
     process.env.APPCLOUD_AUTH_CACHE_TTL_MS = '50'
 
-    fastify = Fastify({ logger: false })
+    // Match production Ajv config so route schemas with `example:` parse.
+    fastify = Fastify({
+      logger: false,
+      ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
+    })
+    // @fastify/sensible decorates reply with .conflict / .notFound / .badRequest
+    // — admin-api-keys routes use these. The production server registers it
+    // before any route plugin runs (server.js).
+    const sensible = (await import('@fastify/sensible')).default
+    await fastify.register(sensible)
     fastify.decorate('pg', {
       pool:  pgClient,
       query: async (sql, params = []) => (await pgClient.query(sql, params)).rows,
@@ -69,6 +78,11 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     }))
     fastify.post('/things', async () => ({ ok: true }))
     fastify.get('/admin/secret', { config: { scope: 'admin' } }, async () => ({ secret: 42 }))
+
+    // Register the real admin-api-keys CRUD plugin so we can exercise it
+    // end-to-end with the same auth + principal wiring it'll see in prod.
+    const { default: adminApiKeyRoutes } = await import('../../routes/admin-api-keys.js')
+    await fastify.register(adminApiKeyRoutes, { prefix: '/admin' })
     await fastify.ready()
   }, 180_000)
 
@@ -232,6 +246,146 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     expect(post.statusCode).toBe(200)
   })
 
+  test('admin-tier: POST /admin/api-keys creates, GET lists, DELETE revokes', async () => {
+    // Create.
+    const created = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'crud-test-key', scopes: ['read'] }),
+    })
+    expect(created.statusCode).toBe(201)
+    const body = JSON.parse(created.payload)
+    expect(body.name).toBe('crud-test-key')
+    expect(body.scopes).toEqual(['read'])
+    expect(body.is_bootstrap).toBe(false)
+    expect(body.plaintext).toMatch(/^ak_/)
+    expect(body.plaintext.length).toBeGreaterThanOrEqual(46)
+    expect(body.created_by).toBe('bootstrap-admin-key')
+
+    // The newly created key is immediately usable (cache invalidation).
+    const newKey = body.plaintext
+    const useFresh = await fastify.inject({
+      method: 'GET', url: '/whoami',
+      headers: { 'x-api-key': newKey },
+    })
+    expect(useFresh.statusCode).toBe(200)
+    expect(JSON.parse(useFresh.payload).name).toBe('crud-test-key')
+
+    // List.
+    const list = await fastify.inject({
+      method: 'GET', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(list.statusCode).toBe(200)
+    const rows = JSON.parse(list.payload)
+    expect(rows.find(r => r.name === 'crud-test-key')).toBeTruthy()
+    // Plaintext is never echoed back.
+    for (const r of rows) expect(r.plaintext).toBeUndefined()
+
+    // Revoke.
+    const del = await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${body.id}`,
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+    expect(del.statusCode).toBe(204)
+
+    // Revoked key no longer authenticates (cache invalidation again).
+    const denied = await fastify.inject({
+      method: 'GET', url: '/whoami',
+      headers: { 'x-api-key': newKey },
+    })
+    expect(denied.statusCode).toBe(401)
+  })
+
+  test('admin-tier: write key cannot reach /admin/api-keys', async () => {
+    const r = await fastify.inject({
+      method: 'GET', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapKey },          // write-tier
+    })
+    expect(r.statusCode).toBe(403)
+  })
+
+  test('admin-tier: bootstrap rows cannot be revoked via the API', async () => {
+    // Use a fresh admin key (not the bootstrap one) so we hit the
+    // is_bootstrap branch rather than the self-revoke branch.
+    const created = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'bootstrap-revoke-tester', scopes: ['admin'] }),
+    })
+    expect(created.statusCode).toBe(201)
+    const otherAdminKey   = JSON.parse(created.payload).plaintext
+    const otherAdminKeyId = JSON.parse(created.payload).id
+
+    const list = await fastify.inject({
+      method: 'GET', url: '/admin/api-keys',
+      headers: { 'x-api-key': otherAdminKey },
+    })
+    const bootstrapRow = JSON.parse(list.payload).find(r => r.name === 'bootstrap-admin-key')
+    expect(bootstrapRow).toBeTruthy()
+
+    const del = await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${bootstrapRow.id}`,
+      headers: { 'x-api-key': otherAdminKey },
+    })
+    expect(del.statusCode).toBe(409)
+    expect(JSON.parse(del.payload).message).toMatch(/bootstrap/)
+
+    // Cleanup the helper key.
+    await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${otherAdminKeyId}`,
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+  })
+
+  test('admin-tier: cannot revoke the key authenticating the request', async () => {
+    // Create a separate admin key, use it to authenticate, try to revoke
+    // itself — should 409.
+    const created = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'self-revoke-test', scopes: ['admin'] }),
+    })
+    expect(created.statusCode).toBe(201)
+    const { id, plaintext } = JSON.parse(created.payload)
+
+    const r = await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${id}`,
+      headers: { 'x-api-key': plaintext },
+    })
+    expect(r.statusCode).toBe(409)
+    expect(JSON.parse(r.payload).message).toMatch(/currently being used/)
+
+    // Cleanup — revoke with the bootstrap admin key.
+    await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${id}`,
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+  })
+
+  test('admin-tier: PATCH updates scopes', async () => {
+    const created = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'patch-test', scopes: ['read'] }),
+    })
+    const { id } = JSON.parse(created.payload)
+
+    const patched = await fastify.inject({
+      method: 'PATCH', url: `/admin/api-keys/${id}`,
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ scopes: ['write'] }),
+    })
+    expect(patched.statusCode).toBe(200)
+    expect(JSON.parse(patched.payload).scopes).toEqual(['write'])
+
+    // Cleanup.
+    await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${id}`,
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+  })
+
   test('rotating the bootstrap env var refreshes the row hash', async () => {
     // Simulate rotation by changing the env value and re-running just the
     // bootstrap section of the plugin (in real deployment this happens
@@ -240,7 +394,12 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     const rotatedKey = generateKey()
     process.env.APPCLOUD_API_KEY = rotatedKey
 
-    const f2 = Fastify({ logger: false })
+    const f2 = Fastify({
+      logger: false,
+      ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
+    })
+    const sensible = (await import('@fastify/sensible')).default
+    await f2.register(sensible)
     f2.decorate('pg', {
       pool:  pgClient,
       query: async (sql, params = []) => (await pgClient.query(sql, params)).rows,
