@@ -36,7 +36,13 @@ export default async function integrationManagementRoutes(fastify) {
   // ── GET /integrations ───────────────────────────────────────────────────────
   // List all configured connector instances. Secrets are decrypted so the UI
   // can show field values (the UI is responsible for obscuring them further).
-  fastify.get('/', async () => {
+  fastify.get('/', {
+    schema: {
+      summary:     'List configured connector instances',
+      description: 'Returns every row from the `integrations` table — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends, etc. Secret fields are decrypted; client UIs are responsible for further obscuring.',
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async () => {
     if (!fastify.pg?.pool) return []
     const rows = await fastify.pg.query(`
       SELECT id, type, name, enabled, config, poll_interval_seconds,
@@ -50,7 +56,12 @@ export default async function integrationManagementRoutes(fastify) {
 
   // ── GET /integrations/:id ───────────────────────────────────────────────────
   fastify.get('/:id', {
-    schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } } },
+    schema: {
+      summary:     'Get one connector instance',
+      description: 'Returns the integration row with config decrypted. Use `/connectors/:type` for the connector\'s schema and capabilities.',
+      params:      { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } },
+      response:    { 200: { type: 'object', additionalProperties: true }, 404: { type: 'object', additionalProperties: true } },
+    },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
     const rows = await fastify.pg.query(
@@ -67,7 +78,20 @@ export default async function integrationManagementRoutes(fastify) {
   // ── POST /integrations ──────────────────────────────────────────────────────
   // Create a new integration instance of a known connector type.
   // Body: { type, name, config, enabled?, pollIntervalSeconds? }
-  fastify.post('/', async (req, reply) => {
+  fastify.post('/', {
+    schema: {
+      summary:     'Create a connector instance',
+      description: 'Body shape: `{ type, name, config, enabled?, pollIntervalSeconds? }`. The `type` must match a registered connector (`/connectors`); the connector\'s `beforeUpsert` runs before validation to fill defaults / auto-generate secrets, and `afterUpsert` runs after persist to sync derived rows. Secret fields are AES-256-GCM-encrypted before INSERT.',
+      body: { type: 'object', required: ['type', 'name'], additionalProperties: true, properties: {
+        type:                { type: 'string', description: 'Connector id (e.g. servicenow, terraform-cloud, otel-ingest)' },
+        name:                { type: 'string' },
+        config:              { type: 'object', additionalProperties: true },
+        enabled:             { type: 'boolean', default: true },
+        pollIntervalSeconds: { type: ['integer', 'null'] },
+      } },
+      response: { 201: { type: 'object', additionalProperties: true }, 400: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
 
     const { type, name, config = {}, enabled = true, pollIntervalSeconds = null } = req.body || {}
@@ -138,7 +162,17 @@ export default async function integrationManagementRoutes(fastify) {
 
   // ── PATCH /integrations/:id ─────────────────────────────────────────────────
   fastify.patch('/:id', {
-    schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } } },
+    schema: {
+      summary:     'Update a connector instance (partial)',
+      description: 'Patches `config` (merged + re-encrypted), `enabled`, or `pollIntervalSeconds`. The connector\'s before/afterUpsert hooks run on each update.',
+      params:      { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } },
+      body:        { type: 'object', additionalProperties: true, properties: {
+        config:              { type: 'object', additionalProperties: true },
+        enabled:             { type: 'boolean' },
+        pollIntervalSeconds: { type: ['integer', 'null'] },
+      } },
+      response:    { 200: { type: 'object', additionalProperties: true }, 404: { type: 'object', additionalProperties: true } },
+    },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
 
@@ -209,7 +243,12 @@ export default async function integrationManagementRoutes(fastify) {
 
   // ── DELETE /integrations/:id ────────────────────────────────────────────────
   fastify.delete('/:id', {
-    schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } } },
+    schema: {
+      summary:     'Delete a connector instance',
+      description: 'Removes the row. Resources the connector previously ingested into Neo4j stay; the next discovery sweep / cleanupStaleNodes will mark them stale.',
+      params:      { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } },
+      response:    { 204: { type: 'null' }, 404: { type: 'object', additionalProperties: true } },
+    },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
     const rows = await fastify.pg.query(
@@ -224,7 +263,12 @@ export default async function integrationManagementRoutes(fastify) {
   // ── POST /integrations/:id/test ─────────────────────────────────────────────
   // Invoke the connector's healthCheck() with decrypted config.
   fastify.post('/:id/test', {
-    schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } } },
+    schema: {
+      summary:     'Test a connector\'s healthCheck',
+      description: 'Invokes `spec.healthCheck()` against the live integration. Returns `{ ok, detail }`. Cheap — does not ingest anything.',
+      params:      { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } },
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
     const rows = await fastify.pg.query(
@@ -251,7 +295,12 @@ export default async function integrationManagementRoutes(fastify) {
   // ── POST /integrations/:id/scan ─────────────────────────────────────────────
   // Trigger a one-off fetch → normalize → ingest pass. Records a sync_jobs row.
   fastify.post('/:id/scan', {
-    schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } } },
+    schema: {
+      summary:     'Trigger a one-off ingest pass',
+      description: 'Runs `fetch → normalize → ingest` for the connector and records a `sync_jobs` row with the outcome. Returns the result envelope (resourcesFound / created / updated / warnings).',
+      params:      { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } },
+      response:    { 200: { type: 'object', additionalProperties: true }, 500: { type: 'object', additionalProperties: true } },
+    },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
 
@@ -324,7 +373,12 @@ export default async function integrationManagementRoutes(fastify) {
 
   // ── GET /integrations/:id/history ───────────────────────────────────────────
   fastify.get('/:id/history', {
-    schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } } },
+    schema: {
+      summary:     'Connector instance sync history',
+      description: 'Returns up to 50 of the most recent `sync_jobs` rows for this integration with status, durations, and per-status counts. Use this to debug why an ingest didn\'t produce the expected nodes.',
+      params:      { type: 'object', properties: { id: { type: 'string', pattern: UUID_RE.source } } },
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
     const rows = await fastify.pg.query(
@@ -344,8 +398,22 @@ export default async function integrationManagementRoutes(fastify) {
 // ── Connector-registry endpoint ────────────────────────────────────────────────
 // Registered at /connectors (separate prefix) from server.js.
 export async function connectorsRegistryRoutes(fastify) {
-  fastify.get('/', async () => fastify.connectors.list().map(serializeSpec))
-  fastify.get('/:id', async (req, reply) => {
+  fastify.get('/', {
+    schema: {
+      summary:     'List available connectors (registry)',
+      description: 'Returns every connector registered with the framework — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends. Each entry includes its `authSchema`, `configSchema`, and UI metadata. Use this to render dynamic connector-creation forms.',
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async () => fastify.connectors.list().map(serializeSpec))
+
+  fastify.get('/:id', {
+    schema: {
+      summary:     'Get one connector\'s schema',
+      description: 'Returns the full spec for one connector — `id`, `displayName`, `description`, JSON schemas for auth + config, UI metadata, capabilities. Used by the connector-creation UI to drive a form.',
+      params:      { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+      response:    { 200: { type: 'object', additionalProperties: true }, 404: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const spec = fastify.connectors.get(req.params.id)
     if (!spec) return reply.notFound('Unknown connector')
     return serializeSpec(spec)

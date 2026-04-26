@@ -5,6 +5,12 @@
 // AES-256-GCM encrypted before INSERT and decrypted on SELECT.
 
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
+import {
+  CloudAccountSchema,
+  CloudAccountCreateBodySchema,
+  IdParamSchema,
+  StandardErrorResponses,
+} from '../schemas/openapi.js'
 
 // SQL to ensure the table exists — run once at startup via onReady hook
 const CREATE_TABLE_SQL = `
@@ -41,7 +47,13 @@ export default async function cloudAccountRoutes(fastify) {
   })
 
   // ── GET /integrations/cloud ──────────────────────────────────────────────
-  fastify.get('/cloud', async (req, reply) => {
+  fastify.get('/cloud', {
+    schema: {
+      summary:     'List all cloud accounts (decrypted config)',
+      description: 'Returns every cloud account row with its decrypted `config` (the on-disk row stores AES-256-GCM-encrypted secrets — clientSecret, secretAccessKey, private_key — which are decrypted on read).',
+      response:    { 200: { type: 'array', items: CloudAccountSchema } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
     try {
       const rows = await fastify.pg.query(
@@ -62,7 +74,14 @@ export default async function cloudAccountRoutes(fastify) {
   })
 
   // ── GET /integrations/cloud/:provider ────────────────────────────────────
-  fastify.get('/cloud/:provider', async (req, reply) => {
+  fastify.get('/cloud/:provider', {
+    schema: {
+      summary:     'List enabled cloud accounts for a provider',
+      description: 'Filters by provider (aws / azure / gcp) and `enabled = true`. Discovery scans use this same query indirectly via the `loadAccounts` helper.',
+      params:      { type: 'object', required: ['provider'], properties: { provider: { type: 'string', enum: ['aws', 'azure', 'gcp'] } } },
+      response:    { 200: { type: 'array', items: CloudAccountSchema } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
     try {
       const rows = await fastify.pg.query(
@@ -83,7 +102,14 @@ export default async function cloudAccountRoutes(fastify) {
   })
 
   // ── POST /integrations/cloud ─────────────────────────────────────────────
-  fastify.post('/cloud', async (req, reply) => {
+  fastify.post('/cloud', {
+    schema: {
+      summary:     'Create or upsert a cloud account',
+      description: 'On unique-key conflict (provider, name) the row is updated, not duplicated. Secret fields in `config` (clientSecret, secretAccessKey, private_key) are AES-256-GCM-encrypted before INSERT.',
+      body:        CloudAccountCreateBodySchema,
+      response:    { 201: CloudAccountSchema, 400: StandardErrorResponses[400], 503: StandardErrorResponses[503] },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool)
       return reply.serviceUnavailable('Database not available — check Postgres connection')
 
@@ -117,7 +143,19 @@ export default async function cloudAccountRoutes(fastify) {
   })
 
   // ── PATCH /integrations/cloud/:id ────────────────────────────────────────
-  fastify.patch('/cloud/:id', async (req, reply) => {
+  fastify.patch('/cloud/:id', {
+    schema: {
+      summary:     'Update a cloud account (partial)',
+      description: 'Any subset of `name` / `config` / `enabled`. The `config` shape is *merged* into the existing decrypted config and re-encrypted, so you can patch one secret without re-supplying the others.',
+      params:      IdParamSchema,
+      body: { type: 'object', additionalProperties: true, properties: {
+        name:    { type: 'string' },
+        config:  { type: 'object', additionalProperties: true },
+        enabled: { type: 'boolean' },
+      } },
+      response: { 200: CloudAccountSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
     try {
       const existing = await fastify.pg.query(
@@ -151,7 +189,14 @@ export default async function cloudAccountRoutes(fastify) {
   })
 
   // ── DELETE /integrations/cloud/:id ───────────────────────────────────────
-  fastify.delete('/cloud/:id', async (req, reply) => {
+  fastify.delete('/cloud/:id', {
+    schema: {
+      summary:     'Delete a cloud account',
+      description: 'Removes the Postgres row. Discovery-emitted Infra nodes already in Neo4j are *not* deleted; they\'ll be marked stale on the next scan that runs without this account.',
+      params:      IdParamSchema,
+      response:    { 204: { type: 'null' }, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
     try {
       const existing = await fastify.pg.query(
@@ -173,7 +218,13 @@ export default async function cloudAccountRoutes(fastify) {
   // One-time migration: copies CloudAccount nodes from Neo4j into Postgres.
   // Safe to run multiple times — uses ON CONFLICT DO UPDATE.
   // Call this if "Run Now" finds no accounts to scan.
-  fastify.post('/cloud/sync-from-neo4j', async (req, reply) => {
+  fastify.post('/cloud/sync-from-neo4j', {
+    schema: {
+      summary:     'One-time migration: copy CloudAccount nodes from Neo4j to Postgres',
+      description: 'For graphs that pre-date the Postgres backing store. Idempotent (`ON CONFLICT (provider, name) DO UPDATE`). Returns the count of accounts migrated.',
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool)  return reply.serviceUnavailable('Database not available')
     if (!fastify.neo4j)     return reply.serviceUnavailable('Neo4j not available')
 
@@ -211,7 +262,19 @@ export default async function cloudAccountRoutes(fastify) {
     }
   })
 
-  fastify.patch('/cloud/:id/scan-result', async (req, reply) => {
+  fastify.patch('/cloud/:id/scan-result', {
+    schema: {
+      summary:     'Internal — record a scan outcome on a cloud account',
+      description: 'Called by the scan handlers in discovery.js to stamp `last_scan_at / last_scan_status / last_scan_total / last_scan_error` on the account row. Not typically called directly by external consumers.',
+      params:      IdParamSchema,
+      body: { type: 'object', additionalProperties: true, properties: {
+        status: { type: 'string', enum: ['success', 'error'] },
+        total:  { type: 'integer' },
+        error:  { type: ['string', 'null'] },
+      } },
+      response: { 200: { type: 'object', properties: { updated: { type: 'boolean' } } } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return { updated: false }
     try {
       const { status, total, error } = req.body || {}

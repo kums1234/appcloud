@@ -53,7 +53,16 @@ export function shannonEntropy(raw) {
   return h
 }
 
+// Minimum normalised length to even consider for fuzzy-match. Short
+// hostnames like "db01" / "web02" can have high per-character entropy
+// (every char distinct) but no distinguishing substrate to match against
+// — they're shingle-overlap death traps. Gate on length first, then
+// entropy.
+const NAME_MIN_LENGTH = 6
+
 export function hasHighEntropy(raw, threshold = NAME_ENTROPY_THRESHOLD) {
+  const s = normalizeName(raw)
+  if (s.length < NAME_MIN_LENGTH) return false
   return shannonEntropy(raw) >= threshold
 }
 

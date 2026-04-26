@@ -1,42 +1,47 @@
 import { describe, test, expect } from '@jest/globals'
-import spec, { mapRelToEdge } from '../index.js'
+import spec, { mapRelToVia } from '../index.js'
 
-describe('mapRelToEdge', () => {
-  test('hosting relationships map to DEPLOYED_ON', () => {
-    expect(mapRelToEdge('Hosted on::Hosts').edge).toBe('DEPLOYED_ON')
-    expect(mapRelToEdge('Runs on::Runs').edge).toBe('DEPLOYED_ON')
-    expect(mapRelToEdge('Virtualised by::Virtualises').edge).toBe('DEPLOYED_ON')
-    expect(mapRelToEdge('Virtualized by::Virtualizes').edge).toBe('DEPLOYED_ON')
-    expect(mapRelToEdge('Installed on::Installs').edge).toBe('DEPLOYED_ON')
+// Slice 5 collapsed the legacy CONNECTS_TO/DEPLOYED_ON edge-label split
+// into a single :CONNECTS_TO edge with a `via` property capturing the
+// ServiceNow relation flavour. The test surface mirrors that.
+
+describe('mapRelToVia', () => {
+  test('hosting relationships map to deployment-style via values', () => {
+    expect(mapRelToVia('Hosted on::Hosts').via).toBe('hosted-on')
+    expect(mapRelToVia('Runs on::Runs').via).toBe('runs-on')
+    expect(mapRelToVia('Virtualised by::Virtualises').via).toBe('virtualised-by')
+    // British vs American spelling collapse to the same via for graph consistency
+    expect(mapRelToVia('Virtualized by::Virtualizes').via).toBe('virtualised-by')
+    expect(mapRelToVia('Installed on::Installs').via).toBe('installed-on')
   })
 
-  test('dependency relationships map to CONNECTS_TO', () => {
-    expect(mapRelToEdge('Depends on::Used by').edge).toBe('CONNECTS_TO')
-    expect(mapRelToEdge('Uses::Used by').edge).toBe('CONNECTS_TO')
-    expect(mapRelToEdge('Provides::Receives').edge).toBe('CONNECTS_TO')
-    expect(mapRelToEdge('Receives data from::Sends data to').edge).toBe('CONNECTS_TO')
-    expect(mapRelToEdge('Connected to::Connected by').edge).toBe('CONNECTS_TO')
+  test('dependency relationships map to logical-coupling via values', () => {
+    expect(mapRelToVia('Depends on::Used by').via).toBe('depends-on')
+    expect(mapRelToVia('Uses::Used by').via).toBe('uses')
+    expect(mapRelToVia('Provides::Receives').via).toBe('provides')
+    expect(mapRelToVia('Receives data from::Sends data to').via).toBe('receives-data-from')
+    expect(mapRelToVia('Connected to::Connected by').via).toBe('connected-to-cmdb')
   })
 
   test('preserves the forward-direction label as relType', () => {
-    expect(mapRelToEdge('Depends on::Used by').relType).toBe('Depends on')
-    expect(mapRelToEdge('Hosted on::Hosts').relType).toBe('Hosted on')
+    expect(mapRelToVia('Depends on::Used by').relType).toBe('Depends on')
+    expect(mapRelToVia('Hosted on::Hosts').relType).toBe('Hosted on')
   })
 
-  test('unknown relation types fall back to CONNECTS_TO without throwing', () => {
-    const r = mapRelToEdge('Weird custom rel::Reverse label')
-    expect(r.edge).toBe('CONNECTS_TO')
+  test('unknown relation types fall back to a `cmdb-other` via without throwing', () => {
+    const r = mapRelToVia('Weird custom rel::Reverse label')
+    expect(r.via).toBe('cmdb-other')
     expect(r.relType).toBe('Weird custom rel')
   })
 
   test('handles null / empty gracefully', () => {
-    expect(mapRelToEdge(null)).toEqual({ edge: 'CONNECTS_TO', relType: 'Unknown' })
-    expect(mapRelToEdge('').edge).toBe('CONNECTS_TO')
+    expect(mapRelToVia(null)).toEqual({ via: 'cmdb-unknown', relType: 'Unknown' })
+    expect(mapRelToVia('').via).toBe('cmdb-unknown')
   })
 })
 
 describe('normalize rels batch', () => {
-  test('extracts parent/child/edge/relType from display_value=all payload', () => {
+  test('extracts parent/child/via/relType from display_value=all payload', () => {
     const raw = {
       kind: 'rels',
       rows: [
@@ -56,7 +61,7 @@ describe('normalize rels batch', () => {
       rel_sys_id: 'rel1',
       parent:     'ci-app',
       child:      'ci-host',
-      edge:       'DEPLOYED_ON',
+      via:        'hosted-on',
       relType:    'Hosted on',
       relTypeRaw: 'Hosted on::Hosts',
     }))

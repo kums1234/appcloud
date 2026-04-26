@@ -125,9 +125,8 @@ Cloud scanning + schema metadata.
 | POST | `/discovery/scan/gcp` | Scan all configured GCP projects |
 | POST | `/discovery/scan/all` | Scan every configured cloud account and auto-bootstrap |
 | POST | `/discovery/bootstrap` | Run app/component bootstrap (RG propagation) without scanning |
-| POST | `/discovery/link` | Link an `:Infra` to a `:Component` via `:DEPLOYED_ON` |
-| GET | `/discovery/accounts` | Configured cloud accounts (from Postgres) |
-| GET | `/discovery/metadata/providers` | Providers + per-provider supported resource types |
+| POST | `/discovery/link` | Link an `:Infra` to a `:Component` via `:CONNECTS_TO {via:'component-mapping'}` |
+| GET | `/discovery/providers` | Providers + per-provider supported resource types |
 | GET | `/discovery/schedule` | Current scheduler state |
 
 After any successful scan the API flags the CMDB assessment scheduler

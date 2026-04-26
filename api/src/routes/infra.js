@@ -1,4 +1,11 @@
 import { props, serialize } from '../utils/serialize.js'
+import {
+  InfraSchema,
+  InfraCreateBodySchema,
+  InfraPatchBodySchema,
+  IdParamSchema,
+  StandardErrorResponses,
+} from '../schemas/openapi.js'
 
 export default async function infraRoutes(fastify) {
   const { query, write } = fastify.neo4j
@@ -6,7 +13,14 @@ export default async function infraRoutes(fastify) {
   const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /infra
-  fastify.get('/', async (req, reply) => {
+  fastify.get('/', {
+    schema: {
+      summary:     'List Infra',
+      description: 'Returns every Infra node, ordered by provider then name. Filterable by `provider` (aws/azure/gcp) and `public` (true/false).',
+      querystring: { type: 'object', properties: { provider: { type: 'string', enum: ['aws', 'azure', 'gcp'] }, public: { type: 'string', enum: ['true', 'false'] } } },
+      response:    { 200: { type: 'array', items: InfraSchema } },
+    },
+  }, async (req, reply) => {
     const { provider, public: isPublic } = req.query
     const filters = []
     if (provider)             filters.push('i.provider = $provider')
@@ -20,10 +34,17 @@ export default async function infraRoutes(fastify) {
   })
 
   // GET /infra/:id
-  fastify.get('/:id', async (req, reply) => {
+  fastify.get('/:id', {
+    schema: {
+      summary:     'Get one Infra node',
+      description: 'Returns the Infra plus its `deployments` — every Component that owns it (with the containing Application name when available).',
+      params:      IdParamSchema,
+      response:    { 200: InfraSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const records = await query(`
       MATCH (i:Infra {id: $id})
-      OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+      OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
       RETURN i,
         collect(DISTINCT {component: c.name, application: a.name}) AS deployments
@@ -37,7 +58,15 @@ export default async function infraRoutes(fastify) {
   })
 
   // POST /infra
-  fastify.post('/', { ...auth }, async (req, reply) => {
+  fastify.post('/', {
+    ...auth,
+    schema: {
+      summary:     'Manually create an Infra node',
+      description: 'Most Infra comes from discovery scans (`/discovery/scan/*`). Use this for resources that aren\'t in any cloud-API surface — e.g. an on-prem appliance you want represented in the graph.',
+      body:        InfraCreateBodySchema,
+      response:    { 201: InfraSchema },
+    },
+  }, async (req, reply) => {
     const { name, provider, resource_type, region, public: isPublic } = req.body
     const records = await write(`
       CREATE (i:Infra {
@@ -53,7 +82,15 @@ export default async function infraRoutes(fastify) {
   })
 
   // PATCH /infra/:id
-  fastify.patch('/:id', { ...auth }, async (req, reply) => {
+  fastify.patch('/:id', {
+    ...auth,
+    schema: {
+      summary:     'Update an Infra node (name / region / public flag)',
+      params:      IdParamSchema,
+      body:        InfraPatchBodySchema,
+      response:    { 200: InfraSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const { name, region, public: isPublic } = req.body
     const records = await write(`
       MATCH (i:Infra {id: $id})
@@ -70,7 +107,15 @@ export default async function infraRoutes(fastify) {
   })
 
   // DELETE /infra/:id
-  fastify.delete('/:id', { ...auth }, async (req, reply) => {
+  fastify.delete('/:id', {
+    ...auth,
+    schema: {
+      summary:     'Delete an Infra node',
+      description: 'DETACH-deletes the node and every relationship it participates in. The next discovery scan will re-create it if it still exists in the cloud.',
+      params:      IdParamSchema,
+      response:    { 204: { type: 'null' } },
+    },
+  }, async (req, reply) => {
     const pre = await query('MATCH (i:Infra {id: $id}) RETURN i.name AS name',
       { id: req.params.id })
     const name = pre[0]?.get('name') || req.params.id
@@ -80,9 +125,15 @@ export default async function infraRoutes(fastify) {
   })
 
   // GET /infra/shared/resources
-  fastify.get('/shared/resources', async (req, reply) => {
+  fastify.get('/shared/resources', {
+    schema: {
+      summary:     'Infra owned by more than one Application (shared services)',
+      description: 'Returns Infra nodes whose owning Components live in two or more distinct Applications, ordered by `usedByApps` desc. Useful for surfacing shared services that need coordination during change windows.',
+      response:    { 200: { type: 'array', items: { ...InfraSchema, properties: { ...InfraSchema.properties, usedByApps: { type: 'integer' } } } } },
+    },
+  }, async (req, reply) => {
     const records = await query(`
-      MATCH (i:Infra)<-[:DEPLOYED_ON]-(c:Component)<-[:CONTAINS]-(a:Application)
+      MATCH (i:Infra)<-[:CONNECTS_TO {via: 'component-mapping'}]-(c:Component)<-[:CONTAINS]-(a:Application)
       WITH i, count(DISTINCT a) AS appCount
       WHERE appCount > 1
       RETURN i, appCount ORDER BY appCount DESC
@@ -91,10 +142,16 @@ export default async function infraRoutes(fastify) {
   })
 
   // GET /infra/public/exposed
-  fastify.get('/public/exposed', async (req, reply) => {
+  fastify.get('/public/exposed', {
+    schema: {
+      summary:     'Internet-exposed Infra (public = true)',
+      description: 'Returns every Infra node flagged `public: true` plus the names of any Components that own them. Cross-cuts the security review surface.',
+      response:    { 200: { type: 'array', items: { ...InfraSchema, properties: { ...InfraSchema.properties, components: { type: 'array', items: { type: 'string' } } } } } },
+    },
+  }, async (req, reply) => {
     const records = await query(`
       MATCH (i:Infra {public: true})
-      OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+      OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       RETURN i, collect(DISTINCT c.name) AS components
     `)
     return records.map(r => ({ ...props(r.get('i')), components: r.get('components') }))

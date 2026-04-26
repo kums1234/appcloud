@@ -1,4 +1,13 @@
 import { props, serialize } from '../utils/serialize.js'
+import {
+  ApplicationSchema,
+  ApplicationCreateBodySchema,
+  ApplicationPatchBodySchema,
+  ComponentSchema,
+  InfraSchema,
+  IdParamSchema,
+  StandardErrorResponses,
+} from '../schemas/openapi.js'
 
 export default async function applicationRoutes(fastify) {
   const { query, write } = fastify.neo4j
@@ -8,7 +17,15 @@ export default async function applicationRoutes(fastify) {
   const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /applications
-  fastify.get('/', async (req, reply) => {
+  fastify.get('/', {
+    schema: {
+      summary:     'List Applications',
+      description: 'Returns every Application in the graph with a `componentCount` of contained Components, ordered by tier then name.',
+      response: {
+        200: { type: 'array', items: { ...ApplicationSchema, properties: { ...ApplicationSchema.properties, componentCount: { type: 'integer' } } } },
+      },
+    },
+  }, async (req, reply) => {
     const records = await query(`
       MATCH (a:Application)
       OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
@@ -32,14 +49,30 @@ export default async function applicationRoutes(fastify) {
   }
 
   // GET /applications/:id
-  fastify.get('/:id', async (req, reply) => {
+  fastify.get('/:id', {
+    schema: {
+      summary:     'Get one Application',
+      description: 'Resolves the path param against `id` (UUID) or `name` and returns the Application + its Components + their owned Infra. Returns 404 when no match.',
+      params:      IdParamSchema,
+      response: {
+        200: {
+          type: 'object', additionalProperties: true,
+          properties: { ...ApplicationSchema.properties,
+            components: { type: 'array', items: { type: 'object', additionalProperties: true } },
+            infra:      { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
+        },
+        404: StandardErrorResponses[404],
+      },
+    },
+  }, async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 
     const records = await query(`
       MATCH (a:Application {id: $id})
       OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
-      OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
+      OPTIONAL MATCH (c)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       RETURN a, collect(DISTINCT c) AS components, collect(DISTINCT i) AS infra
     `, { id: appId })
     const r = records[0]
@@ -51,7 +84,15 @@ export default async function applicationRoutes(fastify) {
   })
 
   // POST /applications
-  fastify.post('/', { ...auth }, async (req, reply) => {
+  fastify.post('/', {
+    ...auth,
+    schema: {
+      summary:     'Create an Application',
+      description: 'Creates a new Application node. `tier` is required; reasonable defaults are filled in for `availability` (`99.9`) and `confidentiality` (`internal`).',
+      body:        ApplicationCreateBodySchema,
+      response:    { 201: ApplicationSchema, ...StandardErrorResponses },
+    },
+  }, async (req, reply) => {
     const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       CREATE (a:Application {
@@ -72,7 +113,16 @@ export default async function applicationRoutes(fastify) {
   })
 
   // PATCH /applications/:id
-  fastify.patch('/:id', { ...auth }, async (req, reply) => {
+  fastify.patch('/:id', {
+    ...auth,
+    schema: {
+      summary:     'Partially update an Application',
+      description: 'Any subset of the create fields. Unspecified fields keep their existing values via `coalesce`.',
+      params:      IdParamSchema,
+      body:        ApplicationPatchBodySchema,
+      response:    { 200: ApplicationSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 
@@ -97,7 +147,15 @@ export default async function applicationRoutes(fastify) {
   })
 
   // DELETE /applications/:id
-  fastify.delete('/:id', { ...auth }, async (req, reply) => {
+  fastify.delete('/:id', {
+    ...auth,
+    schema: {
+      summary:     'Delete an Application (cascades exclusively-owned Components + Infra)',
+      description: 'Removes the Application plus any Components that *only* belong to it, plus Infra that is *only* owned by those Components. Shared resources are preserved.',
+      params:      IdParamSchema,
+      response:    { 204: { type: 'null' }, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 
@@ -119,10 +177,10 @@ export default async function applicationRoutes(fastify) {
 
     // Infra exclusively used by the components we will remove (not by any outside component)
     const appInfra = await query(`
-      MATCH (i:Infra)<-[:DEPLOYED_ON]-(c:Component)
+      MATCH (i:Infra)<-[:CONNECTS_TO {via: 'component-mapping'}]-(c:Component)
       WHERE c.id IN $componentIds
         AND NOT EXISTS {
-          MATCH (i)<-[:DEPLOYED_ON]-(other:Component)
+          MATCH (i)<-[:CONNECTS_TO {via: 'component-mapping'}]-(other:Component)
           WHERE NOT other.id IN $componentIds
         }
       RETURN collect(DISTINCT i.id) AS infraIds
@@ -156,14 +214,32 @@ export default async function applicationRoutes(fastify) {
   })
 
   // GET /applications/:id/topology
-  fastify.get('/:id/topology', async (req, reply) => {
+  fastify.get('/:id/topology', {
+    schema: {
+      summary:     'Application topology — Components, Infra, intra-app connections',
+      description: 'Returns the Application, every Component it contains, the Infra each Component is deployed on, and Component↔Component `:CONNECTS_TO` edges (with protocol/port).',
+      params:      IdParamSchema,
+      response:    {
+        200: {
+          type: 'object', additionalProperties: true,
+          properties: {
+            application: ApplicationSchema,
+            components:  { type: 'array', items: ComponentSchema },
+            infra:       { type: 'array', items: InfraSchema },
+            connections: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
+        },
+        404: StandardErrorResponses[404],
+      },
+    },
+  }, async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 
     const records = await query(`
       MATCH (a:Application {id: $id})
       OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
-      OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
+      OPTIONAL MATCH (c)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       OPTIONAL MATCH (c)-[conn:CONNECTS_TO]->(c2:Component)
       RETURN a,
         collect(DISTINCT c)    AS components,
@@ -181,7 +257,21 @@ export default async function applicationRoutes(fastify) {
   })
 
   // GET /applications/:id/dependencies
-  fastify.get('/:id/dependencies', async (req, reply) => {
+  fastify.get('/:id/dependencies', {
+    schema: {
+      summary:     'Cross-application dependencies for one Application',
+      description: 'Walks each Component in the Application and lists Components in *other* Applications it has a `:CONNECTS_TO` edge to. Used by the impact-radius views.',
+      params:      IdParamSchema,
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            dependencies: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 

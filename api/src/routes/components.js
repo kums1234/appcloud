@@ -1,4 +1,12 @@
 import { props } from '../utils/serialize.js'
+import {
+  ComponentSchema,
+  ComponentCreateBodySchema,
+  ComponentConnectionBodySchema,
+  ComponentDeployBodySchema,
+  IdParamSchema,
+  StandardErrorResponses,
+} from '../schemas/openapi.js'
 
 // ── Component taxonomy — single source of truth shared with the UI ──────────
 // The Applications + Components + Infra pages previously each carried copies
@@ -42,7 +50,24 @@ export default async function componentRoutes(fastify) {
   const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /components/metadata — taxonomy + enums for form builders
-  fastify.get('/metadata', async () => ({
+  fastify.get('/metadata', {
+    schema: {
+      summary:     'Component taxonomy + enum metadata',
+      description: 'Single source of truth for component types, tiers, environments, availability SLAs, and confidentiality levels. UI consumers fetch this once and hydrate dropdowns.',
+      response: {
+        200: {
+          type: 'object', additionalProperties: true,
+          properties: {
+            componentTypes:   { type: 'array', items: { type: 'object', additionalProperties: true } },
+            tiers:            { type: 'array', items: { type: 'object', additionalProperties: true } },
+            environments:     { type: 'array', items: { type: 'string' } },
+            availabilitySlas: { type: 'array', items: { type: 'object', additionalProperties: true } },
+            confidentiality:  { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
+        },
+      },
+    },
+  }, async () => ({
     componentTypes:   COMPONENT_TYPES,
     tiers:            TIERS,
     environments:     ENVIRONMENTS,
@@ -51,7 +76,14 @@ export default async function componentRoutes(fastify) {
   }))
 
   // GET /components
-  fastify.get('/', async (req) => {
+  fastify.get('/', {
+    schema: {
+      summary:     'List Components',
+      description: 'Returns every Component with its containing Application (when one exists). Filterable via the `type` query (api / db / worker / ui).',
+      querystring: { type: 'object', properties: { type: { type: 'string', description: 'Optional filter on Component type' } } },
+      response:    { 200: { type: 'array', items: ComponentSchema } },
+    },
+  }, async (req) => {
     const { type } = req.query
     const records = await query(`
       MATCH (c:Component)
@@ -72,11 +104,18 @@ export default async function componentRoutes(fastify) {
   })
 
   // GET /components/:id
-  fastify.get('/:id', async (req, reply) => {
+  fastify.get('/:id', {
+    schema: {
+      summary:     'Get one Component',
+      description: 'Returns the Component, its parent Application (or null), and the Infra resources it owns via `:CONNECTS_TO {via:"component-mapping"}`.',
+      params:      IdParamSchema,
+      response:    { 200: ComponentSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const records = await query(`
       MATCH (c:Component {id: $id})
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
-      OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
+      OPTIONAL MATCH (c)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       RETURN c, a, collect(DISTINCT i) AS infra
     `, { id: req.params.id })
     if (!records.length) return reply.notFound('Component not found')
@@ -90,7 +129,15 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components
-  fastify.post('/', { ...auth }, async (req, reply) => {
+  fastify.post('/', {
+    ...auth,
+    schema: {
+      summary:     'Create a Component',
+      description: 'Creates a Component node, optionally attaching it to an existing Application via `:CONTAINS`. Either `applicationId` or `appId` works (legacy alias).',
+      body:        ComponentCreateBodySchema,
+      response:    { 201: ComponentSchema },
+    },
+  }, async (req, reply) => {
     const { name, type, runtime } = req.body
     // Accept both applicationId (sent by ComponentForm) and appId
     const appId = req.body.appId || req.body.applicationId || null
@@ -111,7 +158,16 @@ export default async function componentRoutes(fastify) {
   })
 
   // PATCH /components/:id — FIX 4: added auth guard
-  fastify.patch('/:id', { ...auth }, async (req, reply) => {
+  fastify.patch('/:id', {
+    ...auth,
+    schema: {
+      summary:     'Update a Component',
+      description: 'Partial update on `name` / `type` / `runtime`. Other fields preserved.',
+      params:      IdParamSchema,
+      body:        { type: 'object', additionalProperties: true, properties: { name: { type: 'string' }, type: { type: 'string' }, runtime: { type: ['string', 'null'] } } },
+      response:    { 200: ComponentSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const { name, type, runtime } = req.body
     const records = await write(`
       MATCH (c:Component {id: $id})
@@ -128,7 +184,15 @@ export default async function componentRoutes(fastify) {
   })
 
   // DELETE /components/:id — FIX 4: added auth guard
-  fastify.delete('/:id', { ...auth }, async (req, reply) => {
+  fastify.delete('/:id', {
+    ...auth,
+    schema: {
+      summary:     'Delete a Component',
+      description: 'DETACH-delete: removes every relationship the Component participates in (including ownership and Component↔Component connections).',
+      params:      IdParamSchema,
+      response:    { 204: { type: 'null' }, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const pre = await query(
       `MATCH (c:Component {id:$id}) RETURN c.name AS name`, { id: req.params.id }
     )
@@ -140,7 +204,16 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components/:id/connections — FIX 4: added auth guard
-  fastify.post('/:id/connections', { ...auth }, async (req, reply) => {
+  fastify.post('/:id/connections', {
+    ...auth,
+    schema: {
+      summary:     'Connect this Component to another (Component → Component edge)',
+      description: 'Idempotently MERGEs a `:CONNECTS_TO {protocol, port}` edge from this Component to the target. No `via` is set — the endpoint labels (`:Component`→`:Component`) distinguish it from infra-side edges.',
+      params:      IdParamSchema,
+      body:        ComponentConnectionBodySchema,
+      response:    { 201: { type: 'object', properties: { connected: { type: 'boolean' } } } },
+    },
+  }, async (req, reply) => {
     const { targetId, protocol, port } = req.body
     await write(`
       MATCH (c1:Component {id: $id}), (c2:Component {id: $targetId})
@@ -154,11 +227,27 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components/:id/deploy — FIX 4: added auth guard
-  fastify.post('/:id/deploy', { ...auth }, async (req, reply) => {
+  fastify.post('/:id/deploy', {
+    ...auth,
+    schema: {
+      summary:     'Deploy a Component onto an Infra (manual ownership)',
+      description: 'Idempotently MERGEs a `:CONNECTS_TO {via:"component-mapping", source:"manual-deploy", confidence:100}` edge from the Component to the Infra. Use this to record human-confirmed ownership.',
+      params:      IdParamSchema,
+      body:        ComponentDeployBodySchema,
+      response:    { 201: { type: 'object', properties: { deployed: { type: 'boolean' } } } },
+    },
+  }, async (req, reply) => {
     const { infraId } = req.body
     await write(`
       MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})
-      MERGE (c)-[:DEPLOYED_ON]->(i)
+      MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+      ON CREATE SET rel.discovered_at = datetime(),
+                    rel.source        = 'manual-deploy',
+                    rel.confidence    = 100,
+                    rel.evidence      = 'manual deploy via /components/:id/deploy'
+      ON MATCH  SET rel.last_seen     = datetime(),
+                    rel.source        = 'manual-deploy',
+                    rel.confidence    = 100
     `, { id: req.params.id, infraId })
     audit(actor(req), 'deploy', 'Component', req.params.id, req.params.id,
       { infraId })

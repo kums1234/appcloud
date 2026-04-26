@@ -8,8 +8,8 @@
 //        exporter with `encoding: json`. Protobuf encoding returns 415 for now.
 //
 // Rows are staged in otel_spans_raw. The aggregation worker (Phase 1d)
-// reads them in sliding windows and derives :Component / :CONNECTED_TO /
-// :DEPLOYED_ON edges in Neo4j.
+// reads them in sliding windows and derives :Component +
+// :CONNECTS_TO {source:'otel'} edges in Neo4j.
 
 import { createHash } from 'crypto'
 import { flattenResourceSpans, INSERT_COLS } from './parse.js'

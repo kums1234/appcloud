@@ -12,6 +12,7 @@
 //   POST /cmdb/assessment/refresh  fire-and-forget manual run
 
 import { props, serialize } from '../utils/serialize.js'
+import { StandardErrorResponses } from '../schemas/openapi.js'
 
 export default async function cmdbRoutes(fastify) {
   const { query } = fastify.neo4j

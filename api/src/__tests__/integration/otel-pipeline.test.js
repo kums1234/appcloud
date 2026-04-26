@@ -100,10 +100,16 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
     try { await neo4jContainer?.stop() }   catch {}
   })
 
-  test('spans → aggregator tick → Neo4j :Component + :CONNECTED_TO edges', async () => {
+  test('spans → aggregator tick → Neo4j :Component + :CONNECTS_TO edges', async () => {
     const { flattenResourceSpans } = await import('../../connectors/otel-ingest/parse.js')
     const { aggregateBatch }        = await import('../../plugins/otel-aggregator.js')
-    const { VIA_TO_REL_TYPE, TELEMETRY_COMPONENT_LABELS } = await import('../../routes/discovery.schema.js')
+    const { TELEMETRY_COMPONENT_LABELS } = await import('../../routes/discovery.schema.js')
+
+    // Slice 5 unified the edge label: telemetry-derived service-to-service
+    // calls ride :CONNECTS_TO with source='otel' and via='otel-http' /
+    // 'otel-rpc' / 'otel-db' / 'otel-messaging'. The legacy typed-rel
+    // aliases (OBSERVED_HTTP_CALL etc.) and VIA_TO_REL_TYPE export are gone.
+    const TELEMETRY_VIAS = new Set(['otel-http', 'otel-rpc', 'otel-db', 'otel-messaging'])
 
     // ── Seed an integration + tenant row ──
     const integrationId = randomUUID()
@@ -187,7 +193,7 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
       UNWIND $edges AS e
       MATCH (src:Component { name: e.srcName, origin_source: 'otel', origin_namespace: e.srcNs })
       MATCH (dst:Component { name: e.dstName, origin_source: 'otel', origin_namespace: e.dstNs })
-      MERGE (src)-[r:CONNECTED_TO { source: 'otel', via: e.via }]->(dst)
+      MERGE (src)-[r:CONNECTS_TO { source: 'otel', via: e.via }]->(dst)
       SET   r.rps = e.rps, r.error_rate = e.errorRate,
             r.p50_ms = e.p50Ms, r.p95_ms = e.p95Ms,
             r.route = e.route
@@ -203,9 +209,9 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
       expect(r.get('labels')).toEqual(expect.arrayContaining(['Component', 'TelemetryService', 'Workload']))
     }
 
-    // ── Verify :CONNECTED_TO edges with OTel provenance + error rate ──
+    // ── Verify :CONNECTS_TO edges with OTel provenance + error rate ──
     const edgeRes = await fakeFastify.neo4j.query(
-      `MATCH (a:Component {origin_source:'otel'})-[r:CONNECTED_TO {source:'otel'}]->(b:Component {origin_source:'otel'})
+      `MATCH (a:Component {origin_source:'otel'})-[r:CONNECTS_TO {source:'otel'}]->(b:Component {origin_source:'otel'})
        RETURN a.name AS src, b.name AS dst, r.via AS via, r.error_rate AS err
        ORDER BY src`,
     )
@@ -213,7 +219,7 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
     expect(summary).toContain('frontend→orders (err=0)')
     expect(summary).toContain('orders→payments (err=1)')
 
-    // ── Ontology constant is kept in sync: via keys have a typed alias ──
-    for (const e of edges) expect(VIA_TO_REL_TYPE[e.via]).toBeDefined()
+    // Every emitted via stays within the documented telemetry namespace.
+    for (const e of edges) expect(TELEMETRY_VIAS.has(e.via)).toBe(true)
   })
 })

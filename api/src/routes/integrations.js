@@ -11,7 +11,14 @@ import { ingestIacResources }  from '../utils/iac-ingest.js'
 export default async function integrationRoutes(fastify) {
   // POST /integrations/terraform/import
   // Accepts multipart form-data with a "statefile" field containing the .tfstate JSON
-  fastify.post('/terraform/import', async (req, reply) => {
+  fastify.post('/terraform/import', {
+    schema: {
+      summary:     'Import a Terraform / OpenTofu state file (multipart upload)',
+      description: 'Send `multipart/form-data` with a `statefile` field containing the `.tfstate` JSON. Resources are parsed via `parseTerraformState` and ingested into Neo4j as Infra nodes. Returns the import-job id, parse summary, and per-status counts.',
+      consumes:    ['multipart/form-data'],
+      response:    { 200: { type: 'object', additionalProperties: true }, 400: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     // Check multipart is available
     if (typeof req.file !== 'function') {
       return reply.internalServerError(
@@ -112,7 +119,13 @@ export default async function integrationRoutes(fastify) {
   })
 
   // GET /integrations/terraform/history — recent import jobs
-  fastify.get('/terraform/history', async (req, reply) => {
+  fastify.get('/terraform/history', {
+    schema: {
+      summary:     'Recent Terraform import jobs',
+      description: 'Returns up to 20 import jobs newest-first with status, parsed Terraform version, workspace, resource counts, and total duration.',
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
     const rows = await fastify.pg.query(
       `SELECT id, filename, status, terraform_version, workspace,

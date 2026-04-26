@@ -92,11 +92,16 @@ export class ServiceNowClient {
         sysparm_offset: offset,
       })
       if (!Array.isArray(result) || result.length === 0) return
-      yield result
-      yielded += result.length
-      // Short page ⇒ no more rows on the server.
+      // Defensive slice: enforce `max` even if the server returns more rows
+      // than `sysparm_limit` requested. ServiceNow has been observed to
+      // ignore `sysparm_limit` under specific query-builder paths; the
+      // contract here is "yield at most `max` rows total".
+      const page = result.length > remaining ? result.slice(0, remaining) : result
+      yield page
+      yielded += page.length
+      // Short page (vs. what we asked for) ⇒ no more rows on the server.
       if (result.length < limit) return
-      offset += result.length
+      offset += page.length
     }
   }
 

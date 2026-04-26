@@ -5,7 +5,7 @@
 //   1. Ingest CI rows from configured CMDB tables as :CmdbCi nodes keyed
 //      on sys_id (raw, no inference).
 //   2. Ingest ServiceNow's own CI→CI relationships from cmdb_rel_ci as
-//      :CONNECTS_TO / :DEPLOYED_ON edges between :CmdbCi nodes with
+//      :CONNECTS_TO edges between :CmdbCi nodes with
 //      source='servicenow-cmdb-rel'. The original ServiceNow relation
 //      label ("Hosted on", "Depends on", …) is preserved as the `relType`
 //      property.
@@ -57,21 +57,24 @@ const DEFAULT_MAX_PER_TABLE = 10000
 const DEFAULT_PAGE_SIZE     = 500
 const DEFAULT_MAX_RELATIONS = 100000
 
-// ServiceNow relation-type display names → AppCloud edge labels.
-// Anything not listed falls through to :CONNECTS_TO (the more permissive
-// of the two existing edge types, consistent with CLAUDE.md's rule that
-// CONNECTS_TO is "a relationship inferred between resources").
-const REL_TYPE_TO_EDGE = {
-  'Hosted on::Hosts':             'DEPLOYED_ON',
-  'Runs on::Runs':                'DEPLOYED_ON',
-  'Virtualised by::Virtualises':  'DEPLOYED_ON',
-  'Virtualized by::Virtualizes':  'DEPLOYED_ON',
-  'Installed on::Installs':       'DEPLOYED_ON',
-  'Depends on::Used by':          'CONNECTS_TO',
-  'Uses::Used by':                'CONNECTS_TO',
-  'Provides::Receives':           'CONNECTS_TO',
-  'Receives data from::Sends data to': 'CONNECTS_TO',
-  'Connected to::Connected by':   'CONNECTS_TO',
+// ServiceNow relation-type display names → `via` property on the
+// :CONNECTS_TO edge. The semantic distinction the old code drew
+// between :DEPLOYED_ON-style ("hosted on", "runs on") and pure
+// connection ("depends on", "uses") is preserved on the `via`
+// string — readers that want only deployment-style relations can
+// filter `WHERE r.via IN ['hosted-on','runs-on','virtualised-by',
+// 'installed-on']`.
+const REL_TYPE_TO_VIA = {
+  'Hosted on::Hosts':                  'hosted-on',
+  'Runs on::Runs':                     'runs-on',
+  'Virtualised by::Virtualises':       'virtualised-by',
+  'Virtualized by::Virtualizes':       'virtualised-by',
+  'Installed on::Installs':            'installed-on',
+  'Depends on::Used by':               'depends-on',
+  'Uses::Used by':                     'uses',
+  'Provides::Receives':                'provides',
+  'Receives data from::Sends data to': 'receives-data-from',
+  'Connected to::Connected by':        'connected-to-cmdb',
 }
 
 // ── JSON Schema ─────────────────────────────────────────────────────────────
@@ -91,14 +94,13 @@ const authSchema = {
 }
 
 // Map the display_value on cmdb_rel_ci.type — which comes back as a
-// parent/child pair "Hosted on::Hosts" — to our edge type. Exported for
-// tests + downstream observability.
-export function mapRelToEdge(displayName) {
-  if (!displayName) return { edge: 'CONNECTS_TO', relType: 'Unknown' }
-  const edge = REL_TYPE_TO_EDGE[displayName] || 'CONNECTS_TO'
-  // Preserve the forward-direction label ("Depends on" from "Depends on::Used by").
+// parent/child pair "Hosted on::Hosts" — to a `via` value for the
+// :CONNECTS_TO edge. Exported for tests + downstream observability.
+export function mapRelToVia(displayName) {
+  if (!displayName) return { via: 'cmdb-unknown', relType: 'Unknown' }
+  const via = REL_TYPE_TO_VIA[displayName] || 'cmdb-other'
   const relType = displayName.split('::')[0] || displayName
-  return { edge, relType }
+  return { via, relType }
 }
 
 // ── Connector hooks ─────────────────────────────────────────────────────────
@@ -194,13 +196,13 @@ function normalize(raw) {
       const parentId = v(row.parent)
       const childId  = v(row.child)
       if (!parentId || !childId) return null
-      const { edge, relType } = mapRelToEdge(dv(row.type))
+      const { via, relType } = mapRelToVia(dv(row.type))
       return {
         rel_sys_id: v(row.sys_id),
         parent:     parentId,
         child:      childId,
-        edge,                                   // 'CONNECTS_TO' | 'DEPLOYED_ON'
-        relType,                                // e.g. 'Depends on'
+        via,                                    // e.g. 'hosted-on', 'depends-on'
+        relType,                                // human label, e.g. 'Depends on'
         relTypeRaw: dv(row.type) || null,
         updatedOn:  v(row.sys_updated_on) || null,
       }
@@ -300,13 +302,13 @@ async function ingestCis(normalized, ctx) {
   }
 }
 
-// ── cmdb_rel_ci → :CONNECTS_TO / :DEPLOYED_ON edges between :CmdbCi nodes
+// ── cmdb_rel_ci → :CONNECTS_TO edges between :CmdbCi nodes
 //
-// We do a separate batch per edge label so the Cypher query can use a
-// literal relationship type (Neo4j doesn't support variable rel types in
-// MERGE without APOC). For each group, we pre-materialise the CI stubs
-// with MERGE on sys_id so dangling parent/child references don't fail the
-// write — they get upgraded later by a CI-table scan.
+// One MERGE handles every relationship type: the `via` property
+// captures the ServiceNow relation flavour (hosted-on, runs-on,
+// depends-on, uses, …). We pre-materialise the CI stubs with MERGE
+// on sys_id so dangling parent/child references don't fail — they
+// get upgraded later by a CI-table scan.
 async function ingestRels(normalized, ctx) {
   const warnings = []
   if (normalized.warning) warnings.push(normalized.warning)
@@ -318,55 +320,51 @@ async function ingestRels(normalized, ctx) {
   const now = new Date().toISOString()
   let edgesCreated = 0
   let edgesUpdated = 0
-  const byEdge = { CONNECTS_TO: [], DEPLOYED_ON: [] }
-  for (const r of normalized.rels) byEdge[r.edge].push(r)
 
-  for (const [edgeLabel, group] of Object.entries(byEdge)) {
-    if (!group.length) continue
-    // Count existing edges with this source tag so we can split created/updated.
-    let existingCount = 0
-    try {
-      const rows = await ctx.neo4j.query(
-        `UNWIND $rels AS r
-         MATCH (p:CmdbCi { sys_id: r.parent })-[e:${edgeLabel}]->(c:CmdbCi { sys_id: r.child })
-         WHERE e.source = 'servicenow-cmdb-rel' AND e.relSysId = r.rel_sys_id
-         RETURN count(e) AS n`,
-        { rels: group },
-      )
-      existingCount = rows[0]?.get?.('n')?.toNumber?.() ?? Number(rows[0]?.get?.('n') ?? 0)
-    } catch (err) {
-      warnings.push(`rel pre-count (${edgeLabel}) failed: ${err.message}`)
-    }
-
-    try {
-      await ctx.neo4j.write(
-        `UNWIND $rels AS r
-         MERGE (p:CmdbCi { sys_id: r.parent })
-         MERGE (c:CmdbCi { sys_id: r.child })
-         MERGE (p)-[e:${edgeLabel} { relSysId: r.rel_sys_id }]->(c)
-         ON CREATE SET
-           e.source     = 'servicenow-cmdb-rel',
-           e.relType    = r.relType,
-           e.relTypeRaw = r.relTypeRaw,
-           e.confidence = 85,
-           e.evidence   = 'ServiceNow cmdb_rel_ci ' + r.rel_sys_id + ': ' + r.relType,
-           e.createdAt  = $now
-         SET
-           e.relType    = r.relType,
-           e.relTypeRaw = r.relTypeRaw,
-           e.lastSeenAt = $now,
-           e.snUpdatedOn = r.updatedOn,
-           e.episodeId  = $episodeId`,
-        { rels: group, now, episodeId: ctx.episodeId || null },
-      )
-    } catch (err) {
-      warnings.push(`rel ingest (${edgeLabel}) failed: ${err.message}`)
-      continue
-    }
-
-    edgesCreated += Math.max(0, group.length - existingCount)
-    edgesUpdated += existingCount
+  // Count existing edges by (parent, child, relSysId) so we can split
+  // created/updated correctly even when several rows of the same batch
+  // already exist.
+  let existingCount = 0
+  try {
+    const rows = await ctx.neo4j.query(
+      `UNWIND $rels AS r
+       MATCH (p:CmdbCi { sys_id: r.parent })-[e:CONNECTS_TO { relSysId: r.rel_sys_id }]->(c:CmdbCi { sys_id: r.child })
+       WHERE e.source = 'servicenow-cmdb-rel'
+       RETURN count(e) AS n`,
+      { rels: normalized.rels },
+    )
+    existingCount = rows[0]?.get?.('n')?.toNumber?.() ?? Number(rows[0]?.get?.('n') ?? 0)
+  } catch (err) {
+    warnings.push(`rel pre-count failed: ${err.message}`)
   }
+
+  try {
+    await ctx.neo4j.write(
+      `UNWIND $rels AS r
+       MERGE (p:CmdbCi { sys_id: r.parent })
+       MERGE (c:CmdbCi { sys_id: r.child })
+       MERGE (p)-[e:CONNECTS_TO { via: r.via, relSysId: r.rel_sys_id }]->(c)
+       ON CREATE SET
+         e.discovered_at = datetime(),
+         e.source        = 'servicenow-cmdb-rel',
+         e.relType       = r.relType,
+         e.relTypeRaw    = r.relTypeRaw,
+         e.confidence    = 85,
+         e.evidence      = 'ServiceNow cmdb_rel_ci ' + r.rel_sys_id + ': ' + r.relType
+       SET
+         e.relType     = r.relType,
+         e.relTypeRaw  = r.relTypeRaw,
+         e.last_seen   = datetime(),
+         e.snUpdatedOn = r.updatedOn,
+         e.episodeId   = $episodeId`,
+      { rels: normalized.rels, now, episodeId: ctx.episodeId || null },
+    )
+  } catch (err) {
+    warnings.push(`rel ingest failed: ${err.message}`)
+  }
+
+  edgesCreated = Math.max(0, normalized.rels.length - existingCount)
+  edgesUpdated = existingCount
 
   return {
     resourcesFound:   0,
@@ -390,7 +388,7 @@ const uiMetadata = {
   capabilities: [
     'Basic-auth API',
     'Configurable CI tables',
-    'cmdb_rel_ci → :CONNECTS_TO / :DEPLOYED_ON',
+    "cmdb_rel_ci → :CONNECTS_TO {source:'servicenow-cmdb-rel'}",
     'sys_id-keyed idempotent MERGE',
   ],
   fields: [
@@ -420,7 +418,7 @@ const spec = {
   id:          'servicenow',
   category:    'cmdb',
   displayName: 'ServiceNow CMDB',
-  description: 'Pulls Configuration Items from ServiceNow CMDB tables (default: cmdb_ci_server, cmdb_ci_database, cmdb_ci_cloud_resource_base, cmdb_ci_business_app) into Neo4j as :CmdbCi nodes keyed on sys_id, and cmdb_rel_ci rows as :CONNECTS_TO / :DEPLOYED_ON edges between those nodes (source=servicenow-cmdb-rel, confidence=85). Correlation to :Infra is done by /cmdb/assessment.',
+  description: 'Pulls Configuration Items from ServiceNow CMDB tables (default: cmdb_ci_server, cmdb_ci_database, cmdb_ci_cloud_resource_base, cmdb_ci_business_app) into Neo4j as :CmdbCi nodes keyed on sys_id, and cmdb_rel_ci rows as :CONNECTS_TO edges between those nodes (source=servicenow-cmdb-rel, confidence=85, via captures the relation flavour: hosted-on / runs-on / depends-on / uses / …). Correlation to :Infra is done by /cmdb/assessment.',
   authSchema,
   uiMetadata,
   healthCheck,

@@ -2,6 +2,7 @@
 
 import { props, serialize } from '../utils/serialize.js'
 import { createCloudProviderFromOptions } from '../utils/ai-providers.js'
+import { StandardErrorResponses } from '../schemas/openapi.js'
 
 export default async function aiRoutes(fastify) {
   const { query } = fastify.neo4j
@@ -17,7 +18,13 @@ export default async function aiRoutes(fastify) {
   }
 
   // ── GET /ai/status ─────────────────────────────────────────────────────────
-  fastify.get('/status', async () => {
+  fastify.get('/status', {
+    schema: {
+      summary:     'AI provider availability snapshot',
+      description: 'Returns whether the local provider (Ollama) and the cloud provider (Anthropic / OpenAI / Gemini / Azure) are reachable, plus model + baseUrl. Used by the UI to gate AI-feature affordances.',
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async () => {
     const svc = fastify.ai
     if (!svc) {
       return {
@@ -47,7 +54,17 @@ export default async function aiRoutes(fastify) {
   })
 
   // ── POST /ai/suggest/explain ────────────────────────────────────────────────
-  fastify.post('/suggest/explain', async (req, reply) => {
+  fastify.post('/suggest/explain', {
+    schema: {
+      summary:     'Plain-English explanation for a mapping suggestion',
+      description: 'Given an Infra + a candidate Component mapping (output of `/discovery/suggest`), the local LLM produces a human-readable rationale. Useful for tooltips on suggestion cards.',
+      body: { type: 'object', required: ['infra', 'suggestion'], additionalProperties: true, properties: {
+        infra:      { type: 'object', additionalProperties: true },
+        suggestion: { type: 'object', additionalProperties: true },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { infra, suggestion } = req.body || {}
     if (!infra || !suggestion) return reply.badRequest('infra and suggestion are required')
     if (!infra.name)           return reply.badRequest('infra.name is required')
@@ -61,7 +78,14 @@ export default async function aiRoutes(fastify) {
   })
 
   // ── POST /ai/suggest/score ──────────────────────────────────────────────────
-  fastify.post('/suggest/score', async (req, reply) => {
+  fastify.post('/suggest/score', {
+    schema: {
+      summary:     'AI-augmented Application/Component scoring for one Infra',
+      description: 'Given an Infra id, returns LLM-scored candidate Applications. Complements the rule-based scores from the suggest engine; clients combine both.',
+      body:        { type: 'object', required: ['infraId'], additionalProperties: true, properties: { infraId: { type: 'string', format: 'uuid' } } },
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { infraId } = req.body || {}
     if (!infraId) return reply.badRequest('infraId is required')
 
@@ -86,12 +110,19 @@ export default async function aiRoutes(fastify) {
   })
 
   // ── GET /ai/infra/:id/impact ────────────────────────────────────────────────
-  fastify.get('/infra/:id/impact', async (req, reply) => {
+  fastify.get('/infra/:id/impact', {
+    schema: {
+      summary:     'Plain-English blast-radius narrative for one Infra',
+      description: 'Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.',
+      params:      { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { id } = req.params
 
     const records = await query(`
       MATCH (i:Infra {id: $id})
-      OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+      OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
       RETURN i,
              collect(DISTINCT {name: c.name, type: c.type}) AS components,
@@ -113,7 +144,13 @@ export default async function aiRoutes(fastify) {
   })
 
   // ── GET /ai/architecture/plan ───────────────────────────────────────────────
-  fastify.get('/architecture/plan', async (req, reply) => {
+  fastify.get('/architecture/plan', {
+    schema: {
+      summary:     'High-level architectural plan over the whole graph (cloud LLM)',
+      description: 'Fetches a graph snapshot (apps, infra summary, cross-app dependencies) and asks the configured cloud LLM for an architectural review. Returns 503 when no cloud AI is configured.',
+      response:    { 200: { type: 'object', additionalProperties: true }, 503: StandardErrorResponses[503] },
+    },
+  }, async (req, reply) => {
     // Check cloud available before running expensive graph queries
     if (!ai.cloudAvailable) {
       return reply.send(fastify.httpErrors.serviceUnavailable(
@@ -133,7 +170,7 @@ export default async function aiRoutes(fastify) {
         MATCH (i:Infra) WHERE i.source = 'discovery'
         RETURN i.provider AS provider, i.resource_type AS type,
                count(i) AS cnt,
-               count(CASE WHEN (:Component)-[:DEPLOYED_ON]->(i) THEN 1 END) AS mapped
+               count(CASE WHEN (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i) THEN 1 END) AS mapped
         ORDER BY provider, type
       `),
       query(`
@@ -168,7 +205,16 @@ export default async function aiRoutes(fastify) {
   })
 
   // ── POST /ai/drift/remediation-plan ────────────────────────────────────────
-  fastify.post('/drift/remediation-plan', async (req, reply) => {
+  fastify.post('/drift/remediation-plan', {
+    schema: {
+      summary:     'Remediation plan for unmapped/drifted Infra (cloud LLM)',
+      description: 'Without a body, picks up to 50 unmapped discovered Infra nodes and asks the cloud LLM to propose mappings or tag changes. With a body, scores the supplied items.',
+      body: { type: 'object', additionalProperties: true, properties: {
+        items: { type: 'array', items: { type: 'object', additionalProperties: true } },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true }, 503: StandardErrorResponses[503] },
+    },
+  }, async (req, reply) => {
     if (!ai.cloudAvailable) {
       return reply.send(fastify.httpErrors.serviceUnavailable(
         'Cloud AI is not configured. Set AI_CLOUD_PROVIDER and the corresponding API key.'
@@ -180,7 +226,7 @@ export default async function aiRoutes(fastify) {
       const records = await query(`
         MATCH (i:Infra)
         WHERE i.source = 'discovery'
-          AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+          AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
         RETURN i.id AS id, i.name AS name, i.provider AS provider,
                i.resource_type AS resourceType, i.region AS region,
                i.tags AS tags
@@ -205,7 +251,13 @@ export default async function aiRoutes(fastify) {
   })
 
   // ── GET /ai/dependencies/analysis ──────────────────────────────────────────
-  fastify.get('/dependencies/analysis', async (req, reply) => {
+  fastify.get('/dependencies/analysis', {
+    schema: {
+      summary:     'Cross-app dependency analysis (cloud LLM)',
+      description: 'Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.',
+      response:    { 200: { type: 'object', additionalProperties: true }, 503: StandardErrorResponses[503] },
+    },
+  }, async (req, reply) => {
     if (!ai.cloudAvailable) {
       return reply.send(fastify.httpErrors.serviceUnavailable(
         'Cloud AI is not configured. Set AI_CLOUD_PROVIDER and the corresponding API key.'
@@ -245,7 +297,7 @@ export default async function aiRoutes(fastify) {
         // Infrastructure summary by provider and type
         query(`
           MATCH (i:Infra)
-          OPTIONAL MATCH (comp:Component)-[:DEPLOYED_ON]->(i)
+          OPTIONAL MATCH (comp:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
           RETURN i.provider AS provider, i.resource_type AS type,
                  count(DISTINCT i) AS count,
                  count(DISTINCT comp) AS mapped
@@ -255,7 +307,7 @@ export default async function aiRoutes(fastify) {
         // Unmapped resources
         query(`
           MATCH (i:Infra)
-          WHERE NOT (:Component)-[:DEPLOYED_ON]->(i)
+          WHERE NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
           RETURN i.provider AS provider, i.resource_type AS type, i.name AS name,
                  i.region AS region
           LIMIT 20
@@ -539,7 +591,17 @@ export default async function aiRoutes(fastify) {
     return null
   }
 
-  fastify.post('/chat', async (req, reply) => {
+  fastify.post('/chat', {
+    schema: {
+      summary:     'Conversational chat with live graph context',
+      description: 'Injects a fresh snapshot of applications + infra + unmapped resources + cross-app deps into the system prompt before forwarding the conversation. Returns the assistant\'s reply plus a reference to the context used.',
+      body: { type: 'object', required: ['messages'], additionalProperties: true, properties: {
+        messages: { type: 'array', items: { type: 'object', required: ['role', 'content'], additionalProperties: true,
+          properties: { role: { type: 'string', enum: ['user', 'assistant', 'system'] }, content: { type: 'string' } } } },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true }, 503: StandardErrorResponses[503] },
+    },
+  }, async (req, reply) => {
     const svc = fastify.ai
     if (!svc) return reply.internalServerError('AI service unavailable')
 

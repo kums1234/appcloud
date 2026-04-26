@@ -3,8 +3,8 @@
  *
  * Central schema constants for the discovery pipeline.
  * Defines typed Neo4j labels, typed relationship names, and promoted
- * properties — shared by discovery.js, discovery.azure.enrich.js,
- * and integrations.js.
+ * properties — shared by discovery.js, discovery.azure.js,
+ * discovery.azure.supplement.js, and integrations.js.
  *
  * Design: additive dual-label approach — every node keeps the :Infra
  * label for backward compatibility; typed labels are added alongside it.
@@ -77,56 +77,6 @@ export const RESOURCE_TYPE_LABELS = {
   'gcp:gcs_bucket':            ['GCSBucket',           'ObjectStorage'],
 }
 
-// ─── Typed Relationship Labels ───────────────────────────────────────────────
-//
-// Maps the `via` property on :CONNECTED_TO edges to a typed relationship name.
-// Both the typed rel AND the legacy :CONNECTED_TO are written (dual-write)
-// so existing queries continue to work.
-
-export const VIA_TO_REL_TYPE = {
-  'nic':                  'NETWORK_INTERFACE',
-  'disk':                 'ATTACHED_DISK',
-  'subnet':               'PART_OF_SUBNET',
-  'vnet':                 'MEMBER_OF_VNET',
-  'nsg':                  'SECURED_BY',
-  'public-ip':            'HAS_PUBLIC_IP',
-  'route-table':          'USES_ROUTE_TABLE',
-  'app-service-plan':     'HOSTED_ON_PLAN',
-  'vnet-integration':     'VNET_INTEGRATED',
-  'app-insights':         'MONITORED_BY',
-  'aks-node-subnet':      'AKS_NODE_SUBNET',
-  'sql-server':           'CHILD_OF_SERVER',
-  'redis-vnet-injection': 'VNET_INJECTED',
-  'private-endpoint':     'PRIVATE_ENDPOINT',
-  'keyvault-vnet-rule':   'KEYVAULT_ACL',
-  'lb-backend-nic':       'LB_BACKEND',
-  'agw-subnet':           'AGW_SUBNET',
-  'observed-tcp':         'OBSERVED_CONNECTION',
-  'monitors':             'MONITORS',
-  'contains':             'TOPOLOGY_CONTAINS',
-  'associated':           'TOPOLOGY_ASSOCIATED',
-
-  // ── Telemetry-derived service-to-service calls ────────────────────────
-  // All ride the :CONNECTED_TO edge with a `source` property distinguishing
-  // the observability pipeline (otel / datadog / new-relic / mesh / …).
-  // Edge properties (rps, error_rate, p50_ms, p95_ms, window_start/end,
-  // route, protocol) live on the :CONNECTED_TO relationship itself so
-  // queries can MATCH (a)-[r:CONNECTED_TO]-(b) WHERE r.source='otel' …
-  'otel-http':            'OBSERVED_HTTP_CALL',
-  'otel-rpc':             'OBSERVED_RPC_CALL',
-  'otel-messaging':       'OBSERVED_MESSAGING',
-  'otel-db':              'OBSERVED_DB_CALL',
-  'apm-call':             'OBSERVED_APM_CALL',
-  'mesh-call':            'SERVICE_MESH_CALL',
-
-  // ── IaC cross-workspace dependencies ───────────────────────────────────
-  // Terraform's `terraform_remote_state` data source, Pulumi's
-  // `StackReference`. Promoted to graph edges once a workspace is mapped
-  // to a Component/Application; until then the TFC connector surfaces
-  // them as scan warnings (see connectors/terraform-cloud/index.js).
-  'terraform-remote-state': 'STATE_REFERENCE',
-}
-
 // ─── Promoted Raw Fields ─────────────────────────────────────────────────────
 //
 // Fields promoted from the `raw` JSON blob to top-level node properties.
@@ -158,6 +108,10 @@ export const RAW_PROMOTED_FIELDS = {
     subnetwork:       'subnetwork',
     internalIp:       'private_ip',
     externalIp:       'public_ip',
+    caiName:          'cai_name',   // CAI canonical asset.name (//svc.googleapis.com/...)
+                                    // — used by IAM-policy supplement to resolve
+                                    // policy-target resources back to Infra nodes
+                                    // when their cloud_id is the REST self-link.
   },
 }
 
@@ -174,16 +128,6 @@ export const RAW_PROMOTED_FIELDS = {
 export function getLabelsForType(provider, resourceType) {
   const key = `${(provider || '').toLowerCase()}:${(resourceType || '').toLowerCase()}`
   return RESOURCE_TYPE_LABELS[key] || []
-}
-
-/**
- * Get the typed relationship name for a given `via` value.
- *
- *   getTypedRel('nic') → 'NETWORK_INTERFACE'
- *   getTypedRel('unknown') → null
- */
-export function getTypedRel(via) {
-  return VIA_TO_REL_TYPE[(via || '').toLowerCase()] || null
 }
 
 /**
@@ -220,7 +164,7 @@ export function buildLabelSetClause(provider, resourceType, alias = 'i') {
 // service-mesh metrics) receive these labels on top of the base :Component.
 // Gives queries a clean way to pick workload-flavoured components out:
 //
-//   MATCH (s:TelemetryService)-[r:CONNECTED_TO]->(t:TelemetryService)
+//   MATCH (s:TelemetryService)-[r:CONNECTS_TO]->(t:TelemetryService)
 //   WHERE r.source = 'otel' AND r.error_rate > 0.05
 //   RETURN s.name, t.name, r.p95_ms
 //

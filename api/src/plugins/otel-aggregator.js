@@ -11,7 +11,7 @@
 //                         contributes to a cross-service edge, with its
 //                         duration + status folded into aggregates.
 //   3. Emit sweep       — UNWIND-batched MERGE of :Component nodes and
-//                         :CONNECTED_TO edges (plus typed aliases per via),
+//                         :CONNECTS_TO {source:'otel', via:'otel-http'|'otel-rpc'|…} edges,
 //                         then delete the consumed rows.
 //
 // At-least-once semantics: we SELECT row ids, write Neo4j, then DELETE only
@@ -25,7 +25,7 @@
 // OTEL_AGG_INTERVAL_MS shorter or add a retention window in a follow-up if
 // observed in production.
 
-import { VIA_TO_REL_TYPE, TELEMETRY_COMPONENT_LABELS } from '../routes/discovery.schema.js'
+import { TELEMETRY_COMPONENT_LABELS } from '../routes/discovery.schema.js'
 
 const DEFAULT_INTERVAL_MS = parseInt(process.env.OTEL_AGG_INTERVAL_MS || '60000', 10)
 const DEFAULT_BATCH_SIZE  = parseInt(process.env.OTEL_AGG_BATCH_SIZE  || '5000', 10)
@@ -37,9 +37,10 @@ export function componentKey(row) {
   return `${row.service_namespace || ''}|${row.service_name || ''}|${row.deployment_environment || ''}`
 }
 
-// Pick a via value + typed relationship alias based on span attributes.
-// The spec defines otel-http / otel-rpc / otel-db / otel-messaging in
-// VIA_TO_REL_TYPE; we fall back to otel-http for anything unclassified.
+// Pick a via value based on span attributes. We fall back to otel-http
+// for anything unclassified; the value is stored on the
+// :CONNECTS_TO {source:'otel', via:…} edge so queries can filter by
+// telemetry kind without needing per-via typed relationships.
 export function inferVia(attrs, resAttrs) {
   const a = attrs || {}
   const r = resAttrs || {}
@@ -228,12 +229,16 @@ async function runTick(fastify) {
     `, { components: componentArray })
 
     if (edgeArray.length) {
-      // Legacy :CONNECTED_TO edge (kept for back-compat with existing queries)
+      // Single :CONNECTS_TO edge per (src, dst, via) tuple. Telemetry
+      // edges are distinguished from infra structural edges by
+      // `source = 'otel'` plus the :Component endpoint label constraint.
+      // Typed-alias edges (OBSERVED_HTTP_CALL, OBSERVED_RPC_CALL, …) are
+      // no longer written.
       await fastify.neo4j.write(`
         UNWIND $edges AS e
         MATCH (src:Component { name: e.srcName, origin_source: 'otel', origin_namespace: e.srcNs })
         MATCH (dst:Component { name: e.dstName, origin_source: 'otel', origin_namespace: e.dstNs })
-        MERGE (src)-[r:CONNECTED_TO { source: 'otel', via: e.via }]->(dst)
+        MERGE (src)-[r:CONNECTS_TO { source: 'otel', via: e.via }]->(dst)
         SET   r.protocol     = e.protocol,
               r.route        = e.route,
               r.rps          = e.rps,
@@ -244,34 +249,6 @@ async function runTick(fastify) {
               r.window_end   = e.windowEnd,
               r.updated_at   = datetime()
       `, { edges: edgeArray })
-
-      // Typed-alias edges (dual-write). One Cypher call per via-type so we
-      // can use a static relationship name (MERGE doesn't accept a dynamic
-      // rel name parameter).
-      const byVia = new Map()
-      for (const e of edgeArray) {
-        if (!byVia.has(e.via)) byVia.set(e.via, [])
-        byVia.get(e.via).push(e)
-      }
-      for (const [via, viaEdges] of byVia.entries()) {
-        const typedRel = VIA_TO_REL_TYPE[via]
-        if (!typedRel) continue
-        await fastify.neo4j.write(`
-          UNWIND $edges AS e
-          MATCH (src:Component { name: e.srcName, origin_source: 'otel', origin_namespace: e.srcNs })
-          MATCH (dst:Component { name: e.dstName, origin_source: 'otel', origin_namespace: e.dstNs })
-          MERGE (src)-[r:${typedRel} { source: 'otel' }]->(dst)
-          SET   r.protocol     = e.protocol,
-                r.route        = e.route,
-                r.rps          = e.rps,
-                r.error_rate   = e.errorRate,
-                r.p50_ms       = e.p50Ms,
-                r.p95_ms       = e.p95Ms,
-                r.window_start = e.windowStart,
-                r.window_end   = e.windowEnd,
-                r.updated_at   = datetime()
-        `, { edges: viaEdges })
-      }
     }
   } catch (err) {
     fastify.log.error(`[otel-aggregator] Neo4j write failed: ${err.message} — rows retained for next tick`)
