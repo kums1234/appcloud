@@ -354,6 +354,28 @@ npm run test:coverage
   directly — `otel-ingest/parse.js` and the exported helpers in
   `otel-aggregator.js` are the pattern.
 
+## Local hygiene — git hooks, Node version, audit
+
+Three small tools live alongside the repo to catch the boring failure modes early. None are wired in automatically (a fresh clone never silently changes git config); enable them once per checkout.
+
+**Node version pin.** `api/.nvmrc` declares Node 22. With `fnm` or `nvm`, running `nvm use` (or letting `fnm` auto-switch) inside `api/` picks it up — one less "wrong Node version" footgun when bouncing between projects.
+
+**Pre-commit hook — stray `api/src/node_modules/`.** A `node_modules` tree under `api/src/` shadows `api/node_modules` because Node's resolver walks upward from the importing file. This cost real time during the Fastify 5 upgrade. The checked-in hook at `.githooks/pre-commit` refuses to commit while that directory exists; running `cd api && npm install` (or `npm ci`) wires it up automatically via the `prepare` lifecycle, which calls `scripts/install-hooks.sh` and points `core.hooksPath` at `.githooks/`. Run the script directly if your workflow skips `npm install`:
+
+```bash
+scripts/install-hooks.sh
+```
+
+If the stray directory ever appears, remove it with `rm -rf api/src/node_modules`.
+
+**Dependency audit summary.** `scripts/audit-summary.sh` prints the `npm audit` by-severity breakdown for `api/` and compares it against `scripts/audit-baseline.json`. CI calls it without flags and fails on regression; locally:
+
+```bash
+scripts/audit-summary.sh                  # print + compare
+scripts/audit-summary.sh --update-baseline    # lock in the current state after fixing/accepting findings
+scripts/audit-summary.sh --no-fail        # print + compare without exiting non-zero
+```
+
 ## Integration with CI/CD
 
 The development setup mirrors production but with:

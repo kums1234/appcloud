@@ -54,10 +54,17 @@ function isPublicByConvention(routeOptions) {
 
 async function buildAndCollect() {
   const prevKey = process.env.APPCLOUD_API_KEY
-  process.env.APPCLOUD_API_KEY = 'test-default-deny-key'
+  // 32+ chars so the auth plugin's bootstrap-key length warn does not
+  // fire on every test run (MIN_KEY_LEN in plugins/auth.js is 32).
+  process.env.APPCLOUD_API_KEY = 'test-default-deny-key-padded-to-32ch'
 
   const fastify = Fastify({
-    logger: false,
+    // Cap the test logger at silent rather than disabling it outright —
+    // the auth plugin's req.log.warn for stray X-Actor headers is one of
+    // the things we don't want leaking into test output, and capping the
+    // level keeps that local to the logger config instead of relying on
+    // a per-warning override at the call site.
+    logger: { level: 'silent' },
     ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
   })
 

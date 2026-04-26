@@ -8,25 +8,13 @@ import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
 import { authPlugin } from './plugins/auth.js'
 import { auditCleanupPlugin } from './plugins/audit-cleanup.js'
-import applicationRoutes from './routes/applications.js'
-import componentRoutes from './routes/components.js'
-import infraRoutes from './routes/infra.js'
-import graphRoutes from './routes/graph.js'
-import integrationRoutes from './routes/integrations.js'
-import cloudAccountRoutes from './routes/integrations-cloud.js'
-import aiConfigRoutes from './routes/integrations-ai.js'
-import integrationManagementRoutes, { connectorsRegistryRoutes } from './routes/integrations.management.js'
 import { connectorsPlugin } from './plugins/connectors.js'
 import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
 import { cmdbAssessmentSchedulerPlugin } from './plugins/cmdb-assessment-scheduler.js'
-import discoveryRoutes from './routes/discovery.js'
-import discoveryMetadataRoutes from './routes/discovery.metadata.js'
-import auditRoutes from './routes/audit.js'
-import cmdbRoutes from './routes/cmdb.js'
-import adminApiKeyRoutes from './routes/admin-api-keys.js'
 import { aiPlugin } from './plugins/ai.js'
-import aiRoutes from './routes/ai.js'
+import { autoTagRoute } from './utils/openapi-tags.js'
+import { registerAllRoutes } from './utils/route-modules.js'
 
 const fastify = Fastify({
   logger: true,
@@ -127,32 +115,11 @@ const openapiSpec = {
 const swagger    = (await import('@fastify/swagger')).default
 const swaggerUI  = (await import('@fastify/swagger-ui')).default
 
-// `transform` runs per-route at registration time. It auto-tags every
-// route by its first path segment so the Swagger UI groups Discovery /
-// Applications / Components / etc. without per-route annotation. Routes
-// that already declare `schema.tags` keep their explicit tag set.
-const PATH_SEG_TO_TAG = {
-  applications: 'Applications',
-  components:   'Components',
-  infra:        'Infra',
-  graph:        'Graph',
-  ai:           'AI',
-  audit:        'Audit',
-  cmdb:         'CMDB',
-  admin:        'Admin',
-  discovery:    'Discovery',
-  integrations: 'Integrations',
-  connectors:   'Connectors',
-  health:       'Health',
-  docs:         'OpenAPI',
-  openapi:      'OpenAPI',
-}
-function autoTagRoute({ schema, url }) {
-  if (schema?.tags?.length) return { schema, url }
-  const seg = url.split('/').filter(Boolean)[0]
-  const tag = PATH_SEG_TO_TAG[seg] || 'Other'
-  return { schema: { ...(schema || {}), tags: [tag] }, url }
-}
+// `transform` runs per-route at registration time. autoTagRoute (shared
+// with scripts/export-openapi.js + the drift test, see utils/openapi-tags.js)
+// auto-tags every route by its first path segment so the Swagger UI groups
+// Discovery / Applications / Components / etc. without per-route annotation.
+// Routes that already declare `schema.tags` keep their explicit tag set.
 await fastify.register(swagger, { openapi: openapiSpec, transform: autoTagRoute })
 await fastify.register(swaggerUI, {
   routePrefix:    '/docs',
@@ -210,32 +177,18 @@ await schedulerPlugin(fastify)
 // can call markDirty() after an ingest completes.
 await cmdbAssessmentSchedulerPlugin(fastify)
 
-// Protected routes — mutations require a valid X-API-Key header when
-// APPCLOUD_API_KEY is set. The fastify.authenticate decorator is a no-op when
-// auth is disabled so the same preHandler works in both modes.
-await fastify.register(applicationRoutes,  { prefix: '/applications' })
-await fastify.register(componentRoutes,    { prefix: '/components' })
-await fastify.register(infraRoutes,        { prefix: '/infra' })
-await fastify.register(graphRoutes,        { prefix: '/graph' })
-await fastify.register(integrationRoutes,          { prefix: '/integrations' })
-await fastify.register(cloudAccountRoutes,         { prefix: '/integrations' })
-await fastify.register(aiConfigRoutes,             { prefix: '/integrations' })
-// Generic integrations CRUD — registered after the above so static paths
-// (/terraform/*, /cloud/*, /ai/*) keep their priority over :id. Also exposes
-// /connectors for the connector registry listing.
-await fastify.register(integrationManagementRoutes, { prefix: '/integrations' })
-await fastify.register(connectorsRegistryRoutes,    { prefix: '/connectors' })
-await fastify.register(discoveryRoutes,         { prefix: '/discovery' })
-// Read-only metadata endpoints (providers, resource-types). Register after
-// discoveryRoutes so static paths under /discovery don't shadow dynamic ones.
-await fastify.register(discoveryMetadataRoutes, { prefix: '/discovery' })
-await fastify.register(auditRoutes,         { prefix: '/audit' })
-await fastify.register(cmdbRoutes,          { prefix: '/cmdb' })
-await fastify.register(adminApiKeyRoutes,   { prefix: '/admin' })
-// AI plugin — direct call (like neo4j/postgres) so fastify.ai is on the root instance
-// and visible to /ai routes. register(aiPlugin) would encapsulate and hide the decorator.
+// AI plugin — direct call (like neo4j/postgres) so fastify.ai lands on
+// the root instance and is visible to /ai routes. register(aiPlugin)
+// would encapsulate and hide the decorator. Must run before aiRoutes.
 await aiPlugin(fastify)
-await fastify.register(aiRoutes, { prefix: '/ai' })
+
+// Protected routes — mutations require a valid X-API-Key header when
+// APPCLOUD_API_KEY is set. The fastify.authenticate decorator is a no-op
+// when auth is disabled so the same preHandler works in both modes. The
+// registration list (and order — prefix-priority comments live there)
+// is shared with scripts/export-openapi.js + the drift test via
+// utils/route-modules.js.
+await registerAllRoutes(fastify)
 
 fastify.get('/health', {
   schema: {

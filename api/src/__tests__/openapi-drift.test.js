@@ -18,11 +18,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Fastify from 'fastify'
+import { autoTagRoute } from '../utils/openapi-tags.js'
+import { registerAllRoutes } from '../utils/route-modules.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot  = path.resolve(__dirname, '..', '..', '..')
 const docsDir   = path.join(repoRoot, 'docs')
-const apiSrc    = path.resolve(__dirname, '..')
 
 async function buildSpec() {
   const fastify = Fastify({
@@ -40,12 +41,6 @@ async function buildSpec() {
   fastify.decorate('cmdbAssessment', { markDirty: () => {}, run: async () => ({}) })
 
   const swagger = (await import('@fastify/swagger')).default
-  const PATH_SEG_TO_TAG = {
-    applications: 'Applications', components: 'Components', infra: 'Infra',
-    graph: 'Graph', ai: 'AI', audit: 'Audit', cmdb: 'CMDB',
-    discovery: 'Discovery', integrations: 'Integrations',
-    connectors: 'Connectors', health: 'Health', docs: 'OpenAPI', openapi: 'OpenAPI',
-  }
   await fastify.register(swagger, {
     openapi: {
       openapi: '3.0.3',
@@ -61,37 +56,10 @@ async function buildSpec() {
       components: { securitySchemes: { ApiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' } } },
       security:   [{ ApiKey: [] }],
     },
-    transform: ({ schema, url }) => {
-      if (schema?.tags?.length) return { schema, url }
-      const seg = url.split('/').filter(Boolean)[0]
-      return { schema: { ...(schema || {}), tags: [PATH_SEG_TO_TAG[seg] || 'Other'] }, url }
-    },
+    transform: autoTagRoute,
   })
 
-  const modules = [
-    ['./routes/applications.js',          { prefix: '/applications' }],
-    ['./routes/components.js',            { prefix: '/components'   }],
-    ['./routes/infra.js',                 { prefix: '/infra'        }],
-    ['./routes/graph.js',                 { prefix: '/graph'        }],
-    ['./routes/integrations.js',          { prefix: '/integrations' }],
-    ['./routes/integrations-cloud.js',    { prefix: '/integrations' }],
-    ['./routes/integrations-ai.js',       { prefix: '/integrations' }],
-    ['./routes/integrations.management.js', { prefix: '/integrations' }],
-    ['./routes/discovery.js',             { prefix: '/discovery'    }],
-    ['./routes/discovery.metadata.js',    { prefix: '/discovery'    }],
-    ['./routes/audit.js',                 { prefix: '/audit'        }],
-    ['./routes/cmdb.js',                  { prefix: '/cmdb'         }],
-    ['./routes/ai.js',                    { prefix: '/ai'           }],
-    ['./routes/admin-api-keys.js',        { prefix: '/admin'        }],
-  ]
-  for (const [rel, opts] of modules) {
-    const mod = await import(path.join(apiSrc, rel))
-    await fastify.register(mod.default, opts)
-  }
-  try {
-    const m = await import(path.join(apiSrc, './routes/integrations.management.js'))
-    if (m.connectorsRegistryRoutes) await fastify.register(m.connectorsRegistryRoutes, { prefix: '/connectors' })
-  } catch {}
+  await registerAllRoutes(fastify)
 
   fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },
     async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

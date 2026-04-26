@@ -3912,6 +3912,74 @@
         }
       }
     },
+    "/connectors/": {
+      "get": {
+        "summary": "List available connectors (registry)",
+        "tags": [
+          "Connectors"
+        ],
+        "description": "Returns every connector registered with the framework — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends. Each entry includes its `authSchema`, `configSchema`, and UI metadata. Use this to render dynamic connector-creation forms.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connectors/{id}": {
+      "get": {
+        "summary": "Get one connector's schema",
+        "tags": [
+          "Connectors"
+        ],
+        "description": "Returns the full spec for one connector — `id`, `displayName`, `description`, JSON schemas for auth + config, UI metadata, capabilities. Used by the connector-creation UI to drive a form.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/discovery/scan/aws": {
       "post": {
         "summary": "Scan AWS via Config aggregator",
@@ -5650,418 +5718,6 @@
         }
       }
     },
-    "/ai/status": {
-      "get": {
-        "summary": "AI provider availability snapshot",
-        "tags": [
-          "AI"
-        ],
-        "description": "Returns whether the local provider (Ollama) and the cloud provider (Anthropic / OpenAI / Gemini / Azure) are reachable, plus model + baseUrl. Used by the UI to gate AI-feature affordances.",
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/suggest/explain": {
-      "post": {
-        "summary": "Plain-English explanation for a mapping suggestion",
-        "tags": [
-          "AI"
-        ],
-        "description": "Given an Infra + a candidate Component mapping (output of `/discovery/suggest`), the local LLM produces a human-readable rationale. Useful for tooltips on suggestion cards.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "infra",
-                  "suggestion"
-                ],
-                "additionalProperties": true,
-                "properties": {
-                  "infra": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "suggestion": {
-                    "type": "object",
-                    "additionalProperties": true
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/suggest/score": {
-      "post": {
-        "summary": "AI-augmented Application/Component scoring for one Infra",
-        "tags": [
-          "AI"
-        ],
-        "description": "Given an Infra id, returns LLM-scored candidate Applications. Complements the rule-based scores from the suggest engine; clients combine both.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "infraId"
-                ],
-                "additionalProperties": true,
-                "properties": {
-                  "infraId": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/infra/{id}/impact": {
-      "get": {
-        "summary": "Plain-English blast-radius narrative for one Infra",
-        "tags": [
-          "AI"
-        ],
-        "description": "Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/architecture/plan": {
-      "get": {
-        "summary": "High-level architectural plan over the whole graph (cloud LLM)",
-        "tags": [
-          "AI"
-        ],
-        "description": "Fetches a graph snapshot (apps, infra summary, cross-app dependencies) and asks the configured cloud LLM for an architectural review. Returns 503 when no cloud AI is configured.",
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "statusCode",
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": true,
-                  "properties": {
-                    "statusCode": {
-                      "type": "integer",
-                      "example": 400
-                    },
-                    "error": {
-                      "type": "string",
-                      "example": "Bad Request"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "infraId required"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/drift/remediation-plan": {
-      "post": {
-        "summary": "Remediation plan for unmapped/drifted Infra (cloud LLM)",
-        "tags": [
-          "AI"
-        ],
-        "description": "Without a body, picks up to 50 unmapped discovered Infra nodes and asks the cloud LLM to propose mappings or tag changes. With a body, scores the supplied items.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "properties": {
-                  "items": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "additionalProperties": true
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "statusCode",
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": true,
-                  "properties": {
-                    "statusCode": {
-                      "type": "integer",
-                      "example": 400
-                    },
-                    "error": {
-                      "type": "string",
-                      "example": "Bad Request"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "infraId required"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/dependencies/analysis": {
-      "get": {
-        "summary": "Cross-app dependency analysis (cloud LLM)",
-        "tags": [
-          "AI"
-        ],
-        "description": "Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.",
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "statusCode",
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": true,
-                  "properties": {
-                    "statusCode": {
-                      "type": "integer",
-                      "example": 400
-                    },
-                    "error": {
-                      "type": "string",
-                      "example": "Bad Request"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "infraId required"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/chat": {
-      "post": {
-        "summary": "Conversational chat with live graph context",
-        "tags": [
-          "AI"
-        ],
-        "description": "Injects a fresh snapshot of applications + infra + unmapped resources + cross-app deps into the system prompt before forwarding the conversation. Returns the assistant's reply plus a reference to the context used.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "messages"
-                ],
-                "additionalProperties": true,
-                "properties": {
-                  "messages": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "required": [
-                        "role",
-                        "content"
-                      ],
-                      "additionalProperties": true,
-                      "properties": {
-                        "role": {
-                          "type": "string",
-                          "enum": [
-                            "user",
-                            "assistant",
-                            "system"
-                          ]
-                        },
-                        "content": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "statusCode",
-                    "error",
-                    "message"
-                  ],
-                  "additionalProperties": true,
-                  "properties": {
-                    "statusCode": {
-                      "type": "integer",
-                      "example": 400
-                    },
-                    "error": {
-                      "type": "string",
-                      "example": "Bad Request"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "infraId required"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/admin/api-keys": {
       "post": {
         "summary": "Create a new API key",
@@ -6561,24 +6217,21 @@
         }
       }
     },
-    "/connectors/": {
+    "/ai/status": {
       "get": {
-        "summary": "List available connectors (registry)",
+        "summary": "AI provider availability snapshot",
         "tags": [
-          "Connectors"
+          "AI"
         ],
-        "description": "Returns every connector registered with the framework — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends. Each entry includes its `authSchema`, `configSchema`, and UI metadata. Use this to render dynamic connector-creation forms.",
+        "description": "Returns whether the local provider (Ollama) and the cloud provider (Anthropic / OpenAI / Gemini / Azure) are reachable, plus model + baseUrl. Used by the UI to gate AI-feature affordances.",
         "responses": {
           "200": {
             "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": true
-                  }
+                  "type": "object",
+                  "additionalProperties": true
                 }
               }
             }
@@ -6586,17 +6239,107 @@
         }
       }
     },
-    "/connectors/{id}": {
-      "get": {
-        "summary": "Get one connector's schema",
+    "/ai/suggest/explain": {
+      "post": {
+        "summary": "Plain-English explanation for a mapping suggestion",
         "tags": [
-          "Connectors"
+          "AI"
         ],
-        "description": "Returns the full spec for one connector — `id`, `displayName`, `description`, JSON schemas for auth + config, UI metadata, capabilities. Used by the connector-creation UI to drive a form.",
+        "description": "Given an Infra + a candidate Component mapping (output of `/discovery/suggest`), the local LLM produces a human-readable rationale. Useful for tooltips on suggestion cards.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "infra",
+                  "suggestion"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                  "infra": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "suggestion": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/suggest/score": {
+      "post": {
+        "summary": "AI-augmented Application/Component scoring for one Infra",
+        "tags": [
+          "AI"
+        ],
+        "description": "Given an Infra id, returns LLM-scored candidate Applications. Complements the rule-based scores from the suggest engine; clients combine both.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "infraId"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                  "infraId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/infra/{id}/impact": {
+      "get": {
+        "summary": "Plain-English blast-radius narrative for one Infra",
+        "tags": [
+          "AI"
+        ],
+        "description": "Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             },
             "in": "path",
             "name": "id",
@@ -6614,14 +6357,271 @@
                 }
               }
             }
-          },
-          "404": {
+          }
+        }
+      }
+    },
+    "/ai/architecture/plan": {
+      "get": {
+        "summary": "High-level architectural plan over the whole graph (cloud LLM)",
+        "tags": [
+          "AI"
+        ],
+        "description": "Fetches a graph snapshot (apps, infra summary, cross-app dependencies) and asks the configured cloud LLM for an architectural review. Returns 503 when no cloud AI is configured.",
+        "responses": {
+          "200": {
             "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/drift/remediation-plan": {
+      "post": {
+        "summary": "Remediation plan for unmapped/drifted Infra (cloud LLM)",
+        "tags": [
+          "AI"
+        ],
+        "description": "Without a body, picks up to 50 unmapped discovered Infra nodes and asks the cloud LLM to propose mappings or tag changes. With a body, scores the supplied items.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/dependencies/analysis": {
+      "get": {
+        "summary": "Cross-app dependency analysis (cloud LLM)",
+        "tags": [
+          "AI"
+        ],
+        "description": "Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai/chat": {
+      "post": {
+        "summary": "Conversational chat with live graph context",
+        "tags": [
+          "AI"
+        ],
+        "description": "Injects a fresh snapshot of applications + infra + unmapped resources + cross-app deps into the system prompt before forwarding the conversation. Returns the assistant's reply plus a reference to the context used.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "messages"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "content"
+                      ],
+                      "additionalProperties": true,
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "assistant",
+                            "system"
+                          ]
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
                 }
               }
             }
