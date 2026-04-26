@@ -17,59 +17,23 @@
 // in environments without the daemon. Run explicitly with:
 //   cd api && npm run test:integration
 
-import { describe, test, expect, beforeAll, afterAll, jest } from '@jest/globals'
+import { test, expect, beforeAll, afterAll, jest } from '@jest/globals'
+import { getMaybeDescribe, startNeo4j, wrapNeo4jDriver } from './helpers.js'
 
 jest.setTimeout(600_000)
 
-const NODE_MAJOR     = parseInt(process.versions.node.split('.')[0], 10)
-const NODE_SUPPORTED = NODE_MAJOR >= 18 && NODE_MAJOR <= 22
-let DOCKER_AVAILABLE = false
-try {
-  const { execSync } = await import('child_process')
-  execSync('docker info', { stdio: 'ignore', timeout: 5000 })
-  DOCKER_AVAILABLE = true
-} catch { /* docker unavailable — test below becomes a skip */ }
-
-const maybeDescribe = (DOCKER_AVAILABLE && NODE_SUPPORTED) ? describe : describe.skip
-if (DOCKER_AVAILABLE && !NODE_SUPPORTED) {
-  // eslint-disable-next-line no-console
-  console.warn(`[cmdb-assessment integration] skipped: Node ${NODE_MAJOR} not supported by Testcontainers 10.x; use Node 20 or 22 LTS`)
-}
+const maybeDescribe = getMaybeDescribe('cmdb-assessment integration')
 
 maybeDescribe('CMDB assessment → :CmdbCi scores + :REPRESENTS + :IngestionEpisode (Testcontainers)', () => {
   let neo4jContainer, neo4jDriver, ctx
 
   beforeAll(async () => {
-    const { Neo4jContainer } = await import('@testcontainers/neo4j')
-    const neo4jModule        = await import('neo4j-driver')
-    const neo4j              = neo4jModule.default || neo4jModule
-
-    // @testcontainers/neo4j v10.28+ removed withoutAuthentication() — every
-    // container now needs a password. Use a fixed test password and pass it
-    // through to the driver. Username is always 'neo4j' for the official image.
-    neo4jContainer = await new Neo4jContainer('neo4j:5').withPassword('test1234').start()
-    neo4jDriver    = neo4j.driver(
-      neo4jContainer.getBoltUri(),
-      neo4j.auth.basic(neo4jContainer.getUsername(), neo4jContainer.getPassword()),
-    )
-
-    // Minimal ctx shape that runAssessment expects: a logger and a neo4j
-    // driver wrapper exposing `query` + `write`. Mirrors how the API
-    // wires it via the Fastify decorators.
+    ;({ container: neo4jContainer, driver: neo4jDriver } = await startNeo4j())
+    // ctx is the minimal shape runAssessment expects — logger + a neo4j
+    // wrapper with `query` / `write` mirroring the production decorators.
     ctx = {
       log: { info() {}, warn() {}, error() {} },
-      neo4j: {
-        write: async (cypher, params = {}) => {
-          const session = neo4jDriver.session()
-          try { return (await session.run(cypher, params)).records }
-          finally { await session.close() }
-        },
-        query: async (cypher, params = {}) => {
-          const session = neo4jDriver.session()
-          try { return (await session.run(cypher, params)).records }
-          finally { await session.close() }
-        },
-      },
+      neo4j: wrapNeo4jDriver(neo4jDriver),
     }
   }, 180_000)
 
