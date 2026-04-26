@@ -36,6 +36,17 @@ function hasAuthPreHandler(routeOptions, auth) {
   return false
 }
 
+function hasAdminPreHandler(routeOptions, requireAdmin) {
+  const ph = routeOptions.preHandler
+  if (ph === requireAdmin) return true
+  if (Array.isArray(ph) && ph.includes(requireAdmin)) return true
+  return false
+}
+
+function isAdminRoute(routeOptions) {
+  return routeOptions.config?.requireAdmin === true
+}
+
 function isPublicByConvention(routeOptions) {
   return Array.isArray(routeOptions.schema?.security)
       && routeOptions.schema.security.length === 0
@@ -71,6 +82,8 @@ async function buildAndCollect() {
       method:   routeOptions.method,
       url:      routeOptions.url,
       hasAuth:  hasAuthPreHandler(routeOptions, fastify.authenticate),
+      isAdmin:  isAdminRoute(routeOptions),
+      hasAdminGuard: hasAdminPreHandler(routeOptions, fastify.requireAdmin),
       isPublic: isPublicByConvention(routeOptions),
     })
   })
@@ -135,5 +148,23 @@ describe('Auth coverage — default-deny invariant', () => {
     const unexpected = [...publicSet].filter(k => !ALLOWED_PUBLIC_ROUTES.has(k))
     const missing    = [...ALLOWED_PUBLIC_ROUTES].filter(k => !publicSet.has(k))
     expect({ unexpected, missing }).toEqual({ unexpected: [], missing: [] })
+  })
+
+  test('admin-flagged routes have the requireAdmin preHandler attached', () => {
+    const adminRoutes = routes.filter(r => r.isAdmin)
+    expect(adminRoutes.length).toBeGreaterThan(0) // sanity — at least /audit/*
+    const violations = adminRoutes
+      .filter(r => !r.hasAdminGuard)
+      .map(r => `${r.method} ${r.url}`)
+    expect(violations).toEqual([])
+  })
+
+  test('every /audit route is admin-tier', () => {
+    const auditRoutes = routes.filter(r => r.url.startsWith('/audit'))
+    expect(auditRoutes.length).toBeGreaterThan(0)
+    const notAdmin = auditRoutes
+      .filter(r => !r.isAdmin)
+      .map(r => `${r.method} ${r.url}`)
+    expect(notAdmin).toEqual([])
   })
 })

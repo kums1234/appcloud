@@ -927,16 +927,29 @@ export default async function discoveryRoutes(fastify) {
 
 
   // ── GET /discovery/debug/:id — inspect raw Neo4j data for a resource ──
-  // Use this to verify tags and raw are being stored correctly.
-  // curl http://localhost:3000/discovery/debug/INFRA_ID
+  // Returns full raw cloud-API responses + every `:CONNECTS_TO` edge with
+  // properties. Useful for understanding scanner / autolink decisions, but
+  // it leaks tag values that may carry PII (`appcloud:owner`, slack-channel
+  // tags, etc.) and the truncated `raw` blob may carry sensitive metadata.
+  //
+  // Gated behind admin-tier auth AND APPCLOUD_DEBUG=1 so it can't be hit by
+  // a regular API key in production. In dev (NODE_ENV !== 'production') the
+  // env-flag gate is relaxed since debugging is the whole point there.
   fastify.get('/debug/:id', {
+    config: { requireAdmin: true },
     schema: {
-      summary:     'Per-resource debug dump',
-      description: 'Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call.',
+      summary:     'Per-resource debug dump (admin + APPCLOUD_DEBUG only)',
+      description: 'Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call. **Admin-tier only**, and in production must also have `APPCLOUD_DEBUG=1` set.',
       params:      IdParamSchema,
       response: { 200: { type: 'object', additionalProperties: true } },
     },
   }, async (req, reply) => {
+    if (process.env.NODE_ENV === 'production' && process.env.APPCLOUD_DEBUG !== '1') {
+      return reply.code(403).send({
+        error:   'Forbidden',
+        message: 'debug endpoint disabled in production — set APPCLOUD_DEBUG=1 to enable temporarily',
+      })
+    }
     const records = await query(
       `MATCH (i:Infra) WHERE i.id = $id OR i.cloud_id = $id RETURN i LIMIT 1`,
       { id: req.params.id }
