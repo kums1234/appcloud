@@ -33,3 +33,17 @@ export function actorFromReq(req) {
     scope: null,
   }
 }
+
+// Use this when a system-internal job / scheduler / async work fires an
+// audit row that has no user principal. Pass a descriptive name like
+// 'scheduler:cmdb-assessment' or 'terraform-import' so an auditor can
+// distinguish system action types without filtering out everything that
+// looks like 'system'.
+//
+// actor_key_id and actor_scope are deliberately NULL: the row reflects a
+// system action, not a user one. A NULL key_id is therefore meaningful —
+// it says "no user attribution available" rather than "we forgot to
+// record it".
+export function systemActor(name = 'system') {
+  return { name, keyId: null, scope: null }
+}

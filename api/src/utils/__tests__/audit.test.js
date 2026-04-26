@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
-import { actorFromReq } from '../audit.js'
+import { actorFromReq, systemActor } from '../audit.js'
 
 describe('actorFromReq', () => {
   test('uses req.principal.name when present', () => {
@@ -51,5 +51,28 @@ describe('actorFromReq', () => {
       keyId: null,
       scope: null,
     })
+  })
+})
+
+describe('systemActor', () => {
+  test('defaults to plain "system"', () => {
+    expect(systemActor()).toEqual({ name: 'system', keyId: null, scope: null })
+  })
+
+  test('takes a custom name for distinguishing system jobs', () => {
+    expect(systemActor('scheduler:cmdb-assessment')).toEqual({
+      name:  'scheduler:cmdb-assessment',
+      keyId: null,
+      scope: null,
+    })
+  })
+
+  test('always returns NULL key + scope (the absence is meaningful)', () => {
+    // Calling systemActor must NEVER fabricate a key id — a NULL actor_key_id
+    // in the audit_log is what tells an auditor "this was a system action,
+    // not a user one". Lock that contract here.
+    const out = systemActor('any-name-at-all')
+    expect(out.keyId).toBeNull()
+    expect(out.scope).toBeNull()
   })
 })

@@ -182,6 +182,40 @@ function touchLastUsed(pg, id) {
   ).catch(() => {})
 }
 
+// Per-pair rate-limit gate for the "X-Actor on an authenticated request"
+// warning. Returns true the first time we see a given (principalId,
+// xActorValue) pair, then suppresses for `windowMs` so a misconfigured
+// client sending the same header on every request doesn't flood the log.
+//
+// Map evicts oldest entries when it would otherwise exceed `maxEntries`,
+// keeping memory bounded under adversarial inputs (e.g. an attacker
+// spraying random X-Actor values to fill the map). 1024 entries × ~150
+// bytes per entry ≈ 150KB worst case.
+//
+// Exported as a factory so tests can construct an isolated gate with a
+// short window without poking the module's global state.
+export function makeXActorWarnGate({ windowMs, maxEntries } = {}) {
+  const WINDOW = windowMs   ?? parseInt(process.env.APPCLOUD_AUTH_WARN_WINDOW_MS || '60000', 10)
+  const MAX    = maxEntries ?? 1024
+  const state  = new Map()
+  return function shouldWarn(principalId, xActorValue) {
+    // Use NUL between the two parts so values can't collide via clever
+    // packing — `'a:'` + `'b'` and `'a'` + `':b'` would otherwise hash to
+    // the same key under a `:` separator.
+    const key  = `${principalId}\0${xActorValue}`
+    const now  = Date.now()
+    const last = state.get(key)
+    if (last !== undefined && now - last < WINDOW) return false
+    if (state.size >= MAX) {
+      // Map iteration is insertion-order — drop the oldest pair.
+      const firstKey = state.keys().next().value
+      state.delete(firstKey)
+    }
+    state.set(key, now)
+    return true
+  }
+}
+
 export async function authPlugin(fastify) {
   warnIfLegacyKeyEnvSet(fastify.log)
 
@@ -220,6 +254,7 @@ export async function authPlugin(fastify) {
   // 3. Initial cache fill.
   const cache = makeKeyCache()
   await refreshIfStale(cache, pg, fastify.log)
+  const shouldWarnXActor = makeXActorWarnGate()
 
   // 4. Decorate fastify with the auth + scope-check primitives.
   const authDisabled = !bootstrapPlain && !bootstrapAdminPlain && cache.map.size === 0
@@ -261,13 +296,15 @@ export async function authPlugin(fastify) {
     req.principal = principal
     touchLastUsed(pg, principal.id)
     // X-Actor used to be the audit identity; since slice 5 the principal
-    // name is authoritative and X-Actor is silently ignored. Warn once
-    // per request so operators sending it notice the deprecation rather
-    // than wondering why their value never appears in the audit log.
-    if (req.headers['x-actor']) {
+    // name is authoritative and X-Actor is silently ignored. Warn the
+    // first time we see a (principal, xActor) pair, then suppress for
+    // APPCLOUD_AUTH_WARN_WINDOW_MS (default 60s) — a misconfigured client
+    // sending X-Actor on every request would otherwise flood the log.
+    const xActor = req.headers['x-actor']
+    if (xActor && shouldWarnXActor(principal.id, xActor)) {
       req.log.warn(
-        { principal: principal.name, xActor: req.headers['x-actor'] },
-        '[auth] X-Actor header is ignored on authenticated requests — audit actor comes from the API key (since slice 5)',
+        { principal: principal.name, xActor },
+        '[auth] X-Actor header is ignored on authenticated requests — audit actor comes from the API key (rate-limited per (principal, xActor) pair)',
       )
     }
   }
