@@ -1,4 +1,5 @@
 import { props, serialize } from '../utils/serialize.js'
+import { makeRouteHelpers } from '../utils/route-helpers.js'
 import {
   ApplicationSchema,
   ApplicationCreateBodySchema,
@@ -11,7 +12,7 @@ import {
 
 export default async function applicationRoutes(fastify) {
   const { query, write } = fastify.neo4j
-  const auth = { preHandler: fastify.authenticate }
+  const { withAuth } = makeRouteHelpers(fastify)
 
   // ── actor helper — operator identity via X-Actor header, defaults to 'system'
   const actor = (req) => req.headers['x-actor'] || 'system'
@@ -84,15 +85,14 @@ export default async function applicationRoutes(fastify) {
   })
 
   // POST /applications
-  fastify.post('/', {
-    ...auth,
+  fastify.post('/', withAuth({
     schema: {
       summary:     'Create an Application',
       description: 'Creates a new Application node. `tier` is required; reasonable defaults are filled in for `availability` (`99.9`) and `confidentiality` (`internal`).',
       body:        ApplicationCreateBodySchema,
       response:    { 201: ApplicationSchema, ...StandardErrorResponses },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { name, tier, owner, environment, availability, confidentiality, domain } = req.body
     const records = await write(`
       CREATE (a:Application {
@@ -113,8 +113,7 @@ export default async function applicationRoutes(fastify) {
   })
 
   // PATCH /applications/:id
-  fastify.patch('/:id', {
-    ...auth,
+  fastify.patch('/:id', withAuth({
     schema: {
       summary:     'Partially update an Application',
       description: 'Any subset of the create fields. Unspecified fields keep their existing values via `coalesce`.',
@@ -122,7 +121,7 @@ export default async function applicationRoutes(fastify) {
       body:        ApplicationPatchBodySchema,
       response:    { 200: ApplicationSchema, 404: StandardErrorResponses[404] },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 
@@ -147,15 +146,14 @@ export default async function applicationRoutes(fastify) {
   })
 
   // DELETE /applications/:id
-  fastify.delete('/:id', {
-    ...auth,
+  fastify.delete('/:id', withAuth({
     schema: {
       summary:     'Delete an Application (cascades exclusively-owned Components + Infra)',
       description: 'Removes the Application plus any Components that *only* belong to it, plus Infra that is *only* owned by those Components. Shared resources are preserved.',
       params:      IdParamSchema,
       response:    { 204: { type: 'null' }, 404: StandardErrorResponses[404] },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const appId = await resolveApplicationId(req.params.id)
     if (!appId) return reply.notFound('Application not found')
 

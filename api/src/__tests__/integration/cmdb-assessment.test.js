@@ -44,10 +44,13 @@ maybeDescribe('CMDB assessment → :CmdbCi scores + :REPRESENTS + :IngestionEpis
     const neo4jModule        = await import('neo4j-driver')
     const neo4j              = neo4jModule.default || neo4jModule
 
-    neo4jContainer = await new Neo4jContainer('neo4j:5').withoutAuthentication().start()
+    // @testcontainers/neo4j v10.28+ removed withoutAuthentication() — every
+    // container now needs a password. Use a fixed test password and pass it
+    // through to the driver. Username is always 'neo4j' for the official image.
+    neo4jContainer = await new Neo4jContainer('neo4j:5').withPassword('test1234').start()
     neo4jDriver    = neo4j.driver(
       neo4jContainer.getBoltUri(),
-      neo4j.auth.basic('neo4j', 'none'),
+      neo4j.auth.basic(neo4jContainer.getUsername(), neo4jContainer.getPassword()),
     )
 
     // Minimal ctx shape that runAssessment expects: a logger and a neo4j
@@ -249,10 +252,14 @@ maybeDescribe('CMDB assessment → :CmdbCi scores + :REPRESENTS + :IngestionEpis
     const first = await runAssessment(ctx)
     expect(first.matched).toBe(2)
 
-    // Break the match: clear the CI's cloud_id and other matchable fields.
+    // Break the match: clear every signal the matcher could use to resolve
+    // sys-vm-2 back to infra-vm-2 — the strong keys plus the name (matcher
+    // falls back to exact_normalized_name / fuzzy_name when a CI keeps a
+    // matching name even after the strong keys are gone).
     await ctx.neo4j.write(`
       MATCH (ci:CmdbCi { sys_id: 'sys-vm-2' })
       REMOVE ci.cloud_id, ci.fqdn, ci.ip_address
+      SET ci.name = 'sys-vm-2-disappeared'
     `)
 
     const second = await runAssessment(ctx)

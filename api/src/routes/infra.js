@@ -1,4 +1,5 @@
 import { props, serialize } from '../utils/serialize.js'
+import { makeRouteHelpers } from '../utils/route-helpers.js'
 import {
   InfraSchema,
   InfraCreateBodySchema,
@@ -9,7 +10,7 @@ import {
 
 export default async function infraRoutes(fastify) {
   const { query, write } = fastify.neo4j
-  const auth  = { preHandler: fastify.authenticate }
+  const { withAuth } = makeRouteHelpers(fastify)
   const actor = (req) => req.headers['x-actor'] || 'system'
 
   // GET /infra
@@ -58,15 +59,14 @@ export default async function infraRoutes(fastify) {
   })
 
   // POST /infra
-  fastify.post('/', {
-    ...auth,
+  fastify.post('/', withAuth({
     schema: {
       summary:     'Manually create an Infra node',
       description: 'Most Infra comes from discovery scans (`/discovery/scan/*`). Use this for resources that aren\'t in any cloud-API surface — e.g. an on-prem appliance you want represented in the graph.',
       body:        InfraCreateBodySchema,
       response:    { 201: InfraSchema },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { name, provider, resource_type, region, public: isPublic } = req.body
     const records = await write(`
       CREATE (i:Infra {
@@ -82,15 +82,14 @@ export default async function infraRoutes(fastify) {
   })
 
   // PATCH /infra/:id
-  fastify.patch('/:id', {
-    ...auth,
+  fastify.patch('/:id', withAuth({
     schema: {
       summary:     'Update an Infra node (name / region / public flag)',
       params:      IdParamSchema,
       body:        InfraPatchBodySchema,
       response:    { 200: InfraSchema, 404: StandardErrorResponses[404] },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { name, region, public: isPublic } = req.body
     const records = await write(`
       MATCH (i:Infra {id: $id})
@@ -107,15 +106,14 @@ export default async function infraRoutes(fastify) {
   })
 
   // DELETE /infra/:id
-  fastify.delete('/:id', {
-    ...auth,
+  fastify.delete('/:id', withAuth({
     schema: {
       summary:     'Delete an Infra node',
       description: 'DETACH-deletes the node and every relationship it participates in. The next discovery scan will re-create it if it still exists in the cloud.',
       params:      IdParamSchema,
       response:    { 204: { type: 'null' } },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const pre = await query('MATCH (i:Infra {id: $id}) RETURN i.name AS name',
       { id: req.params.id })
     const name = pre[0]?.get('name') || req.params.id

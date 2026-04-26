@@ -1,4 +1,5 @@
 import { props } from '../utils/serialize.js'
+import { makeRouteHelpers } from '../utils/route-helpers.js'
 import {
   ComponentSchema,
   ComponentCreateBodySchema,
@@ -45,7 +46,7 @@ const CONFIDENTIALITY = [
 
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
-  const auth = { preHandler: fastify.authenticate }
+  const { withAuth } = makeRouteHelpers(fastify)
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = (req) => req.headers['x-actor'] || 'system'
 
@@ -129,15 +130,14 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components
-  fastify.post('/', {
-    ...auth,
+  fastify.post('/', withAuth({
     schema: {
       summary:     'Create a Component',
       description: 'Creates a Component node, optionally attaching it to an existing Application via `:CONTAINS`. Either `applicationId` or `appId` works (legacy alias).',
       body:        ComponentCreateBodySchema,
       response:    { 201: ComponentSchema },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { name, type, runtime } = req.body
     // Accept both applicationId (sent by ComponentForm) and appId
     const appId = req.body.appId || req.body.applicationId || null
@@ -158,8 +158,7 @@ export default async function componentRoutes(fastify) {
   })
 
   // PATCH /components/:id — FIX 4: added auth guard
-  fastify.patch('/:id', {
-    ...auth,
+  fastify.patch('/:id', withAuth({
     schema: {
       summary:     'Update a Component',
       description: 'Partial update on `name` / `type` / `runtime`. Other fields preserved.',
@@ -167,7 +166,7 @@ export default async function componentRoutes(fastify) {
       body:        { type: 'object', additionalProperties: true, properties: { name: { type: 'string' }, type: { type: 'string' }, runtime: { type: ['string', 'null'] } } },
       response:    { 200: ComponentSchema, 404: StandardErrorResponses[404] },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { name, type, runtime } = req.body
     const records = await write(`
       MATCH (c:Component {id: $id})
@@ -184,15 +183,14 @@ export default async function componentRoutes(fastify) {
   })
 
   // DELETE /components/:id — FIX 4: added auth guard
-  fastify.delete('/:id', {
-    ...auth,
+  fastify.delete('/:id', withAuth({
     schema: {
       summary:     'Delete a Component',
       description: 'DETACH-delete: removes every relationship the Component participates in (including ownership and Component↔Component connections).',
       params:      IdParamSchema,
       response:    { 204: { type: 'null' }, 404: StandardErrorResponses[404] },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const pre = await query(
       `MATCH (c:Component {id:$id}) RETURN c.name AS name`, { id: req.params.id }
     )
@@ -204,8 +202,7 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components/:id/connections — FIX 4: added auth guard
-  fastify.post('/:id/connections', {
-    ...auth,
+  fastify.post('/:id/connections', withAuth({
     schema: {
       summary:     'Connect this Component to another (Component → Component edge)',
       description: 'Idempotently MERGEs a `:CONNECTS_TO {protocol, port}` edge from this Component to the target. No `via` is set — the endpoint labels (`:Component`→`:Component`) distinguish it from infra-side edges.',
@@ -213,7 +210,7 @@ export default async function componentRoutes(fastify) {
       body:        ComponentConnectionBodySchema,
       response:    { 201: { type: 'object', properties: { connected: { type: 'boolean' } } } },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { targetId, protocol, port } = req.body
     await write(`
       MATCH (c1:Component {id: $id}), (c2:Component {id: $targetId})
@@ -227,8 +224,7 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components/:id/deploy — FIX 4: added auth guard
-  fastify.post('/:id/deploy', {
-    ...auth,
+  fastify.post('/:id/deploy', withAuth({
     schema: {
       summary:     'Deploy a Component onto an Infra (manual ownership)',
       description: 'Idempotently MERGEs a `:CONNECTS_TO {via:"component-mapping", source:"manual-deploy", confidence:100}` edge from the Component to the Infra. Use this to record human-confirmed ownership.',
@@ -236,7 +232,7 @@ export default async function componentRoutes(fastify) {
       body:        ComponentDeployBodySchema,
       response:    { 201: { type: 'object', properties: { deployed: { type: 'boolean' } } } },
     },
-  }, async (req, reply) => {
+  }), async (req, reply) => {
     const { infraId } = req.body
     await write(`
       MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})

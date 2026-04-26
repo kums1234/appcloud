@@ -82,6 +82,13 @@ export const ApplicationCreateBodySchema = {
     confidentiality: { type: 'string' },
     domain:          { type: 'string' },
   },
+  example: {
+    name:        'Payments Platform',
+    tier:        1,
+    owner:       'payments-team',
+    environment: 'production',
+    domain:      'finance',
+  },
 }
 
 export const ApplicationPatchBodySchema = {
@@ -114,6 +121,12 @@ export const ComponentCreateBodySchema = {
     applicationId: { type: 'string', format: 'uuid', description: 'Optional parent Application id' },
     appId:         { type: 'string', format: 'uuid', description: 'Alias for applicationId' },
   },
+  example: {
+    name:          'payment-api',
+    type:          'api',
+    runtime:       'nodejs',
+    applicationId: '00000000-0000-0000-0000-000000000000',
+  },
 }
 
 export const ComponentConnectionBodySchema = {
@@ -125,6 +138,11 @@ export const ComponentConnectionBodySchema = {
     protocol: { type: 'string', example: 'https' },
     port:     { type: ['integer', 'string', 'null'] },
   },
+  example: {
+    targetId: '00000000-0000-0000-0000-000000000000',
+    protocol: 'https',
+    port:     443,
+  },
 }
 
 export const ComponentDeployBodySchema = {
@@ -133,6 +151,9 @@ export const ComponentDeployBodySchema = {
   additionalProperties: true,
   properties: {
     infraId: { type: 'string', format: 'uuid', description: 'Infra node to MERGE a :CONNECTS_TO {via:component-mapping} edge to' },
+  },
+  example: {
+    infraId: '00000000-0000-0000-0000-000000000000',
   },
 }
 
@@ -163,6 +184,13 @@ export const InfraCreateBodySchema = {
     resource_type: { type: 'string', minLength: 1 },
     region:        { type: 'string' },
     public:        { type: 'boolean' },
+  },
+  example: {
+    name:          'web-server-01',
+    provider:      'azure',
+    resource_type: 'vm',
+    region:        'eastus',
+    public:        false,
   },
 }
 
@@ -211,6 +239,17 @@ export const CloudAccountCreateBodySchema = {
       description: 'Azure: { subscriptionId, tenantId, clientId, clientSecret }. GCP: { projectId, serviceAccount: <JSON string> }. AWS: { accessKeyId, secretAccessKey, regions, aggregatorName, aggregatorRegion }.',
     },
     enabled:  { type: 'boolean' },
+  },
+  example: {
+    provider: 'azure',
+    name:     'azure-prod',
+    config: {
+      subscriptionId: '00000000-0000-0000-0000-000000000000',
+      tenantId:       '00000000-0000-0000-0000-000000000000',
+      clientId:       '00000000-0000-0000-0000-000000000000',
+      clientSecret:   'REPLACE_ME',
+    },
+    enabled: true,
   },
 }
 
@@ -294,6 +333,32 @@ export const SuggestApplyAllBodySchema = {
         },
       },
     },
+  },
+  example: {
+    actions: [
+      {
+        action:      'link_component',
+        infraId:     '00000000-0000-0000-0000-000000000000',
+        componentId: '00000000-0000-0000-0000-000000000000',
+      },
+      {
+        action:        'create_component',
+        infraId:       '00000000-0000-0000-0000-000000000000',
+        applicationId: '00000000-0000-0000-0000-000000000000',
+        newCompName:   'payment-worker',
+        suggestedType: 'worker',
+      },
+      {
+        action:         'create_application',
+        newAppName:     'Payments Platform',
+        suggestedTier:  2,
+        suggestedEnv:   'production',
+        suggestedOwner: 'platform-team',
+        components: [
+          { infraId: '00000000-0000-0000-0000-000000000000' },
+        ],
+      },
+    ],
   },
 }
 

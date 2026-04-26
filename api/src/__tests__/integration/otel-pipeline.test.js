@@ -41,10 +41,11 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
     const neo4j                   = neo4jModule.default || neo4jModule
 
     // Start containers in parallel — saves ~1 min on a cold Docker.
+    // @testcontainers/neo4j v10.28+ requires withPassword() — withoutAuthentication() was removed.
     ;[pgContainer, neo4jContainer] = await Promise.all([
       new PostgreSqlContainer('postgres:16-alpine')
         .withDatabase('appcloud').withUsername('appcloud').withPassword('pw').start(),
-      new Neo4jContainer('neo4j:5').withoutAuthentication().start(),
+      new Neo4jContainer('neo4j:5').withPassword('test1234').start(),
     ])
 
     pgClient = new Client({
@@ -65,10 +66,9 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
       await pgClient.query(sql)
     }
 
-    // Container configured withoutAuthentication() — driver still needs a placeholder.
     neo4jDriver = neo4j.driver(
       neo4jContainer.getBoltUri(),
-      neo4j.auth.basic('neo4j', 'none'),
+      neo4j.auth.basic(neo4jContainer.getUsername(), neo4jContainer.getPassword()),
     )
 
     // Fake the decorators that the aggregator plugin expects on `fastify`.

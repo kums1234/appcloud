@@ -13,7 +13,7 @@
 // changed the API, run `npm run openapi:export` to refresh both the
 // JSON and YAML artefacts and commit them alongside the route change.
 
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, beforeAll } from '@jest/globals'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -105,8 +105,12 @@ async function buildSpec() {
 }
 
 describe('OpenAPI drift detection', () => {
+  // buildSpec() boots a stub Fastify and registers every route — ~1.5s.
+  // Both tests diff different artefacts of the same spec, so build once.
+  let live
+  beforeAll(async () => { live = await buildSpec() })
+
   test('docs/openapi.json matches live route registrations', async () => {
-    const live      = await buildSpec()
     const committed = await fs.readFile(path.join(docsDir, 'openapi.json'), 'utf8')
     const liveJson  = JSON.stringify(live.json, null, 2) + '\n'
     if (liveJson !== committed) {
@@ -131,7 +135,6 @@ describe('OpenAPI drift detection', () => {
   })
 
   test('docs/openapi.yaml matches live route registrations', async () => {
-    const live      = await buildSpec()
     const committed = await fs.readFile(path.join(docsDir, 'openapi.yaml'), 'utf8')
     if (live.yaml !== committed) {
       throw new Error(

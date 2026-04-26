@@ -93,6 +93,12 @@ paths:
                   type: string
                 domain:
                   type: string
+              example:
+                name: Payments Platform
+                tier: 1
+                owner: payments-team
+                environment: production
+                domain: finance
         required: true
       responses:
         "201":
@@ -370,6 +376,12 @@ paths:
                   type: string
                 domain:
                   type: string
+              example:
+                name: Payments Platform
+                tier: 1
+                owner: payments-team
+                environment: production
+                domain: finance
       parameters:
         - schema:
             type: string
@@ -780,6 +792,11 @@ paths:
                   type: string
                   format: uuid
                   description: Alias for applicationId
+              example:
+                name: payment-api
+                type: api
+                runtime: nodejs
+                applicationId: 00000000-0000-0000-0000-000000000000
         required: true
       responses:
         "201":
@@ -1036,6 +1053,10 @@ paths:
                     - integer
                     - string
                     - "null"
+              example:
+                targetId: 00000000-0000-0000-0000-000000000000
+                protocol: https
+                port: 443
         required: true
       parameters:
         - schema:
@@ -1076,6 +1097,8 @@ paths:
                   type: string
                   format: uuid
                   description: Infra node to MERGE a :CONNECTS_TO {via:component-mapping} edge to
+              example:
+                infraId: 00000000-0000-0000-0000-000000000000
         required: true
       parameters:
         - schema:
@@ -1199,6 +1222,12 @@ paths:
                   type: string
                 public:
                   type: boolean
+              example:
+                name: web-server-01
+                provider: azure
+                resource_type: vm
+                region: eastus
+                public: false
         required: true
       responses:
         "201":
@@ -2012,6 +2041,15 @@ paths:
                     aggregatorRegion }."
                 enabled:
                   type: boolean
+              example:
+                provider: azure
+                name: azure-prod
+                config:
+                  subscriptionId: 00000000-0000-0000-0000-000000000000
+                  tenantId: 00000000-0000-0000-0000-000000000000
+                  clientId: 00000000-0000-0000-0000-000000000000
+                  clientSecret: REPLACE_ME
+                enabled: true
         required: true
       responses:
         "201":
@@ -3325,6 +3363,23 @@ paths:
                         items:
                           type: object
                           additionalProperties: true
+              example:
+                actions:
+                  - action: link_component
+                    infraId: 00000000-0000-0000-0000-000000000000
+                    componentId: 00000000-0000-0000-0000-000000000000
+                  - action: create_component
+                    infraId: 00000000-0000-0000-0000-000000000000
+                    applicationId: 00000000-0000-0000-0000-000000000000
+                    newCompName: payment-worker
+                    suggestedType: worker
+                  - action: create_application
+                    newAppName: Payments Platform
+                    suggestedTier: 2
+                    suggestedEnv: production
+                    suggestedOwner: platform-team
+                    components:
+                      - infraId: 00000000-0000-0000-0000-000000000000
         required: true
       responses:
         "200":
