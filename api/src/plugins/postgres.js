@@ -1,5 +1,6 @@
 import fs from 'fs'
 import { makeAuditMachinery } from '../utils/audit-buffer.js'
+import { ensureAuditPartitioning, ensureCurrentAndNextPartitions } from '../utils/audit-partitioning.js'
 
 function readSecret(fileEnvVar, plainEnvVar, fallback = '') {
   const filePath = process.env[fileEnvVar]
@@ -51,6 +52,9 @@ export async function postgresPlugin(fastify) {
   // Apply the audit_log evolution that adds actor_key_id + actor_scope
   // columns. Idempotent (`ALTER TABLE … ADD COLUMN IF NOT EXISTS …`) so
   // it's safe to run on every startup; mirrors postgres-init/11-audit-evolution.sql.
+  // We run this BEFORE the partitioning migration so audit_log_legacy
+  // (the renamed table during partitioning) has the up-to-date columns
+  // before its rows get copied into the partitioned shell.
   try {
     await pool.query(`
       ALTER TABLE audit_log
@@ -66,6 +70,18 @@ export async function postgresPlugin(fastify) {
     // plugin runs after this. Log + continue; the auth plugin's CREATE
     // TABLE IF NOT EXISTS api_keys runs before any audit() call.
     fastify.log.warn(`[pg] audit_log evolution skipped: ${err.message}`)
+  }
+
+  // Convert audit_log to a partitioned table (or create it as one on a
+  // fresh DB). Idempotent — no-op if already partitioned. The retention
+  // plugin (plugins/audit-cleanup.js) detects partitioning at runtime
+  // and switches from CTE DELETE → DROP PARTITION.
+  try {
+    const runQuery = async (sql, params) => (await pool.query(sql, params)).rows
+    await ensureAuditPartitioning(runQuery, fastify.log)
+    await ensureCurrentAndNextPartitions(runQuery, fastify.log)
+  } catch (err) {
+    fastify.log.warn(`[pg] audit_log partitioning skipped: ${err.message}`)
   }
 
   // Audit machinery — buffer + retry. The factory in utils/audit-buffer.js

@@ -100,12 +100,28 @@ DB-backed multi-key RBAC system replacing the previous single-env-var auth.
   inserts. Buffer overflow evicts the OLDEST row and increments a
   `stats.dropped` counter (logged at every 100 evictions). Final drain on
   graceful shutdown, bounded to 5 seconds.
-- **`audit_log` retention.** A new `auditCleanupPlugin` runs a CTE-batched
-  DELETE on a fixed cadence to bound table size. Configurable via
-  `APPCLOUD_AUDIT_RETENTION_DAYS` (default 365), `APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS`
-  (default 24h), `APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE` (default 10 000).
-  Retention=0 disables the job. Decorator `fastify.auditCleanup.runNow()`
-  exposed for ops automation. First run staggered 30s after startup.
+- **`audit_log` retention.** A new `auditCleanupPlugin` runs at a fixed
+  cadence to bound table size. Auto-detects whether `audit_log` is
+  partitioned and chooses the right strategy:
+    - **partitioned** → DETACH + DROP each partition whose upper bound is
+      older than the cutoff. ~O(1) per partition; no row scan.
+    - **regular** (pre-partitioning fallback) → CTE-batched DELETE
+      bounded by `APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE` (default 10 000).
+  Configurable via `APPCLOUD_AUDIT_RETENTION_DAYS` (default 365),
+  `APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS` (default 24h). Retention=0
+  disables the job. Decorator `fastify.auditCleanup.runNow()` exposed
+  for ops automation. First run staggered 30s after startup.
+
+- **`audit_log` partitioned by month on `created_at`.** New
+  `postgres-init/12-audit-partitioning.sql` + the runtime migration in
+  `utils/audit-partitioning.js` convert `audit_log` to a Postgres-native
+  RANGE-partitioned table. Existing rows survive the migration via a
+  default partition; current and next-month partitions are auto-created
+  on startup and again on each cleanup run, so a row landing on a
+  month boundary always has a home. Composite primary key is
+  `(id, created_at)` (Postgres requires the partition key be in every
+  uniqueness constraint). Retention plugin auto-detects the new shape
+  and uses DROP PARTITION instead of DELETE.
 
 ---
 

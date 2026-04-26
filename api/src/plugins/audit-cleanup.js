@@ -1,29 +1,41 @@
 // plugins/audit-cleanup.js
 //
-// Periodic retention job for audit_log. Deletes rows older than
+// Periodic retention job for audit_log. Removes rows older than
 // APPCLOUD_AUDIT_RETENTION_DAYS (default 365) at a fixed cadence.
 //
-// Why DELETE rather than partitioning: pre-customer the row volume is low
-// enough that a single DELETE per day is fine; partitioning is the right
-// answer at scale (DETACH PARTITION is ~constant-time vs. row-by-row delete)
-// but the schema migration to convert audit_log → partitioned table is its
-// own slice. The two approaches don't conflict — when partitioning lands,
-// this plugin's role becomes "drop old partitions" instead of "DELETE rows"
-// and the env-var contract stays the same.
+// Auto-detects whether audit_log is partitioned (postgres-native
+// PARTITION BY RANGE — see utils/audit-partitioning.js) and chooses the
+// right strategy:
+//
+//   partitioned → DETACH + DROP each partition whose upper bound is
+//                 older than the cutoff. ~O(1) per partition; no row
+//                 scan; no autovacuum churn.
+//
+//   regular     → batched CTE DELETE (the pre-partitioning fallback).
+//                 Each batch is bounded by APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE
+//                 (default 10 000) so a long-overdue first pass on a big
+//                 table doesn't hold one transaction across millions of rows.
+//
+// The two strategies share the same env-var contract — operators don't
+// need to know which mode is active.
 //
 // Behaviour:
 //   - On startup (after a short delay so the rest of the boot finishes),
 //     run one cleanup pass.
 //   - Then run on a fixed interval (APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS,
 //     default 24h).
-//   - Configurable retention; setting APPCLOUD_AUDIT_RETENTION_DAYS=0
-//     disables the job entirely (default-safe for callers who explicitly
-//     want forever-retention).
-//   - Batched DELETE so a long-overdue cleanup on a large table doesn't
-//     hold a row lock on millions of rows in one go.
-//
-// Exported for symmetry with the other plugins; called once from server.js
-// after the postgres + auth plugins are wired.
+//   - Each run also ensures next-month's partition exists (when
+//     partitioned) so rows landing on a month boundary always have a
+//     home.
+//   - Setting APPCLOUD_AUDIT_RETENTION_DAYS=0 disables the job entirely
+//     (default-safe for callers who explicitly want forever-retention).
+
+import {
+  detectAuditLogState,
+  listExpiredPartitions,
+  dropPartition,
+  ensureCurrentAndNextPartitions,
+} from '../utils/audit-partitioning.js'
 
 const DAY_MS               = 24 * 60 * 60 * 1000
 const DEFAULT_BATCH_SIZE   = 10_000
@@ -48,20 +60,71 @@ export async function auditCleanupPlugin(fastify) {
     return
   }
 
-  // Run a single cleanup pass, deleting rows older than `cutoff` in batches
-  // until no rows remain. Each DELETE is bounded (CTE + LIMIT) so a long-
-  // overdue first pass on a big table doesn't hold a single transaction
-  // open across millions of rows.
+  // Run a single cleanup pass. Strategy depends on table shape:
+  //   partitioned → drop expired partitions (fast, no row scan)
+  //   regular     → batched CTE DELETE (pre-partitioning fallback)
   async function runCleanup() {
     const cutoff = new Date(Date.now() - retentionDays * DAY_MS)
-    let totalDeleted = 0
     const startedAt = Date.now()
+
+    let state
+    try { state = await detectAuditLogState(fastify.pg.query) }
+    catch (err) {
+      fastify.log.error({ err: err.message }, '[audit-cleanup] state detection failed')
+      return { error: err.message, durationMs: Date.now() - startedAt }
+    }
+
+    if (state === 'partitioned') {
+      return runPartitionedCleanup(cutoff, startedAt)
+    }
+    return runRegularCleanup(cutoff, startedAt)
+  }
+
+  // Partitioned-table cleanup — DROP partitions whose upper bound is
+  // older than the cutoff. Also ensures the current/next month
+  // partitions exist so the next INSERT always has a home.
+  async function runPartitionedCleanup(cutoff, startedAt) {
+    let dropped = []
+    try {
+      // Roll the month boundary forward — this is cheap and the right
+      // moment to do it (right before retention runs, when we'd notice
+      // a missing partition anyway).
+      await ensureCurrentAndNextPartitions(fastify.pg.query, fastify.log)
+      const expired = await listExpiredPartitions(fastify.pg.query, cutoff)
+      for (const p of expired) {
+        try {
+          await dropPartition(fastify.pg.query, fastify.log, p.name)
+          dropped.push(p.name)
+        } catch (err) {
+          fastify.log.error({ partition: p.name, err: err.message },
+            '[audit-cleanup] failed to drop partition (continuing)')
+        }
+      }
+    } catch (err) {
+      fastify.log.error({ err: err.message }, '[audit-cleanup] partitioned cleanup failed')
+      return { error: err.message, mode: 'partitioned', dropped, durationMs: Date.now() - startedAt }
+    }
+    const result = {
+      mode:         'partitioned',
+      cutoff:       cutoff.toISOString(),
+      retentionDays,
+      dropped,
+      durationMs:   Date.now() - startedAt,
+    }
+    if (dropped.length > 0) {
+      fastify.log.info(result, '[audit-cleanup] dropped expired partitions')
+    }
+    return result
+  }
+
+  // Regular-table cleanup — batched CTE DELETE. Each batch is bounded
+  // (LIMIT $batchSize) so a long-overdue first pass on a big table
+  // doesn't hold a single transaction across millions of rows.
+  async function runRegularCleanup(cutoff, startedAt) {
+    let totalDeleted = 0
     while (true) {
       let deleted
       try {
-        // CTE-based batched DELETE — Postgres-idiomatic. The DELETE in the
-        // outer query picks rows by id from the inner SELECT, so the lock
-        // surface stays bounded to ≤ batchSize even on huge tables.
         const rows = await fastify.pg.query(`
           WITH old AS (
             SELECT id FROM audit_log
@@ -75,16 +138,17 @@ export async function auditCleanupPlugin(fastify) {
         deleted = rows.length
       } catch (err) {
         fastify.log.error({ err: err.message }, '[audit-cleanup] DELETE failed')
-        return { error: err.message, totalDeleted, durationMs: Date.now() - startedAt }
+        return { error: err.message, mode: 'regular', totalDeleted, durationMs: Date.now() - startedAt }
       }
       totalDeleted += deleted
       if (deleted < batchSize) break                  // last batch was short → done
     }
     const result = {
-      cutoff:      cutoff.toISOString(),
+      mode:         'regular',
+      cutoff:       cutoff.toISOString(),
       retentionDays,
       totalDeleted,
-      durationMs:  Date.now() - startedAt,
+      durationMs:   Date.now() - startedAt,
     }
     if (totalDeleted > 0) {
       fastify.log.info(result, '[audit-cleanup] removed expired audit rows')
