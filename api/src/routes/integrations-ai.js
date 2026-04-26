@@ -57,7 +57,13 @@ export default async function aiConfigRoutes(fastify) {
 
   // ── GET /integrations/ai ────────────────────────────────────────────────────
   // Returns the saved config with apiKey masked.
-  fastify.get('/ai', async (req, reply) => {
+  fastify.get('/ai', {
+    schema: {
+      summary:     'Get the active cloud-AI provider configuration',
+      description: 'Returns the saved Anthropic / OpenAI / Gemini / Azure-OpenAI config with `apiKey` masked. Returns `{ configured: false }` when no config exists.',
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return { configured: false }
     try {
       const rows = await fastify.pg.query(
@@ -87,7 +93,20 @@ export default async function aiConfigRoutes(fastify) {
 
   // ── POST /integrations/ai ───────────────────────────────────────────────────
   // Upsert: deletes existing row and inserts a new one.
-  fastify.post('/ai', async (req, reply) => {
+  fastify.post('/ai', {
+    schema: {
+      summary:     'Save (upsert) the cloud-AI provider configuration',
+      description: 'Replaces any existing config (only one active at a time). `apiKey` is AES-256-GCM-encrypted before INSERT. Setting Azure also requires `azureEndpoint` and `azureDeployment`.',
+      body: { type: 'object', required: ['provider', 'apiKey'], additionalProperties: true, properties: {
+        provider:        { type: 'string', enum: ['anthropic', 'openai', 'gemini', 'azure'] },
+        apiKey:          { type: 'string' },
+        model:           { type: 'string', default: 'auto' },
+        azureEndpoint:   { type: 'string' },
+        azureDeployment: { type: 'string' },
+      } },
+      response: { 201: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool)
       return reply.serviceUnavailable('Database not available')
 
@@ -146,7 +165,13 @@ export default async function aiConfigRoutes(fastify) {
   })
 
   // ── DELETE /integrations/ai ─────────────────────────────────────────────────
-  fastify.delete('/ai', async (req, reply) => {
+  fastify.delete('/ai', {
+    schema: {
+      summary:     'Delete the saved cloud-AI provider configuration',
+      description: 'After deletion `fastify.ai.refreshCloudFromDb()` clears the in-memory provider so subsequent `/ai/*` routes return 503 until a new config is saved.',
+      response: { 204: { type: 'null' }, 404: { type: 'object', properties: { error: { type: 'string' } } } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
     try {
       const existing = await fastify.pg.query('SELECT id, provider FROM ai_config LIMIT 1')
@@ -169,7 +194,13 @@ export default async function aiConfigRoutes(fastify) {
 
   // ── POST /integrations/ai/test ──────────────────────────────────────────────
   // Tests the saved config by creating a provider and sending a trivial message.
-  fastify.post('/ai/test', async (req, reply) => {
+  fastify.post('/ai/test', {
+    schema: {
+      summary:     'Test the saved cloud-AI configuration',
+      description: 'Sends a trivial "Reply with exactly: OK" message and returns the provider response. Useful for verifying credentials without spending tokens on a real query.',
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
 
     try {

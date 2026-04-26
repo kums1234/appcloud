@@ -9,7 +9,24 @@ export default async function auditRoutes(fastify) {
   const pgOk = () => !!fastify.pg?.pool
 
   // ── GET /audit — paginated, filterable log ──────────────────────────────────
-  fastify.get('/', async (req, reply) => {
+  fastify.get('/', {
+    schema: {
+      summary:     'Paginated audit log',
+      description: 'Every mutation API call writes a row here. Filterable by `action` / `resourceType` / `resourceId` / `actor` / time window (`from`, `to`) / free-text (`q`). Returns `{ rows, total, page, pageSize, pages }`.',
+      querystring: { type: 'object', additionalProperties: true, properties: {
+        page:         { type: ['integer', 'string'] },
+        pageSize:     { type: ['integer', 'string'] },
+        action:       { type: 'string' },
+        resourceType: { type: 'string' },
+        resourceId:   { type: 'string' },
+        actor:        { type: 'string' },
+        from:         { type: 'string', format: 'date-time' },
+        to:           { type: 'string', format: 'date-time' },
+        q:            { type: 'string' },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!pgOk()) return { rows: [], total: 0, page: 1, pageSize: 50, note: 'Postgres unavailable' }
 
     const {
@@ -83,7 +100,14 @@ export default async function auditRoutes(fastify) {
   })
 
   // ── GET /audit/stats — aggregated counts ──────────────────────────────────
-  fastify.get('/stats', async (req, reply) => {
+  fastify.get('/stats', {
+    schema: {
+      summary:     'Audit-log analytics for the last N days',
+      description: 'Returns counts grouped by action / resource_type / actor plus a daily-activity series for sparklines. Default window is 30 days; pass `?days=N` to widen.',
+      querystring: { type: 'object', properties: { days: { type: ['integer', 'string'], default: 30 } } },
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!pgOk()) return { byAction: {}, byResourceType: {}, byActor: [], recentActivity: [] }
 
     const { days = 30 } = req.query
@@ -142,7 +166,14 @@ export default async function auditRoutes(fastify) {
   })
 
   // ── GET /audit/resource/:type/:id — full history for one resource ──────────
-  fastify.get('/resource/:type/:id', async (req, reply) => {
+  fastify.get('/resource/:type/:id', {
+    schema: {
+      summary:     'Full audit history for a specific resource',
+      description: 'Up to the last 500 events for one (resource_type, resource_id) pair, newest first. `resource_type` is one of `Application`, `Component`, `Infra`, `CloudAccount`, etc.',
+      params:      { type: 'object', required: ['type', 'id'], properties: { type: { type: 'string' }, id: { type: 'string' } } },
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req, reply) => {
     if (!pgOk()) return []
     const rows = await fastify.pg.query(`
       SELECT id, actor, action, resource_type, resource_id,
@@ -167,7 +198,15 @@ export default async function auditRoutes(fastify) {
   })
 
   // ── GET /audit/actor/:name — all actions by a specific actor ──────────────
-  fastify.get('/actor/:name', async (req, reply) => {
+  fastify.get('/actor/:name', {
+    schema: {
+      summary:     'All audit events by a specific actor (paginated)',
+      description: 'Case-insensitive substring match on the `actor` column. Default actor for system-initiated calls is `system`; clients identify themselves via the `X-Actor` header.',
+      params:      { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+      querystring: { type: 'object', properties: { page: { type: ['integer', 'string'] }, pageSize: { type: ['integer', 'string'] } } },
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!pgOk()) return { rows: [], total: 0 }
     const { page = 1, pageSize = 50 } = req.query
     const limit  = Math.min(parseInt(pageSize) || 50, 200)

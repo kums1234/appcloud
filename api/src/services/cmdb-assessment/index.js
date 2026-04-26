@@ -227,7 +227,7 @@ async function detectOtelActivity(ctx, ci, matchedInfra) {
     const now = Date.now()
     const rows = await ctx.neo4j.query(`
       MATCH (i:Infra { id: $infraId })
-      OPTIONAL MATCH (i)<-[:DEPLOYED_ON]-(c:Component)
+      OPTIONAL MATCH (i)<-[:CONNECTS_TO {via: 'component-mapping'}]-(c:Component)
       WHERE c.lastSeenAt IS NOT NULL
       RETURN max(c.lastSeenAt) AS lastSeenAt
     `, { infraId: matchedInfra.id })

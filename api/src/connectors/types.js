@@ -123,7 +123,7 @@
 
 // ── Canonical IaC shape ──────────────────────────────────────────────────────
 // Emitted by IaC connectors (Terraform, OpenTofu, Pulumi, …). Framework code
-// in common ingest helpers maps this into :Infra / :CONNECTED_TO nodes.
+// in common ingest helpers maps this into :Infra / :CONNECTS_TO nodes.
 /**
  * @typedef {Object} NormalizedIac
  * @property {'iac'} kind

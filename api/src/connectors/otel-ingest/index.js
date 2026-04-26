@@ -2,7 +2,9 @@
 //
 // Push-style connector. Accepts OTLP/HTTP JSON at POST /ingest/otlp/v1/traces
 // and stages spans in Postgres. The aggregation worker (Phase 1d) later
-// derives :Component / :CONNECTED_TO / :DEPLOYED_ON edges in Neo4j.
+// derives :Component + :CONNECTS_TO {source:'otel'} edges in Neo4j.
+// Component → Infra ownership uses :CONNECTS_TO {via:'component-mapping'}
+// with source='auto-link' / 'manual-link' / 'bootstrap'.
 //
 // Config shape (all fields optional — beforeUpsert fills defaults):
 //   {
@@ -128,7 +130,7 @@ const uiMetadata = {
   capabilities: [
     'OTLP/HTTP JSON',
     'Bearer-token auth',
-    ':Component + :CONNECTED_TO edges',
+    ":Component + :CONNECTS_TO {source:'otel'} edges",
     'Three-sweep aggregator',
   ],
   fields: [
@@ -148,7 +150,7 @@ const spec = {
   id:          'otel-ingest',
   category:    'telemetry-ingest',
   displayName: 'OpenTelemetry Collector (OTLP/HTTP)',
-  description: 'Receives OTLP/HTTP JSON traces from a customer-run OpenTelemetry Collector. Tenant-scoped bearer-token auth, spans staged to Postgres, aggregation worker derives :Component / :CONNECTED_TO edges in Neo4j. Configure the Collector otlphttp exporter with `encoding: json` and this integration\'s token as Authorization: Bearer.',
+  description: 'Receives OTLP/HTTP JSON traces from a customer-run OpenTelemetry Collector. Tenant-scoped bearer-token auth, spans staged to Postgres, aggregation worker derives :Component + :CONNECTS_TO {source: \'otel\'} edges in Neo4j. Configure the Collector otlphttp exporter with `encoding: json` and this integration\'s token as Authorization: Bearer.',
   authSchema,
   uiMetadata,
   beforeUpsert,

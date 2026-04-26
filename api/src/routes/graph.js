@@ -1,4 +1,8 @@
 import { props, serialize } from '../utils/serialize.js'
+import {
+  GraphTopologyResponseSchema,
+  GraphImpactResponseSchema,
+} from '../schemas/openapi.js'
 
 export default async function graphRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
@@ -6,7 +10,27 @@ export default async function graphRoutes(fastify) {
   const { query } = fastify.neo4j
 
   // GET /graph/summary
-  fastify.get('/summary', async (req, reply) => {
+  fastify.get('/summary', {
+    schema: {
+      summary:     'Counts: applications, components, infra, connections, public-exposed',
+      description: 'A single-shot summary of the graph: total counts plus components-by-type and infra-by-provider histograms. Used by dashboard tiles.',
+      response:    {
+        200: {
+          type: 'object', additionalProperties: true,
+          properties: {
+            applications:     { type: 'integer' },
+            components:       { type: 'integer' },
+            infraResources:   { type: 'integer' },
+            users:            { type: 'integer' },
+            publicInfraCount: { type: 'integer' },
+            connections:      { type: 'integer' },
+            componentsByType: { type: 'array', items: { type: 'object', additionalProperties: true } },
+            infraByProvider:  { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const [countRecords, compTypeRecords, infraProviderRecords, connRecords] = await Promise.all([
       query(`
         OPTIONAL MATCH (a:Application)
@@ -42,7 +66,13 @@ export default async function graphRoutes(fastify) {
   })
 
   // GET /graph/topology
-  fastify.get('/topology', async (req, reply) => {
+  fastify.get('/topology', {
+    schema: {
+      summary:     'Full graph snapshot — apps, components, connections, deployments, infra',
+      description: 'Single response covering every Application, Component, Component↔Component connection (with protocol/port), Component→Infra deployment, and the unique Infra referenced. Drives the topology canvas.',
+      response:    { 200: GraphTopologyResponseSchema },
+    },
+  }, async (req, reply) => {
     const [appRecords, compRecords, connRecords, deployRecords] = await Promise.all([
       query(`
         MATCH (a:Application)
@@ -64,7 +94,7 @@ export default async function graphRoutes(fastify) {
                r.protocol AS protocol, r.port AS port
       `),
       query(`
-        MATCH (c:Component)-[:DEPLOYED_ON]->(i:Infra)
+        MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
         RETURN c.id AS compId, i.id AS infraId, i.name AS infraName,
                i.provider AS provider, i.region AS region, i.resource_type AS resourceType
       `),
@@ -104,11 +134,18 @@ export default async function graphRoutes(fastify) {
   })
 
   // GET /graph/impact?infraId=x
-  fastify.get('/impact', async (req, reply) => {
+  fastify.get('/impact', {
+    schema: {
+      summary:     'Blast-radius for a single Infra resource',
+      description: 'Walks Infra ← Component ← Application and returns every Component / Application that depends on the given Infra. Applications come back sorted by tier (1 = critical first).',
+      querystring: { type: 'object', required: ['infraId'], properties: { infraId: { type: 'string', format: 'uuid' } } },
+      response:    { 200: GraphImpactResponseSchema, 400: { type: 'object', properties: { error: { type: 'string' } } }, 404: { type: 'object', properties: { error: { type: 'string' } } } },
+    },
+  }, async (req, reply) => {
     const { infraId } = req.query
     if (!infraId) return reply.badRequest('infraId required')
     const records = await query(`
-      MATCH (i:Infra {id: $infraId})<-[:DEPLOYED_ON]-(c:Component)<-[:CONTAINS]-(a:Application)
+      MATCH (i:Infra {id: $infraId})<-[:CONNECTS_TO {via: 'component-mapping'}]-(c:Component)<-[:CONTAINS]-(a:Application)
       RETURN i.name AS infra,
              collect(DISTINCT {name: c.name, type: c.type}) AS components,
              collect(DISTINCT {name: a.name, tier: a.tier, environment: a.environment}) AS applications
@@ -123,7 +160,13 @@ export default async function graphRoutes(fastify) {
   })
 
   // GET /graph/cross-app-dependencies
-  fastify.get('/cross-app-dependencies', async (req, reply) => {
+  fastify.get('/cross-app-dependencies', {
+    schema: {
+      summary:     'Every Component → Component edge that crosses an Application boundary',
+      description: 'Returns one row per cross-application Component connection: `from` (app, tier, component), `connection` (protocol, port), `to` (app, tier, component). Used for change-coordination dashboards.',
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req, reply) => {
     const records = await query(`
       MATCH (a1:Application)-[:CONTAINS]->(c1:Component)
             -[conn:CONNECTS_TO]->(c2:Component)<-[:CONTAINS]-(a2:Application)
@@ -141,7 +184,14 @@ export default async function graphRoutes(fastify) {
   })
 
   // GET /graph/path?from=&to=
-  fastify.get('/path', async (req, reply) => {
+  fastify.get('/path', {
+    schema: {
+      summary:     'Shortest path between two Components',
+      description: 'Returns the shortest directed path of any relationship type from `from` to `to`, with the node sequence and hop count. 404 when no path exists.',
+      querystring: { type: 'object', required: ['from', 'to'], properties: { from: { type: 'string' }, to: { type: 'string' } } },
+      response:    { 200: { type: 'object', additionalProperties: true, properties: { hops: { type: 'integer' }, path: { type: 'array', items: { type: 'object', additionalProperties: true } } } }, 404: { type: 'object', properties: { error: { type: 'string' } } } },
+    },
+  }, async (req, reply) => {
     const { from, to } = req.query
     if (!from || !to) return reply.badRequest('from and to required')
     const records = await query(`
@@ -155,13 +205,26 @@ export default async function graphRoutes(fastify) {
   })
 
   // GET /graph/snapshots
-  fastify.get('/snapshots', async (req, reply) => {
+  fastify.get('/snapshots', {
+    schema: {
+      summary:     'List topology snapshots',
+      description: 'Returns every saved snapshot, newest first. Snapshots are point-in-time captures of node counts; useful for diffing before/after a deploy.',
+      response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req, reply) => {
     const records = await query(`MATCH (s:Snapshot) RETURN s ORDER BY s.createdAt DESC`)
     return records.map(r => props(r.get('s')))
   })
 
   // POST /graph/snapshots
-  fastify.post('/snapshots', async (req, reply) => {
+  fastify.post('/snapshots', {
+    schema: {
+      summary:     'Capture a topology snapshot',
+      description: 'Creates a `:Snapshot` node with the current node counts and an optional `label`. Snapshots are append-only — there\'s no DELETE endpoint.',
+      body:        { type: 'object', additionalProperties: true, properties: { label: { type: 'string' }, name: { type: 'string', description: 'Alias for label' } } },
+      response:    { 201: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { label } = req.body
     const records = await query(`
       MATCH (a:Application) WITH count(a) AS appCount

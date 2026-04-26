@@ -1,7 +1,8 @@
 import { INFRA_ONLY_TYPES, PLATFORM_TYPES, hasExplicitAppTag } from './discovery.schema.js'
 
-// Bootstrap accepts an optional `episodeId` so every :DEPLOYED_ON edge it
-// writes carries the same provenance tag as the scan that triggered it.
+// Bootstrap accepts an optional `episodeId` so every
+// :CONNECTS_TO {via:'component-mapping'} edge it writes carries the
+// same provenance tag as the scan that triggered it.
 // Callers that invoke bootstrap directly (e.g. POST /discovery/bootstrap)
 // can omit it; the edges will still have their `source` tag.
 export async function bootstrapDiscovery(fastify, opts = {}) {
@@ -167,7 +168,7 @@ export async function bootstrapDiscovery(fastify, opts = {}) {
   const infraRecords = await query(`
     MATCH (i:Infra)
     WHERE i.source = 'discovery'
-      AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+      AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
     RETURN i
   `)
 
@@ -236,10 +237,13 @@ export async function bootstrapDiscovery(fastify, opts = {}) {
         await write(`
           MATCH (c:Component {id: $compId})
           MATCH (i:Infra {id: $infraId})
-          MERGE (c)-[rel:DEPLOYED_ON]->(i)
-          ON CREATE SET rel.source = 'bootstrap', rel.mappedAt = datetime()
-          SET rel.lastSeenAt = datetime(),
-              rel.episodeId  = $episodeId
+          MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+          ON CREATE SET rel.discovered_at = datetime(),
+                        rel.source        = 'bootstrap',
+                        rel.confidence    = 80,
+                        rel.evidence      = 'bootstrap tag/RG grouping'
+          SET rel.last_seen = datetime(),
+              rel.episodeId = $episodeId
         `, { compId, infraId: infra.id, episodeId })
 
         linked++
@@ -268,7 +272,7 @@ export async function bootstrapDiscovery(fastify, opts = {}) {
       MATCH (i:Infra)
       WHERE i.provider = 'azure'
         AND i.source = 'discovery'
-        AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+        AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
         AND i.raw IS NOT NULL
       RETURN i.id AS infraId, i.raw AS raw, i.name AS name
     `)
@@ -276,7 +280,7 @@ export async function bootstrapDiscovery(fastify, opts = {}) {
     if (stillUnmapped.length) {
       // Build RG → dominant component map from already-mapped Azure nodes
       const rgDominantRows = await query(`
-        MATCH (c:Component)-[:DEPLOYED_ON]->(i:Infra)
+        MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
         WHERE i.provider = 'azure' AND i.raw IS NOT NULL
         MATCH (a:Application)-[:CONTAINS]->(c)
         RETURN i.raw AS raw, c.id AS compId, c.name AS compName,
@@ -323,12 +327,14 @@ export async function bootstrapDiscovery(fastify, opts = {}) {
         try {
           await write(`
             MATCH (c:Component {id: $compId}), (i:Infra {id: $infraId})
-            MERGE (c)-[rel:DEPLOYED_ON]->(i)
-            ON CREATE SET rel.source = 'bootstrap-rg-propagation',
-                          rel.rgRatio = $ratio,
-                          rel.mappedAt = datetime()
-            SET rel.lastSeenAt = datetime(),
-                rel.episodeId  = $episodeId
+            MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+            ON CREATE SET rel.discovered_at = datetime(),
+                          rel.source        = 'bootstrap-rg-propagation',
+                          rel.confidence    = toInteger(round($ratio * 100)),
+                          rel.rgRatio       = $ratio,
+                          rel.evidence      = 'RG-propagation (ratio=' + toString($ratio) + ')'
+            SET rel.last_seen = datetime(),
+                rel.episodeId = $episodeId
           `, { compId, infraId: row.get('infraId'), ratio, episodeId })
           rgLinked++
         } catch (err) {

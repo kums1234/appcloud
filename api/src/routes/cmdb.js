@@ -12,11 +12,13 @@
 //   POST /cmdb/assessment/refresh  fire-and-forget manual run
 
 import { props, serialize } from '../utils/serialize.js'
+import { makeRouteHelpers } from '../utils/route-helpers.js'
+import { StandardErrorResponses } from '../schemas/openapi.js'
 
 export default async function cmdbRoutes(fastify) {
   const { query } = fastify.neo4j
-  const pg   = fastify.pg
-  const auth = { preHandler: fastify.authenticate }
+  const pg = fastify.pg
+  const { withAuth } = makeRouteHelpers(fastify)
 
   // ── GET /cmdb/assessment ───────────────────────────────────────────────────
   // Filters: minRelevance, minQuality, maxRelevance, maxQuality,
@@ -162,7 +164,7 @@ export default async function cmdbRoutes(fastify) {
 
   // ── POST /cmdb/assessment/refresh ─────────────────────────────────────────
   // Fire-and-forget — kicks off a run in the background and returns 202.
-  fastify.post('/assessment/refresh', { ...auth }, async (req, reply) => {
+  fastify.post('/assessment/refresh', withAuth(), async (req, reply) => {
     if (!fastify.cmdbAssessment?.runNow) {
       return reply.serviceUnavailable('cmdb assessment scheduler not loaded')
     }

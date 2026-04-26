@@ -24,12 +24,104 @@ import cmdbRoutes from './routes/cmdb.js'
 import { aiPlugin } from './plugins/ai.js'
 import aiRoutes from './routes/ai.js'
 
-const fastify = Fastify({ logger: true })
+const fastify = Fastify({
+  logger: true,
+  // OpenAPI 3.0's `example` / `examples` / `xml` keywords aren't part of
+  // the JSON Schema spec Ajv ships with — relax strict mode so we can
+  // annotate routes with them. We still validate every body / param.
+  ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
+})
 
 // Core plugins (these use @fastify/cors and @fastify/sensible which handle
 // their own scoping correctly via their built-in fastify-plugin wrappers)
 await fastify.register(cors, { origin: true })
 await fastify.register(sensible)
+
+// OpenAPI generation. @fastify/swagger derives the spec from each route's
+// declared `schema` block; routes without one still appear in the doc with
+// only path + method + tags. Hosted spec is at /openapi.json (machine
+// readable) and /docs (Swagger UI). The doc is generated at startup;
+// docs/openapi.yaml is exported by the `npm run openapi:export` script for
+// offline / source-control usage.
+const openapiSpec = {
+  openapi: '3.0.3',
+  info: {
+    title:       'AppCloud API',
+    description: 'Knowledge graph platform for infrastructure dependency mapping and blast-radius analysis. See docs/api-guide.md for the working reference and docs/api-postman-collection.json for an importable Postman collection.',
+    version:     '1.1.0',
+    license:     { name: 'Proprietary' },
+  },
+  servers: [
+    { url: 'http://localhost:3000', description: 'Local port-forward' },
+    { url: 'http://appcloud.local',  description: 'Minikube tunnel / ingress' },
+  ],
+  components: {
+    securitySchemes: {
+      ApiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+    },
+  },
+  security: [{ ApiKey: [] }],
+  tags: [
+    { name: 'Health',         description: 'Liveness — open, no auth' },
+    { name: 'Discovery',      description: 'Cloud-account scans, mapping suggestions, supplements' },
+    { name: 'Applications',   description: 'Application lifecycle' },
+    { name: 'Components',     description: 'Component lifecycle + connections + deploy' },
+    { name: 'Infra',          description: 'Infrastructure catalog + shared / exposed views' },
+    { name: 'Graph',          description: 'Topology, blast-radius, cross-app dependencies' },
+    { name: 'AI',             description: 'AI-assisted impact narratives, planning, drift remediation' },
+    { name: 'Audit',          description: 'Mutation audit log' },
+    { name: 'CMDB',           description: 'CMDB assessment + scoring' },
+    { name: 'Integrations',   description: 'Cloud accounts, AI provider config, generic connector framework, Terraform import' },
+    { name: 'Connectors',     description: 'Connector registry — schema discovery for the generic connector framework' },
+    { name: 'OpenAPI',        description: 'API self-description' },
+  ],
+}
+const swagger    = (await import('@fastify/swagger')).default
+const swaggerUI  = (await import('@fastify/swagger-ui')).default
+
+// `transform` runs per-route at registration time. It auto-tags every
+// route by its first path segment so the Swagger UI groups Discovery /
+// Applications / Components / etc. without per-route annotation. Routes
+// that already declare `schema.tags` keep their explicit tag set.
+const PATH_SEG_TO_TAG = {
+  applications: 'Applications',
+  components:   'Components',
+  infra:        'Infra',
+  graph:        'Graph',
+  ai:           'AI',
+  audit:        'Audit',
+  cmdb:         'CMDB',
+  discovery:    'Discovery',
+  integrations: 'Integrations',
+  connectors:   'Connectors',
+  health:       'Health',
+  docs:         'OpenAPI',
+  openapi:      'OpenAPI',
+}
+function autoTagRoute({ schema, url }) {
+  if (schema?.tags?.length) return { schema, url }
+  const seg = url.split('/').filter(Boolean)[0]
+  const tag = PATH_SEG_TO_TAG[seg] || 'Other'
+  return { schema: { ...(schema || {}), tags: [tag] }, url }
+}
+await fastify.register(swagger, { openapi: openapiSpec, transform: autoTagRoute })
+await fastify.register(swaggerUI, {
+  routePrefix:    '/docs',
+  uiConfig:       { docExpansion: 'list', deepLinking: true },
+  staticCSP:      true,
+})
+
+// Expose the generated spec as JSON at /openapi.json (machine-readable).
+// @fastify/swagger-ui serves the same spec at /docs/json + /docs/yaml,
+// but /openapi.json is the conventional path callers expect.
+fastify.get('/openapi.json', {
+  schema: {
+    tags:        ['OpenAPI'],
+    summary:     'Generated OpenAPI specification',
+    description: 'Returns the live OpenAPI 3.0 description of every registered route. Importable into Postman, Swagger UI, openapi-generator, etc. The companion human-readable guide is in docs/api-guide.md.',
+    security:    [],
+  },
+}, async () => fastify.swagger())
 
 // Optional multipart — graceful degradation if not installed
 try {
@@ -90,8 +182,41 @@ await fastify.register(cmdbRoutes,          { prefix: '/cmdb' })
 await aiPlugin(fastify)
 await fastify.register(aiRoutes, { prefix: '/ai' })
 
-fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
-fastify.get('/', async () => ({ name: 'AppCloud API', version: '1.1.0' }))
+fastify.get('/health', {
+  schema: {
+    tags:        ['Health'],
+    summary:     'Liveness probe',
+    description: 'Open — no auth required. Returns 200 with `status: "ok"` and the server clock.',
+    security:    [],
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          status:    { type: 'string', example: 'ok' },
+          timestamp: { type: 'string', format: 'date-time' },
+        },
+      },
+    },
+  },
+}, async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+
+fastify.get('/', {
+  schema: {
+    tags:        ['Health'],
+    summary:     'API banner',
+    description: 'Returns the API name and version. Useful for confirming you hit the right host.',
+    security:    [],
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          name:    { type: 'string' },
+          version: { type: 'string' },
+        },
+      },
+    },
+  },
+}, async () => ({ name: 'AppCloud API', version: '1.1.0' }))
 
 try {
   await fastify.listen({ port: parseInt(process.env.PORT || '3000'), host: '0.0.0.0' })

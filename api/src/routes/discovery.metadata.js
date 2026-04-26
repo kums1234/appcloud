@@ -100,14 +100,24 @@ function buildResourceTypeCatalogue() {
 }
 
 export default async function discoveryMetadataRoutes(fastify) {
-  fastify.get('/providers', async () => ({
+  fastify.get('/providers', {
+    schema: {
+      summary:     'Catalogue of supported cloud providers',
+      description: 'Returns the static list of providers AppCloud can scan (aws / azure / gcp) with display metadata. UI uses this to render the provider picker.',
+      response:    { 200: { type: 'object', properties: { providers: { type: 'array', items: { type: 'object', additionalProperties: true } } } } },
+    },
+  }, async () => ({
     providers: PROVIDERS,
   }))
 
-  fastify.get('/resource-types', async () => ({
+  fastify.get('/resource-types', {
+    schema: {
+      summary:     'Catalogue of recognised resource types',
+      description: 'Returns the per-provider, typed-label catalogue derived from `discovery.schema.js`. Includes the cross-cloud ontology label (e.g. `ComputeInstance` covers Azure VM, EC2, GCE) and an icon hint.',
+      response:    { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async () => ({
     resourceTypes: buildResourceTypeCatalogue(),
-    // Also exposed raw so clients doing a flat `type → icon` lookup don't
-    // have to rebuild the map themselves.
     icons: RESOURCE_TYPE_ICONS,
   }))
 }

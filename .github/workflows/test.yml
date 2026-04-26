@@ -1,0 +1,59 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Local equivalents (run these before pushing — same scripts CI runs):
+#   cd api && npm ci
+#   cd api && npm run test:unit          # ~2s, no Docker
+#   cd api && npm run test:integration   # ~30s, needs Docker + Node 18–22 LTS
+
+# The unit job is the canary for OpenAPI / Postman drift, route-schema
+# misalignment, and the auth default-deny invariant. It must pass on every PR.
+# The integration job exercises the Testcontainers-based CMDB and OTel
+# pipelines against real Neo4j + Postgres images.
+
+jobs:
+  unit:
+    name: Unit tests + drift + auth invariant
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: api
+        run: npm run test:unit
+
+  integration:
+    name: Integration tests (Testcontainers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: api
+        run: npm run test:integration
