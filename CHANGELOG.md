@@ -5,6 +5,76 @@ grouped by release branch and ordered newest-first within each section.
 
 ---
 
+## Unreleased — `fastify5_migration` branch
+
+Fastify 4 → 5 major-version upgrade. Closes the three remaining
+fastify-side advisories that the security_enhancement slice deferred
+(GHSA-mrq3-vjjr-p77c DoS via sendWebStream, GHSA-jx2c-rxcm-jvmq
+Content-Type tab-character body-validation bypass, GHSA-444r-cwp2-x5xf
+X-Forwarded-Proto/Host spoofing).
+
+### Changed
+- `fastify`               4.26 → 5.8
+- `@fastify/cors`         9    → 10
+- `@fastify/multipart`    8    → 9
+- `@fastify/sensible`     5    → 6
+- `@fastify/swagger`      8    → 9
+- `@fastify/swagger-ui`   4    → 5
+
+`@fastify/helmet` (13) and `@fastify/rate-limit` (10) were already on
+v5-compatible majors from earlier slices.
+
+### Migration notes
+- **No application code changes required.** Verified by grepping for
+  every Fastify-4 deprecated API surface (`request.routerPath`,
+  `reply.getResponseTime`, `request.routeSchema`, `request.routeConfig`,
+  `request.context`, `reply.context`) — every match landed in vendored
+  `node_modules/fastify/test/` files, never in our handlers.
+- `docs/openapi.{json,yaml}` regenerated under the new Fastify 5 schema
+  emitter; the drift test catches any subsequent skew.
+- Required Node version is now ≥ 20 (we target 22 in CI + dev fnm).
+- `request.query` parses semicolons differently in v5; we don't pass any
+  semicolon-delimited query strings, so no behaviour change.
+
+### Reliability
+- `npm audit` no longer flags `fastify` directly. Down from 23 → 18
+  remaining advisories, **0 high-severity, 18 moderate**, all in deep
+  transitive deps. Closed via `package.json` overrides:
+    - `undici            ^6.24.0` — closes GHSA-4992-7rv2-5pvq (CRLF
+      injection in upgrade option). Coming from `testcontainers` (devDep);
+      override forces 6.25 which testcontainers tolerates.
+    - `js-yaml           ^4.1.1` — closes GHSA-mh29-5h37-fv8m (prototype
+      pollution in merge `<<`). Transitive of `openapi-to-postmanv2`.
+    - `@tootallnate/once ^3.0.1` — closes GHSA-vpq2-c234-7xj6 (incorrect
+      control-flow scoping). Transitive of `@google-cloud/storage`.
+    - `lodash            ^4.18.1` — closes 3 high-severity advisories
+      (GHSA-r5fr-rjxr-66jc, GHSA-f23m-r3pf-42rh, GHSA-xxjr-mmjv-4gpg).
+      Coming from `openapi-to-postmanv2`. lodash 4.18 is the new latest
+      after years of stagnation at 4.17.21.
+- Remaining 2 unique advisories with no clean fix path:
+    - `uuid <14.0.0`: GHSA-w5hq-g745-h8pq (buffer bounds in v3/v5/v6 when
+      `buf` arg is supplied). Override to `^14` blocked because
+      `testcontainers` and Azure SDK rely on uuid v3 API surface that v14
+      removed. **No practical exploit surface in our use** — none of our
+      consumers pass `buf` to the affected uuid functions.
+    - `yaml 1.0.0 - 1.10.2`: GHSA-48c2-rrv3-qjmp (stack overflow on deeply
+      nested YAML). Fix is in yaml@2 only (v1 line is dead).
+      Inside `openapi-to-postmanv2 > swagger2openapi > oas-resolver` which
+      calls yaml@1 APIs that don't exist in 2.x. **No practical exploit**
+      — openapi-to-postmanv2 only parses our own OpenAPI YAML at build
+      time; never untrusted input.
+- Both can be revisited when the upstream packages release fixes (uuid
+  via Azure SDK / testcontainers bumping their uuid usage to v14, yaml
+  via openapi-to-postmanv2 migrating to yaml@2 or a different parser).
+
+### Test posture
+- 364 unit + 37 integration = 401 tests pass under Fastify 5 with no
+  source modification. The auth-coverage invariant test still locks
+  every route down to the attached scope handler; the drift test still
+  pins `docs/openapi.{json,yaml}` to the live route registrations.
+
+---
+
 ## Unreleased — `multi_key_rbac` branch
 
 DB-backed multi-key RBAC system replacing the previous single-env-var auth.

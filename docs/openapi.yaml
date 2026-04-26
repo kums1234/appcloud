@@ -67,6 +67,7 @@ paths:
         defaults are filled in for `availability` (`99.9`) and `confidentiality`
         (`internal`).
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -99,7 +100,6 @@ paths:
                 owner: payments-team
                 environment: production
                 domain: finance
-        required: true
       responses:
         "201":
           description: Default Response
@@ -352,6 +352,7 @@ paths:
       description: Any subset of the create fields. Unspecified fields keep their
         existing values via `coalesce`.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -767,6 +768,7 @@ paths:
         Application via `:CONTAINS`. Either `applicationId` or `appId` works
         (legacy alias).
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -797,7 +799,6 @@ paths:
                 type: api
                 runtime: nodejs
                 applicationId: 00000000-0000-0000-0000-000000000000
-        required: true
       responses:
         "201":
           description: Default Response
@@ -908,6 +909,7 @@ paths:
         - Components
       description: Partial update on `name` / `type` / `runtime`. Other fields preserved.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -1033,6 +1035,7 @@ paths:
         this Component to the target. No `via` is set — the endpoint labels
         (`:Component`→`:Component`) distinguish it from infra-side edges.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -1057,7 +1060,6 @@ paths:
                 targetId: 00000000-0000-0000-0000-000000000000
                 protocol: https
                 port: 443
-        required: true
       parameters:
         - schema:
             type: string
@@ -1085,6 +1087,7 @@ paths:
         source:"manual-deploy", confidence:100}` edge from the Component to the
         Infra. Use this to record human-confirmed ownership.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -1099,7 +1102,6 @@ paths:
                   description: Infra node to MERGE a :CONNECTS_TO {via:component-mapping} edge to
               example:
                 infraId: 00000000-0000-0000-0000-000000000000
-        required: true
       parameters:
         - schema:
             type: string
@@ -1196,6 +1198,7 @@ paths:
         this for resources that aren't in any cloud-API surface — e.g. an
         on-prem appliance you want represented in the graph.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -1228,7 +1231,6 @@ paths:
                 resource_type: vm
                 region: eastus
                 public: false
-        required: true
       responses:
         "201":
           description: Default Response
@@ -1356,6 +1358,7 @@ paths:
       tags:
         - Infra
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -1881,6 +1884,7 @@ paths:
         optional `label`. Snapshots are append-only — there's no DELETE
         endpoint.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2014,6 +2018,7 @@ paths:
         duplicated. Secret fields in `config` (clientSecret, secretAccessKey,
         private_key) are AES-256-GCM-encrypted before INSERT.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2050,7 +2055,6 @@ paths:
                   clientId: 00000000-0000-0000-0000-000000000000
                   clientSecret: REPLACE_ME
                 enabled: true
-        required: true
       responses:
         "201":
           description: Default Response
@@ -2232,6 +2236,7 @@ paths:
         *merged* into the existing decrypted config and re-encrypted, so you can
         patch one secret without re-supplying the others.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2393,6 +2398,7 @@ paths:
         / last_scan_status / last_scan_total / last_scan_error` on the account
         row. Not typically called directly by external consumers.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2452,6 +2458,7 @@ paths:
         is AES-256-GCM-encrypted before INSERT. Setting Azure also requires
         `azureEndpoint` and `azureDeployment`.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2477,7 +2484,6 @@ paths:
                   type: string
                 azureDeployment:
                   type: string
-        required: true
       responses:
         "201":
           description: Default Response
@@ -2549,6 +2555,7 @@ paths:
         auto-generate secrets, and `afterUpsert` runs after persist to sync
         derived rows. Secret fields are AES-256-GCM-encrypted before INSERT."
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2573,7 +2580,6 @@ paths:
                   type:
                     - integer
                     - "null"
-        required: true
       responses:
         "201":
           description: Default Response
@@ -2626,6 +2632,7 @@ paths:
         `pollIntervalSeconds`. The connector's before/afterUpsert hooks run on
         each update.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2777,6 +2784,7 @@ paths:
         env var). See
         [docs/aws-config-aggregator-coverage.md](../docs/aws-config-aggregator-coverage.md).
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -2916,6 +2924,7 @@ paths:
         Azure account from `/integrations/cloud`. See
         [docs/azure-resource-graph-coverage.md](../docs/azure-resource-graph-coverage.md).
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3027,6 +3036,7 @@ paths:
         `/integrations/cloud`. See
         [docs/gcp-cloud-asset-coverage.md](../docs/gcp-cloud-asset-coverage.md).
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3187,6 +3197,7 @@ paths:
         standard 5-field; consult any cron reference. Setting `enabled: false`
         disables future runs without deleting the config."
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3274,6 +3285,7 @@ paths:
         create-component + create-application), use
         `/discovery/suggest/apply-all`.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3290,7 +3302,6 @@ paths:
                       - infraId
                       - componentId
                     additionalProperties: true
-        required: true
       responses:
         "200":
           description: Default Response
@@ -3318,6 +3329,7 @@ paths:
         Phase 2 also runs after the batch: tag-based auto-link sweeps any
         still-unmapped Infra against the newly-created components.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3383,7 +3395,6 @@ paths:
                     suggestedOwner: platform-team
                     components:
                       - infraId: 00000000-0000-0000-0000-000000000000
-        required: true
       responses:
         "200":
           description: Default Response
@@ -3491,6 +3502,7 @@ paths:
         source:"manual-link", confidence:100}`. Use this when the suggest engine
         missed a mapping.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3506,7 +3518,6 @@ paths:
                 componentId:
                   type: string
                   format: uuid
-        required: true
       responses:
         "200":
           description: Default Response
@@ -3606,6 +3617,7 @@ paths:
         Infra is skipped (with reason), unlinked is removed. The response
         details deleted / skipped / errored."
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -3619,7 +3631,6 @@ paths:
                   items:
                     type: string
                     format: uuid
-        required: true
       responses:
         "200":
           description: Default Response
@@ -3674,6 +3685,7 @@ paths:
         Idempotent — safe to re-run. `monitor-insights` requires a Log Analytics
         workspace ID; `network-watcher` requires Network Watcher Reader.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -4033,6 +4045,7 @@ paths:
         `/discovery/suggest`), the local LLM produces a human-readable
         rationale. Useful for tooltips on suggestion cards.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -4048,7 +4061,6 @@ paths:
                 suggestion:
                   type: object
                   additionalProperties: true
-        required: true
       responses:
         "200":
           description: Default Response
@@ -4066,6 +4078,7 @@ paths:
         Complements the rule-based scores from the suggest engine; clients
         combine both.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -4077,7 +4090,6 @@ paths:
                 infraId:
                   type: string
                   format: uuid
-        required: true
       responses:
         "200":
           description: Default Response
@@ -4155,6 +4167,7 @@ paths:
         asks the cloud LLM to propose mappings or tag changes. With a body,
         scores the supplied items.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -4242,6 +4255,7 @@ paths:
         conversation. Returns the assistant's reply plus a reference to the
         context used.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -4267,7 +4281,6 @@ paths:
                           - system
                       content:
                         type: string
-        required: true
       responses:
         "200":
           description: Default Response
@@ -4306,6 +4319,7 @@ paths:
         requested scopes, and returns the plaintext **once**. Save it
         immediately — it is never recoverable.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -4340,7 +4354,6 @@ paths:
                 scopes:
                   - write
                 expiresAt: 2026-12-31T23:59:59Z
-        required: true
       responses:
         "201":
           description: Default Response
@@ -4530,6 +4543,7 @@ paths:
         a new key and revoke the old one. Bootstrap rows are read-only. Pass
         `expiresAt: null` to clear an expiry, or an ISO instant to set/extend."
       requestBody:
+        required: true
         content:
           application/json:
             schema:
