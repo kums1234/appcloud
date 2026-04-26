@@ -1,40 +1,54 @@
 // utils/encrypt.js
 // AES-256-GCM encryption for secrets stored in the graph/database.
 //
-// Key derivation: scrypt (memory-hard) over the passphrase from
-// APPCLOUD_ENCRYPTION_KEY_FILE / APPCLOUD_ENCRYPTION_KEY plus a fixed salt
-// (APPCLOUD_KDF_SALT, with a documented fallback). The previous build used
-// bare SHA-256, which is GPU-grindable at ~10B/sec — a weak passphrase could
-// be brute-forced in seconds. scrypt with N=2^14, r=8, p=1 makes the same
-// attack ~10⁵× slower and dominates with memory bandwidth, neutering most
-// commodity GPU rigs.
+// ── Two-tier KDF (master + per-row) ──────────────────────────────────────────
+// 1. **Master key** is derived ONCE per process from the passphrase
+//    (APPCLOUD_ENCRYPTION_KEY{,_FILE}) using scrypt — memory-hard,
+//    GPU-resistant, ~50ms. The master is cached so the cost is only paid at
+//    first use.
+// 2. **Row key** is derived per encrypt/decrypt via HKDF-SHA-256 over the
+//    master key plus a fresh random salt stored in each ciphertext.
+//    HKDF is microseconds; safe because the input keying material (the
+//    master) is already a 256-bit pseudo-random value.
 //
-// IV length: 12 bytes (96 bits — the GCM-spec recommendation). Earlier rows
-// were encrypted with 16-byte IVs; decrypt() works with both because the IV
-// length is read from the stored payload.
+// Per-row salts give us two things over a single application-wide salt:
+//   - distinct derived keys per row, so a leak of one decrypted row doesn't
+//     give the attacker a key that decrypts the rest;
+//   - smoother key-rotation story for future multi-tenant work — each
+//     tenant could carry its own salt without re-encrypting other tenants.
 //
-// Migration impact: existing rows encrypted under the old SHA-256 KDF will
-// no longer decrypt and will surface as DecryptionError → null in
-// decryptConfig (with __decryptErrors set so the caller can warn the user).
-// Pre-customer this is acceptable; re-seed cloud accounts after rotating.
+// ── Ciphertext format ────────────────────────────────────────────────────────
+// New (v3, this commit):  `salt:iv:tag:ct`  (4 hex parts)
+// Legacy v2 (slice 2):    `iv:tag:ct`       (3 hex parts) — decrypts via
+//                                            the master key directly, kept
+//                                            so any rows written between
+//                                            slice 2 and this commit still
+//                                            read.
+// Legacy v1 (pre-slice-2, SHA-256 KDF) is no longer decryptable; surfaces
+// as DecryptionError → null in decryptConfig.
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync, hkdfSync } from 'crypto'
 import fs from 'fs'
 
-const ALGO   = 'aes-256-gcm'
-const IV_LEN = 12
+const ALGO    = 'aes-256-gcm'
+const IV_LEN  = 12
 const KEY_LEN = 32
+const SALT_LEN = 16  // 128 bits — well above the HKDF spec minimum
 
 // scrypt cost parameters. N=2^14 is the OWASP-acceptable lower bound; r=8 and
 // p=1 are the standard scrypt parameters. maxmem is sized for ~32 MB so this
 // works on small dev containers without bumping into Node's default cap.
 const SCRYPT_PARAMS = { N: 2 ** 14, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
 
-// Salt is application-public. Its job is to prevent rainbow-table reuse, not
-// to be a secret. Override via APPCLOUD_KDF_SALT only when re-keying — a
-// changed salt invalidates every existing ciphertext, just like changing the
-// passphrase does.
-function readSalt() {
+// HKDF context — a fixed string distinguishing this key-use from any other
+// HKDF outputs we might add later. Bumping the version invalidates existing
+// row keys, just like rotating the passphrase does.
+const HKDF_INFO = Buffer.from('appcloud-row-encryption-key-v1', 'utf8')
+
+// Master-salt source. Public; its job is to prevent rainbow-table reuse
+// against the master scrypt, not to be a secret. Override via
+// APPCLOUD_KDF_SALT only when re-keying the whole DB.
+function readMasterSalt() {
   return Buffer.from(process.env.APPCLOUD_KDF_SALT || 'appcloud-kdf-salt-v1', 'utf8')
 }
 
@@ -59,23 +73,32 @@ function readRawKey() {
   )
 }
 
-// Cache the derived key so we don't pay the ~50 ms scrypt cost on every
-// encrypt/decrypt call. Invalidates if the passphrase changes between calls
-// (e.g. tests that flip the env var).
-let cachedKey = null
-let cachedRaw = null
-let cachedSalt = null
+// ── Master-key cache ────────────────────────────────────────────────────────
+// Keyed on (passphrase, masterSalt). Invalidates when either changes (e.g.
+// tests that flip env vars). The cache is critical: without it, every
+// encrypt/decrypt call would pay scrypt's ~50ms, blowing up cloud-account
+// reads (~5s for 100 accounts).
+let cachedMaster     = null
+let cachedRaw        = null
+let cachedMasterSalt = null
 
-function deriveKey() {
+function getMasterKey() {
   const raw  = readRawKey()
-  const salt = readSalt()
-  if (cachedKey && cachedRaw === raw && Buffer.compare(cachedSalt, salt) === 0) {
-    return cachedKey
+  const salt = readMasterSalt()
+  if (cachedMaster && cachedRaw === raw && Buffer.compare(cachedMasterSalt, salt) === 0) {
+    return cachedMaster
   }
-  cachedKey  = scryptSync(raw, salt, KEY_LEN, SCRYPT_PARAMS)
-  cachedRaw  = raw
-  cachedSalt = salt
-  return cachedKey
+  cachedMaster     = scryptSync(raw, salt, KEY_LEN, SCRYPT_PARAMS)
+  cachedRaw        = raw
+  cachedMasterSalt = salt
+  return cachedMaster
+}
+
+// HKDF: extract-and-expand. Fast (microseconds) — safe because the master
+// is already a high-entropy 256-bit value; HKDF is just a domain separator.
+function deriveRowKey(rowSalt) {
+  const master = getMasterKey()
+  return Buffer.from(hkdfSync('sha256', master, rowSalt, HKDF_INFO, KEY_LEN))
 }
 
 // One-time startup notice — surface that the legacy fallback envs are
@@ -96,20 +119,23 @@ export function warnIfLegacyKeyEnvSet(log) {
 
 export function encrypt(plaintext) {
   if (!plaintext) return plaintext
-  const key = deriveKey()
-  const iv  = randomBytes(IV_LEN)
+  const salt   = randomBytes(SALT_LEN)
+  const iv     = randomBytes(IV_LEN)
+  const key    = deriveRowKey(salt)
   const cipher = createCipheriv(ALGO, key, iv)
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const tag = cipher.getAuthTag()
-  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`
+  return [
+    salt.toString('hex'),
+    iv.toString('hex'),
+    tag.toString('hex'),
+    encrypted.toString('hex'),
+  ].join(':')
 }
 
-// Sentinel thrown when ciphertext is shaped correctly (iv:tag:ct) but the GCM
-// auth tag fails to verify. Distinguishes a real decryption failure (wrong key,
-// corrupted ciphertext) from a plaintext pass-through. Callers can catch this
-// to decide whether to surface, redact, or fail loud — but they must NOT
-// silently treat the original ciphertext as plaintext (the previous behaviour
-// quietly handed `iv:tag:ct` hex strings to cloud SDKs as if they were keys).
+// Sentinel thrown when ciphertext is shaped correctly but auth-tag verify
+// fails (wrong key, corrupted ciphertext). Distinguishes a real decryption
+// failure from a plaintext pass-through.
 export class DecryptionError extends Error {
   constructor(message, cause) {
     super(message)
@@ -121,17 +147,29 @@ export class DecryptionError extends Error {
 export function decrypt(encoded) {
   if (!encoded) return encoded
   // Pass-through for non-encrypted shapes — legacy plaintext rows + simple
-  // strings that never went through encrypt(). The `iv:tag:ct` triple is the
-  // only thing we treat as ciphertext.
+  // strings that never went through encrypt().
   if (!encoded.includes(':')) return encoded
   const parts = encoded.split(':')
-  if (parts.length !== 3) return encoded
-  const [ivHex, tagHex, ctHex] = parts
+
+  let saltHex, ivHex, tagHex, ctHex
+  let key
   try {
-    const key     = deriveKey()
-    const iv      = Buffer.from(ivHex,  'hex')
-    const tag     = Buffer.from(tagHex, 'hex')
-    const ct      = Buffer.from(ctHex,  'hex')
+    if (parts.length === 4) {
+      // v3 — per-row salt + HKDF-derived key.
+      [saltHex, ivHex, tagHex, ctHex] = parts
+      const rowSalt = Buffer.from(saltHex, 'hex')
+      if (rowSalt.length !== SALT_LEN) return encoded   // shape doesn't match
+      key = deriveRowKey(rowSalt)
+    } else if (parts.length === 3) {
+      // v2 — master-key direct (slice 2 transient format).
+      [ivHex, tagHex, ctHex] = parts
+      key = getMasterKey()
+    } else {
+      return encoded
+    }
+    const iv  = Buffer.from(ivHex,  'hex')
+    const tag = Buffer.from(tagHex, 'hex')
+    const ct  = Buffer.from(ctHex,  'hex')
     const decipher = createDecipheriv(ALGO, key, iv)
     decipher.setAuthTag(tag)
     return decipher.update(ct, undefined, 'utf8') + decipher.final('utf8')

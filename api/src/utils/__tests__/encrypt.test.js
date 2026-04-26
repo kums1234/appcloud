@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll } from '@jest/globals'
+import { createCipheriv, randomBytes, scryptSync } from 'crypto'
 import { encrypt, decrypt, encryptConfig, decryptConfig, DecryptionError } from '../encrypt.js'
 
 beforeAll(() => {
@@ -14,9 +15,23 @@ describe('encrypt/decrypt', () => {
     const plain = 'hunter2-🔑-超级'
     const enc = encrypt(plain)
     expect(enc).not.toContain(plain)
-    // Format: iv:tag:ciphertext, all hex
-    expect(enc.split(':').length).toBe(3)
+    // v3 format: salt:iv:tag:ciphertext, all hex
+    expect(enc.split(':').length).toBe(4)
     expect(decrypt(enc)).toBe(plain)
+  })
+
+  test('two encrypts of the same plaintext produce different salts', () => {
+    // Per-row salts mean each ciphertext carries its own first segment.
+    // Same plaintext → same passphrase → two distinct ciphertexts (and
+    // distinct first segments specifically — IV would already differ in
+    // GCM mode, but the salt difference is what gives us per-row keys).
+    const enc1 = encrypt('same-plaintext')
+    const enc2 = encrypt('same-plaintext')
+    const salt1 = enc1.split(':')[0]
+    const salt2 = enc2.split(':')[0]
+    expect(salt1).not.toBe(salt2)
+    expect(decrypt(enc1)).toBe('same-plaintext')
+    expect(decrypt(enc2)).toBe('same-plaintext')
   })
 
   test('empty / null inputs pass through', () => {
@@ -48,10 +63,26 @@ describe('encrypt/decrypt', () => {
 
   test('decrypt throws DecryptionError on corrupted ciphertext', () => {
     const enc = encrypt('round-trip-target')
-    const [iv, tag, ct] = enc.split(':')
+    const [salt, iv, tag, ct] = enc.split(':')
     // Flip a byte in the ciphertext — auth tag verification must fail.
-    const corrupted = `${iv}:${tag}:${ct.slice(0, -2)}ff`
+    const corrupted = `${salt}:${iv}:${tag}:${ct.slice(0, -2)}ff`
     expect(() => decrypt(corrupted)).toThrow(DecryptionError)
+  })
+
+  test('legacy v2 ciphertext (3-part, master-key direct) still decrypts', () => {
+    // Reproduce what slice-2 encrypt() would have produced: scrypt over
+    // (passphrase, master_salt) keying AES-GCM directly with no row salt.
+    // We construct one by hand here and verify decrypt() routes through
+    // the v2 path (parts.length === 3).
+    const masterSalt = Buffer.from('appcloud-kdf-salt-v1', 'utf8')
+    const masterKey  = scryptSync('test-encrypt-key-fixed', masterSalt, 32, { N: 2 ** 14, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
+    const iv     = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', masterKey, iv)
+    const ct     = Buffer.concat([cipher.update('legacy-payload', 'utf8'), cipher.final()])
+    const tag    = cipher.getAuthTag()
+    const v2     = `${iv.toString('hex')}:${tag.toString('hex')}:${ct.toString('hex')}`
+    expect(v2.split(':').length).toBe(3)
+    expect(decrypt(v2)).toBe('legacy-payload')
   })
 })
 
