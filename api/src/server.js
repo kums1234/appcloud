@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import helmet from '@fastify/helmet'
 import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
@@ -36,6 +37,17 @@ const fastify = Fastify({
 // their own scoping correctly via their built-in fastify-plugin wrappers)
 await fastify.register(cors, { origin: true })
 await fastify.register(sensible)
+
+// Baseline security headers via @fastify/helmet. Disabling CSP because the
+// Swagger UI is served from /docs and would need a tailored policy; the rest
+// of helmet's defaults (X-Frame-Options DENY, X-Content-Type-Options nosniff,
+// Referrer-Policy, etc.) protect the API surface against clickjacking and
+// MIME-type confusion. HSTS is enabled for production where TLS is terminated
+// upstream — it's a no-op over HTTP so safe to leave on in dev.
+await fastify.register(helmet, {
+  contentSecurityPolicy: false,
+  hsts: { maxAge: 31536000, includeSubDomains: true },
+})
 
 // OpenAPI generation. @fastify/swagger derives the spec from each route's
 // declared `schema` block; routes without one still appear in the doc with
@@ -217,6 +229,64 @@ fastify.get('/', {
     },
   },
 }, async () => ({ name: 'AppCloud API', version: '1.1.0' }))
+
+// ── Global error handler ─────────────────────────────────────────────────────
+// Default Fastify behaviour returns `err.message` to the client which leaks
+// internal file paths and stack-trace fragments (e.g. ai.js's handleAIError
+// passes err.message straight through). In production we swap that for a
+// generic message keyed by the request id so operators can grep the server
+// logs while clients see no internals; in dev we keep the verbose form so
+// the test/inspect loop stays fast.
+fastify.setErrorHandler((err, req, reply) => {
+  // Validation errors and explicit Fastify-shaped errors (sensible's
+  // reply.notFound / .badRequest / etc.) already carry safe messages and a
+  // statusCode — pass them through untouched.
+  if (err.validation || (err.statusCode && err.statusCode < 500)) {
+    return reply.send(err)
+  }
+  fastify.log.error({ err, reqId: req.id, url: req.url }, 'unhandled error')
+  const code = err.statusCode || 500
+  if (process.env.NODE_ENV === 'production') {
+    return reply.code(code).send({
+      statusCode: code,
+      error:      err.name || 'Internal Server Error',
+      message:    `internal error (request id: ${req.id})`,
+    })
+  }
+  return reply.code(code).send({
+    statusCode: code,
+    error:      err.name || 'Internal Server Error',
+    message:    err.message,
+    stack:      err.stack,
+  })
+})
+
+// ── Graceful shutdown ────────────────────────────────────────────────────────
+// Without these, a SIGTERM (k8s pod kill, docker stop) drops in-flight
+// requests and leaks DB connections. fastify.close() drains the connection
+// queue, runs onClose hooks (which DB plugins use to close their pools), and
+// returns once everything's flushed.
+let shuttingDown = false
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, async () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    fastify.log.info(`[shutdown] ${signal} received — closing fastify + plugins`)
+    const forceExit = setTimeout(() => {
+      fastify.log.error('[shutdown] timed out after 30s — forcing exit')
+      process.exit(1)
+    }, 30_000)
+    try {
+      await fastify.close()
+      clearTimeout(forceExit)
+      process.exit(0)
+    } catch (err) {
+      fastify.log.error({ err }, '[shutdown] error during close')
+      clearTimeout(forceExit)
+      process.exit(1)
+    }
+  })
+}
 
 try {
   await fastify.listen({ port: parseInt(process.env.PORT || '3000'), host: '0.0.0.0' })

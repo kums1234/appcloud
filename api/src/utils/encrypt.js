@@ -35,8 +35,25 @@ export function encrypt(plaintext) {
   return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`
 }
 
+// Sentinel thrown when ciphertext is shaped correctly (iv:tag:ct) but the GCM
+// auth tag fails to verify. Distinguishes a real decryption failure (wrong key,
+// corrupted ciphertext) from a plaintext pass-through. Callers can catch this
+// to decide whether to surface, redact, or fail loud — but they must NOT
+// silently treat the original ciphertext as plaintext (the previous behaviour
+// quietly handed `iv:tag:ct` hex strings to cloud SDKs as if they were keys).
+export class DecryptionError extends Error {
+  constructor(message, cause) {
+    super(message)
+    this.name  = 'DecryptionError'
+    this.cause = cause
+  }
+}
+
 export function decrypt(encoded) {
   if (!encoded) return encoded
+  // Pass-through for non-encrypted shapes — legacy plaintext rows + simple
+  // strings that never went through encrypt(). The `iv:tag:ct` triple is the
+  // only thing we treat as ciphertext.
   if (!encoded.includes(':')) return encoded
   const parts = encoded.split(':')
   if (parts.length !== 3) return encoded
@@ -49,7 +66,12 @@ export function decrypt(encoded) {
     const decipher = createDecipheriv(ALGO, key, iv)
     decipher.setAuthTag(tag)
     return decipher.update(ct, undefined, 'utf8') + decipher.final('utf8')
-  } catch { return encoded }
+  } catch (err) {
+    throw new DecryptionError(
+      `decrypt: auth tag mismatch or corrupt ciphertext (${err.message})`,
+      err,
+    )
+  }
 }
 
 // Fields whose values are encrypted at rest in the `config` JSONB column of
@@ -83,13 +105,29 @@ export function encryptConfig(config) {
   return out
 }
 
+// Decrypt every known-secret field in a config blob. On a per-field decryption
+// failure (wrong key, corrupt row), the field is replaced with `null` and the
+// failure is recorded under a `__decryptErrors` array so the caller can surface
+// the problem to the user / log / metrics rather than silently handing
+// ciphertext to a downstream cloud SDK.
 export function decryptConfig(config) {
   if (!config || typeof config !== 'object') return config
   const out = { ...config }
+  const errors = []
   for (const field of SECRET_FIELDS) {
     if (out[field]) {
-      try { out[field] = decrypt(out[field]) } catch {}
+      try {
+        out[field] = decrypt(out[field])
+      } catch (err) {
+        if (err instanceof DecryptionError) {
+          errors.push({ field, message: err.message })
+          out[field] = null
+        } else {
+          throw err
+        }
+      }
     }
   }
+  if (errors.length) out.__decryptErrors = errors
   return out
 }

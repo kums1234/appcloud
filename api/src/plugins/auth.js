@@ -21,6 +21,12 @@
 // Swagger UI under `/docs/*`) either set `security: []` or are registered
 // BEFORE this plugin runs, so the hook never sees them.
 import fs from 'fs'
+import { timingSafeEqual } from 'crypto'
+
+// Recommended minimum key length. `openssl rand -hex 32` produces 64 chars.
+// Shorter keys are accepted (don't break dev) but logged with a warning so
+// the operator notices before going to production.
+const MIN_KEY_LEN = 32
 
 function readKey() {
   const filePath = process.env.APPCLOUD_API_KEY_FILE
@@ -28,6 +34,22 @@ function readKey() {
     try { return fs.readFileSync(filePath, 'utf8').trim() } catch {}
   }
   return (process.env.APPCLOUD_API_KEY || '').trim()
+}
+
+// Constant-time API-key comparison. A naive `provided !== expected` short-
+// circuits on the first byte mismatch, leaking how far the guess matched via
+// timing — over many requests an attacker can recover the key byte-by-byte.
+//
+// timingSafeEqual requires equal-length buffers. We pad the provided value to
+// the expected length (with a fixed sentinel) and force-fail if the lengths
+// differ — both branches still execute the full-length comparison, so the
+// length check itself doesn't leak.
+function safeKeyEqual(provided, expected) {
+  const expectedBuf = Buffer.from(expected, 'utf8')
+  const providedBuf = Buffer.alloc(expectedBuf.length, 0)
+  Buffer.from(provided, 'utf8').copy(providedBuf, 0, 0, expectedBuf.length)
+  const equal = timingSafeEqual(providedBuf, expectedBuf)
+  return equal && provided.length === expected.length
 }
 
 // Treat a route as public when the schema explicitly opts out via the OpenAPI
@@ -59,7 +81,7 @@ export async function authPlugin(fastify) {
   const authenticate = expected
     ? async (req, reply) => {
         const provided = (req.headers['x-api-key'] || '').trim()
-        if (!provided || provided !== expected) {
+        if (!provided || !safeKeyEqual(provided, expected)) {
           reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
         }
       }
@@ -79,6 +101,12 @@ export async function authPlugin(fastify) {
 
   if (expected) {
     fastify.log.info('[auth] API-key authentication enabled (X-API-Key header) — default-deny on all routes')
+    if (expected.length < MIN_KEY_LEN) {
+      fastify.log.warn(
+        `[auth] APPCLOUD_API_KEY is only ${expected.length} chars — recommend ${MIN_KEY_LEN}+ ` +
+        `(generate via: openssl rand -hex 32)`,
+      )
+    }
   } else {
     fastify.log.warn('[auth] APPCLOUD_API_KEY not set — authentication disabled, all routes open')
   }

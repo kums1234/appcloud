@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll } from '@jest/globals'
-import { encrypt, decrypt, encryptConfig, decryptConfig } from '../encrypt.js'
+import { encrypt, decrypt, encryptConfig, decryptConfig, DecryptionError } from '../encrypt.js'
 
 beforeAll(() => {
   // Tests must be deterministic regardless of host env; override the key.
@@ -30,6 +30,28 @@ describe('encrypt/decrypt', () => {
     // Caller may pass an already-decrypted value through decrypt() on read —
     // verify it's a no-op rather than throwing.
     expect(decrypt('plain-looking-value')).toBe('plain-looking-value')
+  })
+
+  test('decrypt throws DecryptionError on auth-tag mismatch (wrong key)', () => {
+    // Encrypt with the fixed test key, then swap to a different key and try to
+    // decrypt. The previous behaviour silently returned the ciphertext as if
+    // it were plaintext — this test locks in the new throw-on-failure contract.
+    const enc = encrypt('round-trip-target')
+    const previousKey = process.env.APPCLOUD_ENCRYPTION_KEY
+    try {
+      process.env.APPCLOUD_ENCRYPTION_KEY = 'a-different-key'
+      expect(() => decrypt(enc)).toThrow(DecryptionError)
+    } finally {
+      process.env.APPCLOUD_ENCRYPTION_KEY = previousKey
+    }
+  })
+
+  test('decrypt throws DecryptionError on corrupted ciphertext', () => {
+    const enc = encrypt('round-trip-target')
+    const [iv, tag, ct] = enc.split(':')
+    // Flip a byte in the ciphertext — auth tag verification must fail.
+    const corrupted = `${iv}:${tag}:${ct.slice(0, -2)}ff`
+    expect(() => decrypt(corrupted)).toThrow(DecryptionError)
   })
 })
 
@@ -68,5 +90,29 @@ describe('encryptConfig / decryptConfig', () => {
     expect(encryptConfig(null)).toBe(null)
     expect(encryptConfig(undefined)).toBe(undefined)
     expect(decryptConfig(null)).toBe(null)
+  })
+
+  test('decryptConfig replaces undecryptable fields with null and surfaces errors', () => {
+    // Encrypt with the test key, then swap the env to simulate a key rotation
+    // that didn't re-encrypt the row.
+    const enc = encryptConfig({
+      apiToken:        'plain-token',
+      secretAccessKey: 'plain-secret',
+      region:          'us-east-1',
+    })
+    const previousKey = process.env.APPCLOUD_ENCRYPTION_KEY
+    try {
+      process.env.APPCLOUD_ENCRYPTION_KEY = 'rotated-and-not-backfilled'
+      const dec = decryptConfig(enc)
+      expect(dec.region).toBe('us-east-1')        // non-secret pass-through
+      expect(dec.apiToken).toBe(null)             // undecryptable → null, not ciphertext
+      expect(dec.secretAccessKey).toBe(null)
+      expect(dec.__decryptErrors).toEqual(expect.arrayContaining([
+        expect.objectContaining({ field: 'apiToken' }),
+        expect.objectContaining({ field: 'secretAccessKey' }),
+      ]))
+    } finally {
+      process.env.APPCLOUD_ENCRYPTION_KEY = previousKey
+    }
   })
 })

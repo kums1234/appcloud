@@ -18,6 +18,10 @@ if [ ! -f ./secrets/db_username.txt ] || [ ! -f ./secrets/db_password.txt ]; the
   exit 1
 fi
 
+# Enforce 600 perms on every secret file — fixes drift if a new file was added
+# without `chmod 600` (and prevents the dev-host process-readable footgun).
+./scripts/check-secret-perms.sh
+
 # Make the entrypoint executable
 chmod +x ./neo4j-entrypoint.sh
 

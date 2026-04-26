@@ -198,15 +198,25 @@ export default async function auditRoutes(fastify) {
   })
 
   // ── GET /audit/actor/:name — all actions by a specific actor ──────────────
+  // Constrain the actor name to a sane character set. The Postgres query
+  // itself is parameterised so this is not an injection guard — it's a log-
+  // injection guard for downstream log aggregators (ELK, Splunk) that often
+  // splat `actor=<value>` into a single line; a value containing a newline
+  // would forge a fake audit entry in those systems.
+  const ACTOR_NAME_RE = /^[A-Za-z0-9._@:+-]{1,128}$/
+
   fastify.get('/actor/:name', {
     schema: {
       summary:     'All audit events by a specific actor (paginated)',
       description: 'Case-insensitive substring match on the `actor` column. Default actor for system-initiated calls is `system`; clients identify themselves via the `X-Actor` header.',
-      params:      { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+      params:      { type: 'object', required: ['name'], properties: { name: { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$' } } },
       querystring: { type: 'object', properties: { page: { type: ['integer', 'string'] }, pageSize: { type: ['integer', 'string'] } } },
       response:    { 200: { type: 'object', additionalProperties: true } },
     },
   }, async (req, reply) => {
+    if (!ACTOR_NAME_RE.test(req.params.name)) {
+      return reply.badRequest('actor name must match [A-Za-z0-9._@:+-]{1,128}')
+    }
     if (!pgOk()) return { rows: [], total: 0 }
     const { page = 1, pageSize = 50 } = req.query
     const limit  = Math.min(parseInt(pageSize) || 50, 200)
