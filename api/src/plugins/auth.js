@@ -41,7 +41,9 @@ const MIN_KEY_LEN  = 32
 const CACHE_TTL_MS = parseInt(process.env.APPCLOUD_AUTH_CACHE_TTL_MS || '60000', 10)
 
 // Mirror of postgres-init/10-api-keys.sql so a fresh DB without the init
-// file applied still gets the table. Keep schemas in sync.
+// file applied still gets the table. Keep schemas in sync. The
+// `ADD COLUMN IF NOT EXISTS expires_at` is the upgrade path for
+// deployments whose api_keys table predates that column.
 const CREATE_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS api_keys (
     id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -53,9 +55,11 @@ const CREATE_TABLE_SQL = `
     created_by    TEXT,
     last_used_at  TIMESTAMPTZ,
     revoked_at    TIMESTAMPTZ,
+    expires_at    TIMESTAMPTZ,
     is_bootstrap  BOOLEAN      NOT NULL DEFAULT false,
     CHECK (array_length(scopes, 1) >= 1)
   );
+  ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
   CREATE INDEX IF NOT EXISTS idx_api_keys_hash_active
     ON api_keys (key_hash) WHERE revoked_at IS NULL;
   CREATE INDEX IF NOT EXISTS idx_api_keys_active
@@ -119,18 +123,24 @@ function makeKeyCache() {
 }
 
 async function loadKeysFromDb(pg) {
+  // expires_at filter evaluated at query time (not in the partial index)
+  // because now() is STABLE, not IMMUTABLE. Index probes by key_hash via
+  // the revoked-only partial index; the planner adds an in-memory check
+  // for expires_at on top.
   const rows = await pg.query(`
-    SELECT id, name, key_hash, key_prefix, scopes
+    SELECT id, name, key_hash, key_prefix, scopes, expires_at
     FROM api_keys
     WHERE revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > now())
   `)
   const map = new Map()
   for (const r of rows) {
     map.set(r.key_hash, {
-      id:     r.id,
-      name:   r.name,
-      scopes: r.scopes,
-      prefix: r.key_prefix,
+      id:        r.id,
+      name:      r.name,
+      scopes:    r.scopes,
+      prefix:    r.key_prefix,
+      expiresAt: r.expires_at,
     })
   }
   return map
@@ -291,6 +301,18 @@ export async function authPlugin(fastify) {
         return
       }
       reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
+      return
+    }
+    // Per-request expiry guard. The cache only refreshes every CACHE_TTL_MS,
+    // so a key whose expires_at falls between two refreshes would otherwise
+    // remain usable for up to that window. Check now() against the
+    // expires_at carried with the principal so the moment of expiry is
+    // enforced exactly.
+    if (principal.expiresAt && new Date(principal.expiresAt) <= new Date()) {
+      reply.code(401).send({
+        error:   'Unauthorized',
+        message: 'API key has expired',
+      })
       return
     }
     req.principal = principal

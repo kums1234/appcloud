@@ -31,12 +31,24 @@ CREATE TABLE IF NOT EXISTS api_keys (
   last_used_at  TIMESTAMPTZ,
   -- Soft delete. Once revoked, never reused.
   revoked_at    TIMESTAMPTZ,
+  -- Optional expiry. NULL = never expires. The cache filter that decides
+  -- which keys are usable evaluates `expires_at IS NULL OR expires_at > now()`,
+  -- so expired keys stop authenticating without any explicit revoke.
+  -- Useful for time-bound CI tokens.
+  expires_at    TIMESTAMPTZ,
   -- Marks the env-var bootstrap rows so the auth plugin can refresh them
   -- if the env var changes (rotated key). Hand-created keys have FALSE.
   is_bootstrap  BOOLEAN      NOT NULL DEFAULT false,
   CHECK (array_length(scopes, 1) >= 1)
 );
 
+-- Idempotent guard for upgraded deployments where api_keys was created
+-- before expires_at existed.
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+-- Partial index gates on revoked_at only — `now()` is STABLE, not
+-- IMMUTABLE, so it can't appear in a partial-index predicate. Expiry
+-- is filtered at query time in the auth plugin's cache-load query.
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash_active
   ON api_keys (key_hash) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_api_keys_active

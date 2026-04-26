@@ -76,6 +76,20 @@ DB-backed multi-key RBAC system replacing the previous single-env-var auth.
   (`APPCLOUD_ADMIN_API_KEY` env var) is now the lower-effort path; for
   multi-team operation, create separate keys via `/admin/api-keys`.
 
+### Added — key lifecycle
+- **`api_keys.expires_at TIMESTAMPTZ`** (nullable; NULL = never expires).
+  The auth-plugin cache filter (`WHERE revoked_at IS NULL AND (expires_at
+  IS NULL OR expires_at > now())`) drops expired keys at refresh time, and
+  a per-request expiry check (`new Date(principal.expiresAt) <= new Date()`)
+  enforces the moment of expiry without waiting for the cache TTL. Useful
+  for time-bound CI tokens.
+- `POST /admin/api-keys` accepts an optional `expiresAt` ISO instant
+  (rejected with 400 if it's already in the past at create time).
+  `PATCH /admin/api-keys/:id` accepts `expiresAt: null` to clear or an
+  ISO instant to set/extend (no future-only check on PATCH so it can
+  also be used to force-expire a key without bumping `revoked_at`).
+- `GET /admin/api-keys` rows expose `expires_at`.
+
 ### Reliability — audit log
 - **`pg.audit()` retry buffer.** Failed INSERTs no longer disappear into a
   silent try/catch. Rows queue in an in-memory ring buffer (capped via

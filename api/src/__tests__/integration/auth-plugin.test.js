@@ -384,6 +384,81 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     })
   })
 
+  test('expiresAt: future expiry works, past expiry rejects, NULL = never', async () => {
+    // Create three keys spanning the expiry-state matrix.
+    const futureCreate = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({
+        name:      'expiry-future',
+        scopes:    ['read'],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),    // +60s
+      }),
+    })
+    expect(futureCreate.statusCode).toBe(201)
+    const future = JSON.parse(futureCreate.payload)
+    expect(future.expires_at).toBeTruthy()
+
+    // Create-time validation: expiresAt in the past → 400.
+    const pastCreate = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({
+        name:      'expiry-past-attempt',
+        scopes:    ['read'],
+        expiresAt: '2000-01-01T00:00:00Z',
+      }),
+    })
+    expect(pastCreate.statusCode).toBe(400)
+    expect(JSON.parse(pastCreate.payload).message).toMatch(/in the future/)
+
+    // Future key works.
+    let r = await fastify.inject({
+      method: 'GET', url: '/whoami',
+      headers: { 'x-api-key': future.plaintext },
+    })
+    expect(r.statusCode).toBe(200)
+
+    // Force-expire it via PATCH (with a past expires_at) and verify it
+    // stops working immediately — the per-request expiry guard catches
+    // it without waiting for the cache to refresh.
+    const patched = await fastify.inject({
+      method: 'PATCH', url: `/admin/api-keys/${future.id}`,
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ expiresAt: '2000-01-01T00:00:00Z' }),
+    })
+    expect(patched.statusCode).toBe(200)
+    expect(new Date(JSON.parse(patched.payload).expires_at) < new Date()).toBe(true)
+
+    // Wait a tick for the cache invalidation kicked by PATCH to land,
+    // then try the expired key.
+    await new Promise(r => setTimeout(r, 80))
+    r = await fastify.inject({
+      method: 'GET', url: '/whoami',
+      headers: { 'x-api-key': future.plaintext },
+    })
+    expect(r.statusCode).toBe(401)
+
+    // PATCH back to NULL re-enables.
+    await fastify.inject({
+      method: 'PATCH', url: `/admin/api-keys/${future.id}`,
+      headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
+      payload: JSON.stringify({ expiresAt: null }),
+    })
+    await new Promise(r => setTimeout(r, 80))
+    r = await fastify.inject({
+      method: 'GET', url: '/whoami',
+      headers: { 'x-api-key': future.plaintext },
+    })
+    expect(r.statusCode).toBe(200)
+
+    // Cleanup.
+    await fastify.inject({
+      method: 'DELETE', url: `/admin/api-keys/${future.id}`,
+      headers: { 'x-api-key': bootstrapAdminKey },
+    })
+  })
+
   test('admin-tier: PATCH updates scopes', async () => {
     const created = await fastify.inject({
       method: 'POST', url: '/admin/api-keys',

@@ -39,6 +39,7 @@ const ApiKeyRowSchema = {
     created_by:   { type: ['string', 'null'] },
     last_used_at: { type: ['string', 'null'], format: 'date-time' },
     revoked_at:   { type: ['string', 'null'], format: 'date-time' },
+    expires_at:   { type: ['string', 'null'], format: 'date-time', description: 'NULL = never expires; otherwise the key is rejected once now() crosses this instant.' },
     is_bootstrap: { type: 'boolean' },
   },
 }
@@ -48,12 +49,14 @@ const CreateBodySchema = {
   required: ['name', 'scopes'],
   additionalProperties: false,
   properties: {
-    name:   { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$', description: 'Human-readable identifier — appears in audit logs as the actor.' },
-    scopes: { type: 'array', minItems: 1, items: { type: 'string', enum: ['admin', 'write', 'read'] } },
+    name:      { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$', description: 'Human-readable identifier — appears in audit logs as the actor.' },
+    scopes:    { type: 'array', minItems: 1, items: { type: 'string', enum: ['admin', 'write', 'read'] } },
+    expiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Optional expiry. Omit (or pass null) for never-expires. The key stops working at the moment now() crosses this instant.' },
   },
   example: {
-    name:   'ci-deploy-bot',
-    scopes: ['write'],
+    name:      'ci-deploy-bot',
+    scopes:    ['write'],
+    expiresAt: '2026-12-31T23:59:59Z',
   },
 }
 
@@ -61,8 +64,9 @@ const PatchBodySchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    name:   { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$' },
-    scopes: { type: 'array', minItems: 1, items: { type: 'string', enum: ['admin', 'write', 'read'] } },
+    name:      { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$' },
+    scopes:    { type: 'array', minItems: 1, items: { type: 'string', enum: ['admin', 'write', 'read'] } },
+    expiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Pass null to clear (never-expires). Pass an ISO date-time to set or extend.' },
   },
 }
 
@@ -96,8 +100,18 @@ export default async function adminApiKeyRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!pgOk()) return reply.serviceUnavailable('Postgres not available')
-    const { name, scopes } = req.body
+    const { name, scopes, expiresAt } = req.body
     if (!NAME_RE.test(name)) return reply.badRequest('name must match [A-Za-z0-9._@:+-]{1,128}')
+    // expiresAt is optional. If passed, it must be in the future; rejecting
+    // a same-instant or already-past value at create time prevents a class
+    // of accidentally-DOA keys (the key would be rejected on first use).
+    let parsedExpiresAt = null
+    if (expiresAt) {
+      const ts = new Date(expiresAt)
+      if (Number.isNaN(ts.getTime())) return reply.badRequest('expiresAt must be a valid ISO date-time')
+      if (ts <= new Date())            return reply.badRequest('expiresAt must be in the future')
+      parsedExpiresAt = ts
+    }
 
     let normalised
     try { normalised = normaliseScopes(scopes) }
@@ -112,10 +126,10 @@ export default async function adminApiKeyRoutes(fastify) {
     let rows
     try {
       rows = await fastify.pg.query(`
-        INSERT INTO api_keys (name, key_hash, key_prefix, scopes, created_by, is_bootstrap)
-        VALUES ($1, $2, $3, $4, $5, false)
-        RETURNING id, name, key_prefix, scopes, created_at, created_by, last_used_at, revoked_at, is_bootstrap
-      `, [name, key_hash, key_prefix, normalised, req.principal?.name || 'unknown'])
+        INSERT INTO api_keys (name, key_hash, key_prefix, scopes, created_by, expires_at, is_bootstrap)
+        VALUES ($1, $2, $3, $4, $5, $6, false)
+        RETURNING id, name, key_prefix, scopes, created_at, created_by, last_used_at, revoked_at, expires_at, is_bootstrap
+      `, [name, key_hash, key_prefix, normalised, req.principal?.name || 'unknown', parsedExpiresAt])
     } catch (err) {
       if (String(err.code) === '23505') {                    // unique_violation
         return reply.conflict(`api key name '${name}' already exists`)
@@ -152,7 +166,7 @@ export default async function adminApiKeyRoutes(fastify) {
     const where = includeRevoked ? '' : 'WHERE revoked_at IS NULL'
     const rows = await fastify.pg.query(`
       SELECT id, name, key_prefix, scopes, created_at, created_by,
-             last_used_at, revoked_at, is_bootstrap
+             last_used_at, revoked_at, expires_at, is_bootstrap
       FROM api_keys
       ${where}
       ORDER BY created_at DESC
@@ -201,15 +215,15 @@ export default async function adminApiKeyRoutes(fastify) {
     config: { scope: 'admin' },
     schema: {
       tags:        ['Admin'],
-      summary:     'Update an API key (name / scopes)',
-      description: 'Updates the row metadata. The secret cannot be patched — generate a new key and revoke the old one. Bootstrap rows are read-only.',
+      summary:     'Update an API key (name / scopes / expiresAt)',
+      description: 'Updates the row metadata. The secret cannot be patched — generate a new key and revoke the old one. Bootstrap rows are read-only. Pass `expiresAt: null` to clear an expiry, or an ISO instant to set/extend.',
       params:      { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
       body:        PatchBodySchema,
       response:    { 200: ApiKeyRowSchema, 404: StandardErrorResponses[404], 409: StandardErrorResponses[409] },
     },
   }, async (req, reply) => {
     if (!pgOk()) return reply.serviceUnavailable('Postgres not available')
-    const { name, scopes } = req.body || {}
+    const { name, scopes, expiresAt } = req.body || {}
     if (name !== undefined && !NAME_RE.test(name)) {
       return reply.badRequest('name must match [A-Za-z0-9._@:+-]{1,128}')
     }
@@ -217,6 +231,23 @@ export default async function adminApiKeyRoutes(fastify) {
     if (scopes !== undefined) {
       try { normalised = normaliseScopes(scopes) }
       catch (e) { return reply.badRequest(e.message) }
+    }
+
+    // expiresAt patches: undefined = leave alone, null = clear (never
+    // expires), ISO date-time = set/extend (validated). Unlike create,
+    // we allow extending into the past — useful for forcing an early
+    // expiry to revoke without bumping revoked_at.
+    let parsedExpiresAt
+    let touchExpiresAt = false
+    if (expiresAt !== undefined) {
+      touchExpiresAt = true
+      if (expiresAt === null) {
+        parsedExpiresAt = null
+      } else {
+        const ts = new Date(expiresAt)
+        if (Number.isNaN(ts.getTime())) return reply.badRequest('expiresAt must be a valid ISO date-time or null')
+        parsedExpiresAt = ts
+      }
     }
 
     const existing = await fastify.pg.query(
@@ -228,16 +259,35 @@ export default async function adminApiKeyRoutes(fastify) {
       return reply.conflict('bootstrap keys cannot be patched — rotate APPCLOUD_API_KEY{,_FILE} or change scopes in the plugin code')
     }
 
+    // Build SET clauses dynamically so each field is independently
+    // patchable. expires_at gets a literal-NULL path (the COALESCE pattern
+    // would treat null as "leave alone").
+    const sets = []
+    const params = []
+    let p = 1
+    if (name !== undefined)       { sets.push(`name = $${p++}`)        ; params.push(name) }
+    if (normalised !== undefined) { sets.push(`scopes = $${p++}::text[]`); params.push(normalised) }
+    if (touchExpiresAt)           { sets.push(`expires_at = $${p++}`)   ; params.push(parsedExpiresAt) }
+
+    if (!sets.length) {
+      // Nothing to update — return the current row.
+      const current = await fastify.pg.query(`
+        SELECT id, name, key_prefix, scopes, created_at, created_by,
+               last_used_at, revoked_at, expires_at, is_bootstrap
+        FROM api_keys WHERE id = $1
+      `, [req.params.id])
+      return current[0]
+    }
+
     let rows
     try {
       rows = await fastify.pg.query(`
         UPDATE api_keys
-        SET name   = COALESCE($1, name),
-            scopes = COALESCE($2::text[], scopes)
-        WHERE id = $3
+        SET ${sets.join(', ')}
+        WHERE id = $${p}
         RETURNING id, name, key_prefix, scopes, created_at, created_by,
-                  last_used_at, revoked_at, is_bootstrap
-      `, [name ?? null, normalised ?? null, req.params.id])
+                  last_used_at, revoked_at, expires_at, is_bootstrap
+      `, [...params, req.params.id])
     } catch (err) {
       if (String(err.code) === '23505') {
         return reply.conflict(`api key name '${name}' already exists`)

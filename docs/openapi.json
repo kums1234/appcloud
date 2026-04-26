@@ -6083,13 +6083,22 @@
                         "read"
                       ]
                     }
+                  },
+                  "expiresAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Optional expiry. Omit (or pass null) for never-expires. The key stops working at the moment now() crosses this instant."
                   }
                 },
                 "example": {
                   "name": "ci-deploy-bot",
                   "scopes": [
                     "write"
-                  ]
+                  ],
+                  "expiresAt": "2026-12-31T23:59:59Z"
                 }
               }
             }
@@ -6149,6 +6158,14 @@
                         "string"
                       ],
                       "format": "date-time"
+                    },
+                    "expires_at": {
+                      "type": [
+                        "null",
+                        "string"
+                      ],
+                      "format": "date-time",
+                      "description": "NULL = never expires; otherwise the key is rejected once now() crosses this instant."
                     },
                     "is_bootstrap": {
                       "type": "boolean"
@@ -6239,6 +6256,14 @@
                           "string"
                         ],
                         "format": "date-time"
+                      },
+                      "expires_at": {
+                        "type": [
+                          "null",
+                          "string"
+                        ],
+                        "format": "date-time",
+                        "description": "NULL = never expires; otherwise the key is rejected once now() crosses this instant."
                       },
                       "is_bootstrap": {
                         "type": "boolean"
@@ -6337,11 +6362,11 @@
         }
       },
       "patch": {
-        "summary": "Update an API key (name / scopes)",
+        "summary": "Update an API key (name / scopes / expiresAt)",
         "tags": [
           "Admin"
         ],
-        "description": "Updates the row metadata. The secret cannot be patched — generate a new key and revoke the old one. Bootstrap rows are read-only.",
+        "description": "Updates the row metadata. The secret cannot be patched — generate a new key and revoke the old one. Bootstrap rows are read-only. Pass `expiresAt: null` to clear an expiry, or an ISO instant to set/extend.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6364,6 +6389,14 @@
                         "read"
                       ]
                     }
+                  },
+                  "expiresAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Pass null to clear (never-expires). Pass an ISO date-time to set or extend."
                   }
                 }
               }
@@ -6434,6 +6467,14 @@
                         "string"
                       ],
                       "format": "date-time"
+                    },
+                    "expires_at": {
+                      "type": [
+                        "null",
+                        "string"
+                      ],
+                      "format": "date-time",
+                      "description": "NULL = never expires; otherwise the key is rejected once now() crosses this instant."
                     },
                     "is_bootstrap": {
                       "type": "boolean"
