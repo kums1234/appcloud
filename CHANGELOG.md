@@ -37,10 +37,35 @@ v5-compatible majors from earlier slices.
   semicolon-delimited query strings, so no behaviour change.
 
 ### Reliability
-- `npm audit` no longer flags `fastify` directly. Remaining 23 advisories
-  live in transitive deps of `openapi-to-postmanv2` (yaml/lodash/
-  postman-collection) and `@google-cloud/storage` (gaxios → undici),
-  outside our exploit surface.
+- `npm audit` no longer flags `fastify` directly. Down from 23 → 18
+  remaining advisories, **0 high-severity, 18 moderate**, all in deep
+  transitive deps. Closed via `package.json` overrides:
+    - `undici            ^6.24.0` — closes GHSA-4992-7rv2-5pvq (CRLF
+      injection in upgrade option). Coming from `testcontainers` (devDep);
+      override forces 6.25 which testcontainers tolerates.
+    - `js-yaml           ^4.1.1` — closes GHSA-mh29-5h37-fv8m (prototype
+      pollution in merge `<<`). Transitive of `openapi-to-postmanv2`.
+    - `@tootallnate/once ^3.0.1` — closes GHSA-vpq2-c234-7xj6 (incorrect
+      control-flow scoping). Transitive of `@google-cloud/storage`.
+    - `lodash            ^4.18.1` — closes 3 high-severity advisories
+      (GHSA-r5fr-rjxr-66jc, GHSA-f23m-r3pf-42rh, GHSA-xxjr-mmjv-4gpg).
+      Coming from `openapi-to-postmanv2`. lodash 4.18 is the new latest
+      after years of stagnation at 4.17.21.
+- Remaining 2 unique advisories with no clean fix path:
+    - `uuid <14.0.0`: GHSA-w5hq-g745-h8pq (buffer bounds in v3/v5/v6 when
+      `buf` arg is supplied). Override to `^14` blocked because
+      `testcontainers` and Azure SDK rely on uuid v3 API surface that v14
+      removed. **No practical exploit surface in our use** — none of our
+      consumers pass `buf` to the affected uuid functions.
+    - `yaml 1.0.0 - 1.10.2`: GHSA-48c2-rrv3-qjmp (stack overflow on deeply
+      nested YAML). Fix is in yaml@2 only (v1 line is dead).
+      Inside `openapi-to-postmanv2 > swagger2openapi > oas-resolver` which
+      calls yaml@1 APIs that don't exist in 2.x. **No practical exploit**
+      — openapi-to-postmanv2 only parses our own OpenAPI YAML at build
+      time; never untrusted input.
+- Both can be revisited when the upstream packages release fixes (uuid
+  via Azure SDK / testcontainers bumping their uuid usage to v14, yaml
+  via openapi-to-postmanv2 migrating to yaml@2 or a different parser).
 
 ### Test posture
 - 364 unit + 37 integration = 401 tests pass under Fastify 5 with no

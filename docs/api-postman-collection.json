@@ -59,7 +59,7 @@
       ]
     },
     {
-      "id": "be2b57b7-8235-4613-b782-9322f5ef703e",
+      "id": "0a6902e1-4902-4f86-aa9c-964184dcf3a3",
       "name": "Applications",
       "description": {
         "content": "",
@@ -67,7 +67,7 @@
       },
       "item": [
         {
-          "id": "fca42a3f-862f-49bd-a726-88eae97c0de8",
+          "id": "e56536fb-385d-4eff-8c25-6b0e29fe03f9",
           "name": "List Applications",
           "request": {
             "name": "List Applications",
@@ -97,7 +97,7 @@
           },
           "response": [
             {
-              "id": "860f496a-2561-47e8-a9aa-dbcaee798123",
+              "id": "34e521bb-281c-4398-a788-950cafdef948",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -128,7 +128,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"d63eb63a-8963-4bfa-48f0-f076c4564d6d\",\n    \"name\": \"Payments Platform\",\n    \"tier\": 1,\n    \"owner\": \"payments-team\",\n    \"environment\": \"production\",\n    \"availability\": \"99.99\",\n    \"confidentiality\": \"confidential\",\n    \"domain\": \"finance\",\n    \"componentCount\": 6264,\n    \"key_0\": 5145.527227178175,\n    \"key_1\": \"string\",\n    \"key_2\": 6248.304031064016\n  },\n  {\n    \"id\": \"2fa0e8d9-0f44-42b1-de5f-4906c117226e\",\n    \"name\": \"Payments Platform\",\n    \"tier\": 1,\n    \"owner\": \"payments-team\",\n    \"environment\": \"production\",\n    \"availability\": \"99.99\",\n    \"confidentiality\": \"confidential\",\n    \"domain\": \"finance\",\n    \"componentCount\": 9184\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"4d9a06d4-8965-5521-1916-3a8778a9966c\",\n    \"name\": \"Payments Platform\",\n    \"tier\": 1,\n    \"owner\": \"payments-team\",\n    \"environment\": \"production\",\n    \"availability\": \"99.99\",\n    \"confidentiality\": \"confidential\",\n    \"domain\": \"finance\",\n    \"componentCount\": 9785,\n    \"key_0\": \"string\",\n    \"key_1\": false\n  },\n  {\n    \"id\": \"ee45f269-2598-e743-eee7-d68dbce98a20\",\n    \"name\": \"Payments Platform\",\n    \"tier\": 1,\n    \"owner\": \"payments-team\",\n    \"environment\": \"production\",\n    \"availability\": \"99.99\",\n    \"confidentiality\": \"confidential\",\n    \"domain\": \"finance\",\n    \"componentCount\": 1625\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -139,7 +139,7 @@
           }
         },
         {
-          "id": "70ac1564-77d5-4ac0-bbaa-f09e2c5bf3d6",
+          "id": "6a407346-d80f-40f7-98ba-c1a28ec0e201",
           "name": "Create an Application",
           "request": {
             "name": "Create an Application",
@@ -182,7 +182,7 @@
           },
           "response": [
             {
-              "id": "2aeaf0b4-6de1-4870-a9bd-37be17d333cd",
+              "id": "404c1ba0-cd6e-4ef5-8ae4-bf34ed7109dd",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -221,12 +221,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"a15099ec-3e1c-8258-fede-f0451ff5e4be\",\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"availability\": \"99.99\",\n  \"confidentiality\": \"confidential\",\n  \"domain\": \"finance\"\n}",
+              "body": "{\n  \"id\": \"33d0cb27-6baa-0b92-1794-61f2674990b4\",\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"availability\": \"99.99\",\n  \"confidentiality\": \"confidential\",\n  \"domain\": \"finance\",\n  \"key_0\": 3192,\n  \"key_1\": true\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "29a9a20e-6a8b-48d2-a7c5-281a7e1272ec",
+              "id": "3ebfde71-0747-4d20-8614-3c106a3382b0",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -270,7 +270,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "48fdf04f-3613-4647-9be0-42c13edd068a",
+              "id": "ec0a979b-5adc-4452-93ea-f08c5773df22",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -314,7 +314,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4d6735bd-8a2a-48a8-99ff-6e35e3c14563",
+              "id": "c62714e7-c93b-4b34-8de9-db4006cfefde",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -358,7 +358,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "1b0bf4af-d8c2-4290-ac0a-fa6d535cd256",
+              "id": "e0cbdbb4-65ac-4e39-b399-ac67836599f3",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -402,7 +402,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "57520fe9-e738-45dc-bf0b-9d5bcc356293",
+              "id": "a7c7326b-c382-4ffa-801e-a038c41bdb11",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -446,7 +446,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "5d8f46be-d7db-4b05-9fe5-6ba02924fe71",
+              "id": "8d1a9150-fbf7-450e-9fa9-5028736d60ff",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -496,7 +496,7 @@
           }
         },
         {
-          "id": "908036a8-36be-4883-9942-098d723bb1fa",
+          "id": "7cc55210-28df-4d52-92fd-8f84e39be5f5",
           "name": "Get one Application",
           "request": {
             "name": "Get one Application",
@@ -534,7 +534,7 @@
           },
           "response": [
             {
-              "id": "36b85252-c59f-452d-8f4d-f3df9210c5a3",
+              "id": "03857e94-49c2-4713-a26a-8eef8b75e82d",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -573,12 +573,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"c9a21270-c33c-2aac-5a1a-e0d59c30f6fa\",\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"availability\": \"99.99\",\n  \"confidentiality\": \"confidential\",\n  \"domain\": \"finance\",\n  \"components\": [\n    {\n      \"key_0\": 9161,\n      \"key_1\": 2720\n    },\n    {\n      \"key_0\": 8602.381176219014\n    }\n  ],\n  \"infra\": [\n    {\n      \"key_0\": 4097.258822479648,\n      \"key_1\": 4123.908068089295\n    },\n    {\n      \"key_0\": 1357,\n      \"key_1\": 2762\n    }\n  ],\n  \"key_0\": 1005,\n  \"key_1\": \"string\",\n  \"key_2\": \"string\",\n  \"key_3\": 5799.824918434811\n}",
+              "body": "{\n  \"id\": \"85ba482e-6487-2846-e155-10934a436ff8\",\n  \"name\": \"Payments Platform\",\n  \"tier\": 2,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"availability\": \"99.99\",\n  \"confidentiality\": \"confidential\",\n  \"domain\": \"finance\",\n  \"components\": [\n    {\n      \"key_0\": 6118.393656519645,\n      \"key_1\": false\n    },\n    {\n      \"key_0\": 1864.9755255304058\n    }\n  ],\n  \"infra\": [\n    {\n      \"key_0\": false\n    },\n    {\n      \"key_0\": \"string\",\n      \"key_1\": false,\n      \"key_2\": 8002.610909500394,\n      \"key_3\": \"string\"\n    }\n  ],\n  \"key_0\": 7841\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "28fd4aeb-e66d-4c52-816d-4f1c1aa062b2",
+              "id": "6c346b3f-c240-4e49-a27c-ecf4f69889ea",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -628,7 +628,7 @@
           }
         },
         {
-          "id": "709a407b-8948-43b8-a6e2-22574bb690b1",
+          "id": "f6d2c09b-41fa-4d4f-b4de-48ad7200a32d",
           "name": "Partially update an Application",
           "request": {
             "name": "Partially update an Application",
@@ -679,7 +679,7 @@
           },
           "response": [
             {
-              "id": "162e0755-e701-4ad7-a97c-d343be19b43d",
+              "id": "01a3b53b-c86d-467e-9100-6fcc25b29296",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -726,12 +726,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"a15099ec-3e1c-8258-fede-f0451ff5e4be\",\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"availability\": \"99.99\",\n  \"confidentiality\": \"confidential\",\n  \"domain\": \"finance\"\n}",
+              "body": "{\n  \"id\": \"33d0cb27-6baa-0b92-1794-61f2674990b4\",\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"availability\": \"99.99\",\n  \"confidentiality\": \"confidential\",\n  \"domain\": \"finance\",\n  \"key_0\": 3192,\n  \"key_1\": true\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "68d7c10b-fae4-4d82-b86a-0b96e39fcade",
+              "id": "b5277696-b033-46f6-816a-3d808ba63fd9",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -789,7 +789,7 @@
           }
         },
         {
-          "id": "7cbd2c6a-7cd4-4230-83b6-60c38acbff3c",
+          "id": "41f325c5-ce7e-4089-9638-0045f39a8452",
           "name": "Delete an Application (cascades exclusively-owned Components + Infra)",
           "request": {
             "name": "Delete an Application (cascades exclusively-owned Components + Infra)",
@@ -827,7 +827,7 @@
           },
           "response": [
             {
-              "id": "b571f9ec-4b7e-4d2c-9446-ffcd738b3986",
+              "id": "55ade07a-1341-4a1a-a63e-907b0d2f826f",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -865,7 +865,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "28aceb0b-cf21-4504-85c3-81d85d4773b1",
+              "id": "83113de9-0a7e-462e-af7e-c71429de71e0",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -915,7 +915,7 @@
           }
         },
         {
-          "id": "dea410a2-c6d6-4f6d-b2a2-75b73317dde5",
+          "id": "1127a8f3-dd4e-48f7-97b0-b2922fa760c0",
           "name": "Application topology — Components, Infra, intra-app connections",
           "request": {
             "name": "Application topology — Components, Infra, intra-app connections",
@@ -954,7 +954,7 @@
           },
           "response": [
             {
-              "id": "12533319-b381-4549-ab7c-14ac9ddabbdf",
+              "id": "4dd0db66-3adf-42e4-a2ff-e0d06db565ac",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -994,12 +994,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"application\": {\n    \"id\": \"7051163d-48ea-6a27-bbd0-4fae0fad2eb5\",\n    \"name\": \"Payments Platform\",\n    \"tier\": 2,\n    \"owner\": \"payments-team\",\n    \"environment\": \"production\",\n    \"availability\": \"99.99\",\n    \"confidentiality\": \"confidential\",\n    \"domain\": \"finance\"\n  },\n  \"components\": [\n    {\n      \"id\": \"d84e69dc-c401-10f5-8d24-7feeca316d86\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": \"string\",\n      \"appName\": null\n    },\n    {\n      \"id\": \"17a086b8-774c-c636-2a74-16f7ca70262e\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": \"string\",\n      \"appName\": \"string\",\n      \"key_0\": 7124.583297379454,\n      \"key_1\": false,\n      \"key_2\": 5679,\n      \"key_3\": 5860.197547055659\n    }\n  ],\n  \"infra\": [\n    {\n      \"id\": \"717864f1-921f-563d-871b-c6f40ee75601\",\n      \"cloud_id\": null,\n      \"name\": \"string\",\n      \"provider\": \"gcp\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": true,\n      \"tags\": \"string\",\n      \"raw\": \"string\"\n    },\n    {\n      \"id\": \"e7760818-4df9-041a-bc19-a5131d0c56a2\",\n      \"cloud_id\": \"string\",\n      \"name\": \"string\",\n      \"provider\": \"aws\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": true,\n      \"tags\": {},\n      \"raw\": \"string\"\n    }\n  ],\n  \"connections\": [\n    {\n      \"key_0\": true\n    },\n    {\n      \"key_0\": false,\n      \"key_1\": \"string\"\n    }\n  ]\n}",
+              "body": "{\n  \"application\": {\n    \"id\": \"9a18f0bc-3473-3f9a-2b70-4c42655de9ba\",\n    \"name\": \"Payments Platform\",\n    \"tier\": 2,\n    \"owner\": \"payments-team\",\n    \"environment\": \"production\",\n    \"availability\": \"99.99\",\n    \"confidentiality\": \"confidential\",\n    \"domain\": \"finance\"\n  },\n  \"components\": [\n    {\n      \"id\": \"9a99ff0f-5efa-677e-b378-55e916c87681\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": null,\n      \"appName\": \"string\"\n    },\n    {\n      \"id\": \"3adb1387-6f9b-b2c6-540d-1b0412f277fc\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": null,\n      \"appName\": null\n    }\n  ],\n  \"infra\": [\n    {\n      \"id\": \"e93581b6-2177-bef6-dfc1-dfa98931c9f2\",\n      \"cloud_id\": \"string\",\n      \"name\": \"string\",\n      \"provider\": \"azure\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": false,\n      \"tags\": {},\n      \"raw\": \"string\"\n    },\n    {\n      \"id\": \"493e8c54-2761-f713-1a24-b4a77fc51682\",\n      \"cloud_id\": \"string\",\n      \"name\": \"string\",\n      \"provider\": \"azure\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": true,\n      \"tags\": \"string\",\n      \"raw\": \"string\"\n    }\n  ],\n  \"connections\": [\n    {\n      \"key_0\": true\n    },\n    {\n      \"key_0\": 6757,\n      \"key_1\": 9144.539332736747,\n      \"key_2\": \"string\",\n      \"key_3\": \"string\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "190965f4-5bd1-403c-82e4-5940752a7ef9",
+              "id": "0f2455bf-3e2c-48b0-b808-ac2f5cd0bb0f",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1050,7 +1050,7 @@
           }
         },
         {
-          "id": "3a884314-9504-4f19-8981-95b32fa8cb64",
+          "id": "bd548cc3-136c-49f0-82b3-0ec241e793ac",
           "name": "Cross-application dependencies for one Application",
           "request": {
             "name": "Cross-application dependencies for one Application",
@@ -1089,7 +1089,7 @@
           },
           "response": [
             {
-              "id": "b153320c-e1bd-4ee7-9067-f41621773dad",
+              "id": "67c0e9dd-8610-4f51-9362-2cf7104b8f0b",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1129,7 +1129,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"dependencies\": [\n    {\n      \"key_0\": \"string\"\n    },\n    {\n      \"key_0\": false,\n      \"key_1\": true\n    }\n  ]\n}",
+              "body": "{\n  \"dependencies\": [\n    {\n      \"key_0\": 6978.233645272649,\n      \"key_1\": 5623.416156239169,\n      \"key_2\": false\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -1143,7 +1143,7 @@
       "event": []
     },
     {
-      "id": "2e3f364d-88e7-48d6-942c-aae53d95c336",
+      "id": "d61cf529-4c76-4046-8a43-f49f268f39f6",
       "name": "Components",
       "description": {
         "content": "",
@@ -1151,7 +1151,7 @@
       },
       "item": [
         {
-          "id": "8bc4844f-4904-4f99-936a-3a8af13dffe5",
+          "id": "ff277b76-1807-4ae2-ad1a-501b1727ac2e",
           "name": "Component taxonomy + enum metadata",
           "request": {
             "name": "Component taxonomy + enum metadata",
@@ -1181,7 +1181,7 @@
           },
           "response": [
             {
-              "id": "e7feb618-e241-4f38-ac57-29c7c4092b7c",
+              "id": "49ec47c0-52fe-4ecc-a7df-1b3e766f9be8",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1212,7 +1212,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"componentTypes\": [\n    {\n      \"key_0\": 6660,\n      \"key_1\": 652\n    },\n    {\n      \"key_0\": \"string\",\n      \"key_1\": false\n    }\n  ],\n  \"tiers\": [\n    {\n      \"key_0\": 9923.156136267058\n    },\n    {\n      \"key_0\": true,\n      \"key_1\": true,\n      \"key_2\": \"string\"\n    }\n  ],\n  \"environments\": [\n    \"string\",\n    \"string\"\n  ],\n  \"availabilitySlas\": [\n    {\n      \"key_0\": 5281,\n      \"key_1\": 7228.078523197301,\n      \"key_2\": 9327.022005593992\n    },\n    {\n      \"key_0\": 9802,\n      \"key_1\": \"string\",\n      \"key_2\": true\n    }\n  ],\n  \"confidentiality\": [\n    {\n      \"key_0\": 789.5196873479459\n    },\n    {\n      \"key_0\": 4827,\n      \"key_1\": false\n    }\n  ]\n}",
+              "body": "{\n  \"componentTypes\": [\n    {\n      \"key_0\": false,\n      \"key_1\": false\n    },\n    {\n      \"key_0\": 6149\n    }\n  ],\n  \"tiers\": [\n    {\n      \"key_0\": 6137,\n      \"key_1\": false,\n      \"key_2\": false,\n      \"key_3\": 4548\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ],\n  \"environments\": [\n    \"string\",\n    \"string\"\n  ],\n  \"availabilitySlas\": [\n    {\n      \"key_0\": 6685.272371947617\n    },\n    {\n      \"key_0\": true\n    }\n  ],\n  \"confidentiality\": [\n    {\n      \"key_0\": 2301.720946959345,\n      \"key_1\": \"string\"\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -1223,7 +1223,7 @@
           }
         },
         {
-          "id": "8d993deb-0dcc-492a-94b4-50c1e7c035d5",
+          "id": "39294419-cb40-4899-8611-e8b5d3f5a93b",
           "name": "List Components",
           "request": {
             "name": "List Components",
@@ -1260,7 +1260,7 @@
           },
           "response": [
             {
-              "id": "98f10905-4b42-4d4e-9773-fe20d47974ed",
+              "id": "b5a5ebb7-e46c-4d4b-bd26-dc9e7060391d",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1296,7 +1296,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"5225e180-e541-d6ce-4d75-fd5e78ad22e8\",\n    \"name\": \"payment-api\",\n    \"type\": \"api\",\n    \"runtime\": \"nodejs\",\n    \"appId\": null,\n    \"appName\": \"string\"\n  },\n  {\n    \"id\": \"173d44a2-b038-8301-a372-d05d19c1ab53\",\n    \"name\": \"payment-api\",\n    \"type\": \"api\",\n    \"runtime\": \"nodejs\",\n    \"appId\": \"string\",\n    \"appName\": \"string\",\n    \"key_0\": 5650,\n    \"key_1\": false\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"286b37da-9d0a-7870-0b26-0d262d938a7b\",\n    \"name\": \"payment-api\",\n    \"type\": \"api\",\n    \"runtime\": \"nodejs\",\n    \"appId\": null,\n    \"appName\": \"string\"\n  },\n  {\n    \"id\": \"d7bfd994-c1c4-7f88-c391-0d4b53307245\",\n    \"name\": \"payment-api\",\n    \"type\": \"api\",\n    \"runtime\": \"nodejs\",\n    \"appId\": null,\n    \"appName\": \"string\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -1307,7 +1307,7 @@
           }
         },
         {
-          "id": "ca9c4976-9af4-47ff-9b53-6e8c533783f6",
+          "id": "b6d81d3e-ce2f-441c-b43d-9a5dd47c195a",
           "name": "Create a Component",
           "request": {
             "name": "Create a Component",
@@ -1350,7 +1350,7 @@
           },
           "response": [
             {
-              "id": "ca66c0b5-81ab-41ab-9223-45957350d306",
+              "id": "caf791fe-df89-4bbf-ba73-f3dbfbe4aa47",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1389,7 +1389,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"a7681a1b-9ecc-3d1d-820e-e5a491a4bd67\",\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"appId\": \"string\",\n  \"appName\": null\n}",
+              "body": "{\n  \"id\": \"449a7824-f4a1-98c9-fe48-03a2ac2205f1\",\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"appId\": \"string\",\n  \"appName\": \"string\",\n  \"key_0\": \"string\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -1400,7 +1400,7 @@
           }
         },
         {
-          "id": "0831cbaa-05c1-4c4c-8fe9-45ed6464460f",
+          "id": "6ed31433-0bb5-47e3-94a8-ec4e20673636",
           "name": "Get one Component",
           "request": {
             "name": "Get one Component",
@@ -1438,7 +1438,7 @@
           },
           "response": [
             {
-              "id": "14148391-81a4-4387-b168-2bc716779a49",
+              "id": "a39fd852-2c47-4200-a5cd-746b56b17b73",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1477,12 +1477,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"a7681a1b-9ecc-3d1d-820e-e5a491a4bd67\",\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"appId\": \"string\",\n  \"appName\": null\n}",
+              "body": "{\n  \"id\": \"449a7824-f4a1-98c9-fe48-03a2ac2205f1\",\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"appId\": \"string\",\n  \"appName\": \"string\",\n  \"key_0\": \"string\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "bbbf4875-8a63-4cf6-b67e-634658d6b871",
+              "id": "19286233-f8b8-47b9-84de-2c299ec41e74",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1532,7 +1532,7 @@
           }
         },
         {
-          "id": "3ae5a281-3ce4-4834-af7a-42de7c50f999",
+          "id": "b84feff6-8712-4d6e-beea-2b33a7093d28",
           "name": "Update a Component",
           "request": {
             "name": "Update a Component",
@@ -1573,7 +1573,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": \"string\",\n  \"key_1\": \"string\"\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": 5726\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1583,7 +1583,7 @@
           },
           "response": [
             {
-              "id": "f27396ca-e31f-41be-a3b6-395aa063535c",
+              "id": "161ffbcb-f79d-4f58-a46f-ad29de87946d",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1614,7 +1614,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": \"string\",\n  \"key_1\": \"string\"\n}",
+                  "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": 5726\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1630,12 +1630,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"a7681a1b-9ecc-3d1d-820e-e5a491a4bd67\",\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"appId\": \"string\",\n  \"appName\": null\n}",
+              "body": "{\n  \"id\": \"449a7824-f4a1-98c9-fe48-03a2ac2205f1\",\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"appId\": \"string\",\n  \"appName\": \"string\",\n  \"key_0\": \"string\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "87c3b19d-dff9-4dca-a21a-7e48581d4445",
+              "id": "4bde56b8-d0c1-4724-8b17-ff59ac6c1978",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1666,7 +1666,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": \"string\",\n  \"key_1\": \"string\"\n}",
+                  "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": 5726\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1693,7 +1693,7 @@
           }
         },
         {
-          "id": "953f4fa2-730c-4b8f-bd58-106f4340d5c3",
+          "id": "cb6ef446-6f10-4631-a660-9980c83e3aad",
           "name": "Delete a Component",
           "request": {
             "name": "Delete a Component",
@@ -1731,7 +1731,7 @@
           },
           "response": [
             {
-              "id": "6939e1bf-9fbf-4d7b-9b24-f57ee600f23d",
+              "id": "42ed5472-a8a2-4cf1-b0b3-3701b32ccd75",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1769,7 +1769,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "d0d1ae56-aaa2-4735-bee8-dfcc1e125875",
+              "id": "5901e32a-94be-4f8c-b7d0-4d705f07cb1c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1819,7 +1819,7 @@
           }
         },
         {
-          "id": "d216c223-c4cc-41c8-8056-fe7b058247f4",
+          "id": "a45c42b2-20b3-4f5e-8d0b-fe8e64d5cbf9",
           "name": "Connect this Component to another (Component → Component edge)",
           "request": {
             "name": "Connect this Component to another (Component → Component edge)",
@@ -1871,7 +1871,7 @@
           },
           "response": [
             {
-              "id": "918d11c2-f560-4ebf-ada1-409a1b62364c",
+              "id": "79e03645-1ba4-4245-ac55-bcf9e3bdc018",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -1930,7 +1930,7 @@
           }
         },
         {
-          "id": "0378b957-106b-4a8b-82cb-36901e1cdc12",
+          "id": "f70434bf-03a3-4507-81d7-7c0f853e72de",
           "name": "Deploy a Component onto an Infra (manual ownership)",
           "request": {
             "name": "Deploy a Component onto an Infra (manual ownership)",
@@ -1982,7 +1982,7 @@
           },
           "response": [
             {
-              "id": "a99b232c-f120-4acd-8b32-ebfeb7b1b783",
+              "id": "213fad08-4ea4-4bbc-9ab1-356f6cf331d7",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2044,7 +2044,7 @@
       "event": []
     },
     {
-      "id": "e61461d0-ea4c-4716-99d3-9b01fb8db7de",
+      "id": "add12345-e171-4829-b526-0b92be36b18e",
       "name": "Infra",
       "description": {
         "content": "",
@@ -2052,7 +2052,7 @@
       },
       "item": [
         {
-          "id": "fcbdb104-0844-43e1-aefa-e7031169663f",
+          "id": "b90f6464-20fb-40b7-bb11-324ca8b2f9fa",
           "name": "List Infra",
           "request": {
             "name": "List Infra",
@@ -2072,7 +2072,7 @@
                 {
                   "disabled": false,
                   "key": "provider",
-                  "value": "gcp"
+                  "value": "azure"
                 },
                 {
                   "disabled": false,
@@ -2093,7 +2093,7 @@
           },
           "response": [
             {
-              "id": "972e2730-6c51-41e5-8ca3-f36256d8c4fc",
+              "id": "480af710-966f-43fc-9327-c2d99b0dac41",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2107,7 +2107,7 @@
                   "query": [
                     {
                       "key": "provider",
-                      "value": "gcp"
+                      "value": "azure"
                     },
                     {
                       "key": "public",
@@ -2133,7 +2133,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"528c8ef0-49e7-9c42-d64b-51ddafff14c7\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"azure\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": true,\n    \"tags\": {},\n    \"raw\": {}\n  },\n  {\n    \"id\": \"7285f77b-fbbf-41a6-5433-5e080d605dd0\",\n    \"cloud_id\": \"string\",\n    \"name\": \"string\",\n    \"provider\": \"azure\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": true,\n    \"tags\": \"string\",\n    \"raw\": {}\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"5c0350a7-d022-32b6-b947-947b7695a1a5\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"aws\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": {},\n    \"raw\": {}\n  },\n  {\n    \"id\": \"ee04b091-2b47-c3ad-bbb9-c7e4e27b48da\",\n    \"cloud_id\": \"string\",\n    \"name\": \"string\",\n    \"provider\": \"gcp\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": {},\n    \"raw\": {}\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2144,7 +2144,7 @@
           }
         },
         {
-          "id": "0d2e2c32-6a76-40bc-a064-5bbfc4934f14",
+          "id": "c70338a0-1701-4acf-9014-92ad1e3b8df0",
           "name": "Manually create an Infra node",
           "request": {
             "name": "Manually create an Infra node",
@@ -2187,7 +2187,7 @@
           },
           "response": [
             {
-              "id": "862e8a14-8360-43ea-8ec5-fe9416c0fb31",
+              "id": "c0113807-b49d-4829-8c3f-65abc5940594",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2226,7 +2226,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"22069228-55ff-b2ee-8375-cdcf15fb92d6\",\n  \"cloud_id\": \"string\",\n  \"name\": \"string\",\n  \"provider\": \"gcp\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": true,\n  \"tags\": {},\n  \"raw\": \"string\"\n}",
+              "body": "{\n  \"id\": \"c4aca8ca-c908-15fd-9318-7fafd6ed9d2f\",\n  \"cloud_id\": \"string\",\n  \"name\": \"string\",\n  \"provider\": \"gcp\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": false,\n  \"tags\": \"string\",\n  \"raw\": {}\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2237,7 +2237,7 @@
           }
         },
         {
-          "id": "453d3be8-164b-4364-af4f-30815ad29284",
+          "id": "375e9517-5707-492d-ad10-3b0cc034b18a",
           "name": "Get one Infra node",
           "request": {
             "name": "Get one Infra node",
@@ -2275,7 +2275,7 @@
           },
           "response": [
             {
-              "id": "7fd4ac84-3375-4174-b2c9-582416a62e5f",
+              "id": "f2aeb3f0-f6b8-42c8-bebb-9be69a859490",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2314,12 +2314,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"22069228-55ff-b2ee-8375-cdcf15fb92d6\",\n  \"cloud_id\": \"string\",\n  \"name\": \"string\",\n  \"provider\": \"gcp\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": true,\n  \"tags\": {},\n  \"raw\": \"string\"\n}",
+              "body": "{\n  \"id\": \"c4aca8ca-c908-15fd-9318-7fafd6ed9d2f\",\n  \"cloud_id\": \"string\",\n  \"name\": \"string\",\n  \"provider\": \"gcp\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": false,\n  \"tags\": \"string\",\n  \"raw\": {}\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "c90a2cb4-221f-47c4-8d48-cf48d48e68b7",
+              "id": "a91a2f28-2e7a-4656-8d1d-69f4f9362800",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2369,7 +2369,7 @@
           }
         },
         {
-          "id": "f747400f-846a-40d8-9233-a594eca3535a",
+          "id": "32ad7320-cb7f-41f0-9064-9a0e18e3aa8a",
           "name": "Update an Infra node (name / region / public flag)",
           "request": {
             "name": "Update an Infra node (name / region / public flag)",
@@ -2417,7 +2417,7 @@
           },
           "response": [
             {
-              "id": "89d35755-f90c-42cd-ba0b-fb176a4e5844",
+              "id": "e8b2833e-9aab-4379-a1c4-968cf29f485b",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2464,12 +2464,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"22069228-55ff-b2ee-8375-cdcf15fb92d6\",\n  \"cloud_id\": \"string\",\n  \"name\": \"string\",\n  \"provider\": \"gcp\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": true,\n  \"tags\": {},\n  \"raw\": \"string\"\n}",
+              "body": "{\n  \"id\": \"c4aca8ca-c908-15fd-9318-7fafd6ed9d2f\",\n  \"cloud_id\": \"string\",\n  \"name\": \"string\",\n  \"provider\": \"gcp\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": false,\n  \"tags\": \"string\",\n  \"raw\": {}\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "73a09162-d1fb-488b-b008-443101f315e8",
+              "id": "868b80a5-de2d-4ff6-876d-e69ac93f529e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2527,7 +2527,7 @@
           }
         },
         {
-          "id": "22c4f119-c1df-4372-a5aa-f95b5b73b8b6",
+          "id": "d3cd3c43-0d4b-4eef-a14a-2bcc71e9497c",
           "name": "Delete an Infra node",
           "request": {
             "name": "Delete an Infra node",
@@ -2559,7 +2559,7 @@
           },
           "response": [
             {
-              "id": "4a55e51a-d8e1-4d64-8715-e31ff9d2fadd",
+              "id": "0ff9908b-d11f-4631-85ae-ce36d5384936",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2603,7 +2603,7 @@
           }
         },
         {
-          "id": "d094ee92-2cc4-4928-afca-a8d442a606b1",
+          "id": "cfd1b077-f5c7-4fd7-8e75-807daa54f812",
           "name": "Infra owned by more than one Application (shared services)",
           "request": {
             "name": "Infra owned by more than one Application (shared services)",
@@ -2634,7 +2634,7 @@
           },
           "response": [
             {
-              "id": "f7b37dd2-79d0-4d86-a75c-cccc8f2e379b",
+              "id": "de4f56e9-f3d3-4d03-9c8d-39f407ce3e14",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2666,7 +2666,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"53a37483-ae86-892e-5487-11815eefcb33\",\n    \"cloud_id\": \"string\",\n    \"name\": \"string\",\n    \"provider\": \"gcp\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": \"string\",\n    \"raw\": \"string\",\n    \"usedByApps\": 3599\n  },\n  {\n    \"id\": \"d34a53cd-0353-442c-550b-496f34a3ebab\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"gcp\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": \"string\",\n    \"raw\": \"string\",\n    \"usedByApps\": 8030\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"e9562306-8329-39e2-eb95-c93aa0f0c986\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"aws\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": \"string\",\n    \"raw\": {},\n    \"usedByApps\": 1729\n  },\n  {\n    \"id\": \"524cde7c-2cce-b8b4-32af-b0c355171497\",\n    \"cloud_id\": \"string\",\n    \"name\": \"string\",\n    \"provider\": \"gcp\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": true,\n    \"tags\": \"string\",\n    \"raw\": {},\n    \"usedByApps\": 4507,\n    \"key_0\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2677,7 +2677,7 @@
           }
         },
         {
-          "id": "bf3b90dd-1f30-4d36-ac44-b5e53d08ce54",
+          "id": "574032dc-bacd-4780-86d7-b7da53bf9863",
           "name": "Internet-exposed Infra (public = true)",
           "request": {
             "name": "Internet-exposed Infra (public = true)",
@@ -2708,7 +2708,7 @@
           },
           "response": [
             {
-              "id": "04bff13b-1c70-49be-a9d4-4a77683f5599",
+              "id": "af7e7190-f9ff-4532-a889-e978a35d295b",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2740,7 +2740,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"86e40c0f-7768-8c57-0201-883949c95ef9\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"gcp\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": true,\n    \"tags\": {},\n    \"raw\": \"string\",\n    \"components\": [\n      \"string\",\n      \"string\"\n    ]\n  },\n  {\n    \"id\": \"27f87be0-cc8e-64f8-0f1c-b512d7ed850d\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"azure\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": true,\n    \"tags\": {},\n    \"raw\": {},\n    \"components\": [\n      \"string\",\n      \"string\"\n    ],\n    \"key_0\": 641,\n    \"key_1\": \"string\"\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"87194e11-0745-9173-a951-525ac5cf877b\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"azure\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": \"string\",\n    \"raw\": \"string\",\n    \"components\": [\n      \"string\",\n      \"string\"\n    ],\n    \"key_0\": 7157.510124345261,\n    \"key_1\": 8745.609875032631,\n    \"key_2\": 1405.9302177028044\n  },\n  {\n    \"id\": \"f4ea8cc1-e091-df2f-ce35-5a4e188e0c65\",\n    \"cloud_id\": null,\n    \"name\": \"string\",\n    \"provider\": \"aws\",\n    \"resource_type\": \"vm\",\n    \"region\": \"eastus\",\n    \"public\": false,\n    \"tags\": {},\n    \"raw\": {},\n    \"components\": [\n      \"string\",\n      \"string\"\n    ]\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2754,7 +2754,7 @@
       "event": []
     },
     {
-      "id": "6e4b7317-6b38-436b-bd5c-45103b837364",
+      "id": "36355031-c1a5-44cc-81fb-1e44fa2bd120",
       "name": "Graph",
       "description": {
         "content": "",
@@ -2762,7 +2762,7 @@
       },
       "item": [
         {
-          "id": "cf612000-9d8a-425b-aacb-8c56c15bbe49",
+          "id": "07e3364e-57ca-4609-b68a-7fe6656893b3",
           "name": "Counts: applications, components, infra, connections, public-exposed",
           "request": {
             "name": "Counts: applications, components, infra, connections, public-exposed",
@@ -2792,7 +2792,7 @@
           },
           "response": [
             {
-              "id": "1cfb90fd-7e74-45a7-828d-e7672c8f54bd",
+              "id": "932e7e7c-6ddb-4abc-a587-caf2eab05b84",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2823,7 +2823,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"applications\": 2597,\n  \"components\": 9580,\n  \"infraResources\": 2626,\n  \"users\": 8282,\n  \"publicInfraCount\": 2373,\n  \"connections\": 6770,\n  \"componentsByType\": [\n    {\n      \"key_0\": 6818.023051128581,\n      \"key_1\": \"string\"\n    },\n    {\n      \"key_0\": 5644,\n      \"key_1\": false,\n      \"key_2\": \"string\"\n    }\n  ],\n  \"infraByProvider\": [\n    {\n      \"key_0\": false\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ],\n  \"key_0\": 4925\n}",
+              "body": "{\n  \"applications\": 2283,\n  \"components\": 6393,\n  \"infraResources\": 5936,\n  \"users\": 2486,\n  \"publicInfraCount\": 5496,\n  \"connections\": 7694,\n  \"componentsByType\": [\n    {\n      \"key_0\": \"string\",\n      \"key_1\": 5,\n      \"key_2\": 6118.799367211043\n    },\n    {\n      \"key_0\": 4591\n    }\n  ],\n  \"infraByProvider\": [\n    {\n      \"key_0\": false,\n      \"key_1\": 5416\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2834,7 +2834,7 @@
           }
         },
         {
-          "id": "5a6900ef-dc3f-4bba-9676-a410000a2923",
+          "id": "74b00a68-364c-4b00-87cb-85fab5b7b705",
           "name": "Full graph snapshot — apps, components, connections, deployments, infra",
           "request": {
             "name": "Full graph snapshot — apps, components, connections, deployments, infra",
@@ -2864,7 +2864,7 @@
           },
           "response": [
             {
-              "id": "e317ae6d-4225-40ca-84ba-92d64fbe2e52",
+              "id": "10a18719-aa90-4dcc-b74b-d14a72a60a8c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2895,7 +2895,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"apps\": [\n    {\n      \"id\": \"068175e8-cf50-7e31-dfb3-fd3aa7004a91\",\n      \"name\": \"Payments Platform\",\n      \"tier\": 1,\n      \"owner\": \"payments-team\",\n      \"environment\": \"production\",\n      \"availability\": \"99.99\",\n      \"confidentiality\": \"confidential\",\n      \"domain\": \"finance\"\n    },\n    {\n      \"id\": \"438354ea-4a1e-de08-4f63-a3af0faa8422\",\n      \"name\": \"Payments Platform\",\n      \"tier\": 1,\n      \"owner\": \"payments-team\",\n      \"environment\": \"production\",\n      \"availability\": \"99.99\",\n      \"confidentiality\": \"confidential\",\n      \"domain\": \"finance\",\n      \"key_0\": true\n    }\n  ],\n  \"components\": [\n    {\n      \"id\": \"44db9c6c-de19-16e0-a0f4-af42e4f61745\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": \"string\",\n      \"appName\": null\n    },\n    {\n      \"id\": \"d4ea4d56-8a35-e553-a558-89f5259af100\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": null,\n      \"appName\": \"string\"\n    }\n  ],\n  \"connections\": [\n    {\n      \"key_0\": 834,\n      \"key_1\": 6158,\n      \"key_2\": true,\n      \"key_3\": 6536.0974974504215,\n      \"key_4\": 4677.387368207921\n    },\n    {\n      \"key_0\": 1563\n    }\n  ],\n  \"deployments\": [\n    {\n      \"key_0\": 1656.9269107834207,\n      \"key_1\": false\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ],\n  \"infra\": [\n    {\n      \"id\": \"8902cdf9-a23d-a830-4582-f3dfc943deb7\",\n      \"cloud_id\": \"string\",\n      \"name\": \"string\",\n      \"provider\": \"aws\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": false,\n      \"tags\": {},\n      \"raw\": {}\n    },\n    {\n      \"id\": \"18a8907c-4ead-1509-47c1-13802f979eb9\",\n      \"cloud_id\": null,\n      \"name\": \"string\",\n      \"provider\": \"gcp\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": false,\n      \"tags\": \"string\",\n      \"raw\": \"string\"\n    }\n  ]\n}",
+              "body": "{\n  \"apps\": [\n    {\n      \"id\": \"78e4c29f-23d5-2777-041b-ab674ffb4305\",\n      \"name\": \"Payments Platform\",\n      \"tier\": 1,\n      \"owner\": \"payments-team\",\n      \"environment\": \"production\",\n      \"availability\": \"99.99\",\n      \"confidentiality\": \"confidential\",\n      \"domain\": \"finance\"\n    },\n    {\n      \"id\": \"eec3239a-6ea5-8798-3e88-419b7265ea52\",\n      \"name\": \"Payments Platform\",\n      \"tier\": 2,\n      \"owner\": \"payments-team\",\n      \"environment\": \"production\",\n      \"availability\": \"99.99\",\n      \"confidentiality\": \"confidential\",\n      \"domain\": \"finance\",\n      \"key_0\": \"string\"\n    }\n  ],\n  \"components\": [\n    {\n      \"id\": \"d3128446-0180-605f-1161-a94939f65c11\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": \"string\",\n      \"appName\": \"string\"\n    },\n    {\n      \"id\": \"e9a68fee-786a-14ef-b646-75cad25ba3e4\",\n      \"name\": \"payment-api\",\n      \"type\": \"api\",\n      \"runtime\": \"nodejs\",\n      \"appId\": \"string\",\n      \"appName\": null\n    }\n  ],\n  \"connections\": [\n    {\n      \"key_0\": 1157.8353018566113,\n      \"key_1\": 7838.790902604169\n    },\n    {\n      \"key_0\": false,\n      \"key_1\": \"string\"\n    }\n  ],\n  \"deployments\": [\n    {\n      \"key_0\": \"string\"\n    },\n    {\n      \"key_0\": 3320.2935296085334,\n      \"key_1\": 3818.2436370990704\n    }\n  ],\n  \"infra\": [\n    {\n      \"id\": \"c9383d87-0fd7-9f31-68a5-ae8a2457fe77\",\n      \"cloud_id\": null,\n      \"name\": \"string\",\n      \"provider\": \"aws\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": false,\n      \"tags\": {},\n      \"raw\": {}\n    },\n    {\n      \"id\": \"f3106e12-6822-d5e0-1625-6a61b7658b99\",\n      \"cloud_id\": null,\n      \"name\": \"string\",\n      \"provider\": \"gcp\",\n      \"resource_type\": \"vm\",\n      \"region\": \"eastus\",\n      \"public\": false,\n      \"tags\": \"string\",\n      \"raw\": \"string\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2906,7 +2906,7 @@
           }
         },
         {
-          "id": "5a2ce4f5-6b10-4083-8d6f-288cb7afd398",
+          "id": "5e5a341c-be17-4e2a-89ff-4317e3ca53a3",
           "name": "Blast-radius for a single Infra resource",
           "request": {
             "name": "Blast-radius for a single Infra resource",
@@ -2926,7 +2926,7 @@
                 {
                   "disabled": false,
                   "key": "infraId",
-                  "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                  "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                   "description": "(Required) "
                 }
               ],
@@ -2943,7 +2943,7 @@
           },
           "response": [
             {
-              "id": "a1b9ea40-057a-44a2-aae8-24a5db8bf488",
+              "id": "3fbb7a13-41cb-4f48-be49-b13d2a7afbc4",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2957,7 +2957,7 @@
                   "query": [
                     {
                       "key": "infraId",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea"
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d"
                     }
                   ],
                   "variable": []
@@ -2979,12 +2979,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"infra\": \"string\",\n  \"components\": [\n    {\n      \"key_0\": 6466,\n      \"key_1\": 5070.6347897667765,\n      \"key_2\": false,\n      \"key_3\": 7381.50835999267\n    },\n    {\n      \"key_0\": 9895\n    }\n  ],\n  \"applications\": [\n    {\n      \"key_0\": 8134.654392363685,\n      \"key_1\": 4917,\n      \"key_2\": false\n    },\n    {\n      \"key_0\": 4149\n    }\n  ],\n  \"key_0\": 1767,\n  \"key_1\": true\n}",
+              "body": "{\n  \"infra\": \"string\",\n  \"components\": [\n    {\n      \"key_0\": 2156.991127630039,\n      \"key_1\": false\n    },\n    {\n      \"key_0\": false,\n      \"key_1\": true\n    }\n  ],\n  \"applications\": [\n    {\n      \"key_0\": 6943.1073265432515,\n      \"key_1\": false\n    },\n    {\n      \"key_0\": \"string\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "810b4261-2728-4e34-918e-c6de9dd2278d",
+              "id": "2d42effe-8017-487b-8a7f-ab9d5eae03df",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -2998,7 +2998,7 @@
                   "query": [
                     {
                       "key": "infraId",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea"
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d"
                     }
                   ],
                   "variable": []
@@ -3025,7 +3025,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "a28c5be1-fb9b-4db1-a053-9deca7f47841",
+              "id": "0d2b1b67-f8a0-4fb8-832a-752d01b7cc44",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3039,7 +3039,7 @@
                   "query": [
                     {
                       "key": "infraId",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea"
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d"
                     }
                   ],
                   "variable": []
@@ -3072,7 +3072,7 @@
           }
         },
         {
-          "id": "069d5f56-3859-4fbb-9234-da6470f0b131",
+          "id": "743ab5f4-1ee1-4c2c-b23d-f33090339994",
           "name": "Every Component → Component edge that crosses an Application boundary",
           "request": {
             "name": "Every Component → Component edge that crosses an Application boundary",
@@ -3102,7 +3102,7 @@
           },
           "response": [
             {
-              "id": "e761a3fd-41d6-43bf-af62-abff40e4e4b6",
+              "id": "6248aad4-1d3c-4642-a180-38f0646b76a0",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3133,7 +3133,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3144,7 +3144,7 @@
           }
         },
         {
-          "id": "e063fccc-468a-44e4-8d32-8d60672b5e82",
+          "id": "6c5e8f00-cda1-46b1-a744-660042c8fd61",
           "name": "Shortest path between two Components",
           "request": {
             "name": "Shortest path between two Components",
@@ -3187,7 +3187,7 @@
           },
           "response": [
             {
-              "id": "dc5bdc7a-4f5f-481b-9c53-265a07fc2ff7",
+              "id": "16d31472-3fdc-4268-9d38-942005276551",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3227,12 +3227,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"hops\": 477,\n  \"path\": [\n    {\n      \"key_0\": 3161,\n      \"key_1\": 779.3206298970334,\n      \"key_2\": 9830.24781680773\n    },\n    {\n      \"key_0\": \"string\",\n      \"key_1\": 8685.015203057003\n    }\n  ],\n  \"key_0\": \"string\",\n  \"key_1\": 2514.5229725985473\n}",
+              "body": "{\n  \"hops\": 5242,\n  \"path\": [\n    {\n      \"key_0\": 6203,\n      \"key_1\": 7905\n    },\n    {\n      \"key_0\": 6629,\n      \"key_1\": 9623\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4d9210fe-7cf2-4d92-8009-290429177c46",
+              "id": "e6615d8d-796d-440d-916b-a02598e43e47",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3283,7 +3283,7 @@
           }
         },
         {
-          "id": "929f95e3-c587-4ad4-9a37-2eab0499531d",
+          "id": "384ea90e-3b1a-4ad9-a827-0cb6be80659d",
           "name": "List topology snapshots",
           "request": {
             "name": "List topology snapshots",
@@ -3313,7 +3313,7 @@
           },
           "response": [
             {
-              "id": "53bde751-9434-4ec8-94ca-b91b0d1a84ca",
+              "id": "fbb5236b-291d-486c-9954-eb3355c9abb6",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3344,7 +3344,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3355,7 +3355,7 @@
           }
         },
         {
-          "id": "4b740ea3-71c0-43ce-8caf-d8a1f19fdf11",
+          "id": "b8409495-0b2a-4834-8a2c-04b19429ec28",
           "name": "Capture a topology snapshot",
           "request": {
             "name": "Capture a topology snapshot",
@@ -3388,7 +3388,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\"\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 6560\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3398,7 +3398,7 @@
           },
           "response": [
             {
-              "id": "1573cac1-dc2a-43d7-8a64-f287c308e0ba",
+              "id": "d94eaecd-58c7-4742-80a4-1a994403ecf3",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3421,7 +3421,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\"\n}",
+                  "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 6560\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3437,7 +3437,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3451,7 +3451,7 @@
       "event": []
     },
     {
-      "id": "a19514e8-4f28-48b4-bff7-a136ae3fe7cc",
+      "id": "e45ddbb5-1415-4e11-a516-828aa58e2de2",
       "name": "Integrations",
       "description": {
         "content": "",
@@ -3459,7 +3459,7 @@
       },
       "item": [
         {
-          "id": "23f78b5b-2d48-4c54-bdc4-2261b94d2d7a",
+          "id": "014c2656-dcf6-414f-b748-18a02c4770cd",
           "name": "Import a Terraform / OpenTofu state file (multipart upload)",
           "request": {
             "name": "Import a Terraform / OpenTofu state file (multipart upload)",
@@ -3490,7 +3490,7 @@
           },
           "response": [
             {
-              "id": "e4a87b31-1dfd-4459-84c6-1ed6f46edf32",
+              "id": "58719140-1883-4b35-93a7-6876dc6005eb",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3522,12 +3522,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "5cce6e9f-b0f1-48bd-aa8b-4b6ac7d37b73",
+              "id": "840f362a-04b5-4507-9328-89c343544638",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3559,7 +3559,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3570,7 +3570,7 @@
           }
         },
         {
-          "id": "d45ad9d5-92fe-4574-b2d4-2027d5f8d5f5",
+          "id": "ccaf4372-5244-409c-99f0-21bf3c55f54e",
           "name": "Recent Terraform import jobs",
           "request": {
             "name": "Recent Terraform import jobs",
@@ -3601,7 +3601,7 @@
           },
           "response": [
             {
-              "id": "ceea335d-6478-4aa6-b815-ca56f9070f0d",
+              "id": "f0319100-869e-4ac8-b9bf-29e85d2cd6a6",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3633,7 +3633,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3644,7 +3644,7 @@
           }
         },
         {
-          "id": "a7309ef5-864b-49c1-b1bb-0b1d6eb877cf",
+          "id": "deebe157-cf48-4abc-b937-bdfb42b75e85",
           "name": "List all cloud accounts (decrypted config)",
           "request": {
             "name": "List all cloud accounts (decrypted config)",
@@ -3674,7 +3674,7 @@
           },
           "response": [
             {
-              "id": "5d51f071-a7e5-4f99-8570-375b1831e1bf",
+              "id": "b922ac57-54b2-4dd4-942c-714fce0d47e1",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3705,7 +3705,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"78ba2914-75dc-d584-a699-2ce555275736\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": \"string\",\n      \"key_1\": 4900,\n      \"key_2\": false\n    },\n    \"enabled\": false,\n    \"last_scan_at\": \"1981-03-16T00:06:48.375Z\",\n    \"last_scan_status\": null,\n    \"last_scan_total\": 3906,\n    \"last_scan_error\": null,\n    \"created_at\": null,\n    \"updated_at\": null\n  },\n  {\n    \"id\": \"47c2e463-88aa-0502-1841-a1b040cbfeb7\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": true,\n      \"key_1\": 8728.774488075798\n    },\n    \"enabled\": true,\n    \"last_scan_at\": \"1965-07-30T14:22:03.598Z\",\n    \"last_scan_status\": \"string\",\n    \"last_scan_total\": 7447,\n    \"last_scan_error\": \"string\",\n    \"created_at\": null,\n    \"updated_at\": null,\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"a1d265d5-1db9-7cea-3f7a-35401b558668\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": 8081\n    },\n    \"enabled\": false,\n    \"last_scan_at\": \"1986-04-02T22:46:59.314Z\",\n    \"last_scan_status\": \"string\",\n    \"last_scan_total\": 5511,\n    \"last_scan_error\": \"string\",\n    \"created_at\": null,\n    \"updated_at\": \"1990-12-05T02:17:43.699Z\",\n    \"key_0\": 2631,\n    \"key_1\": false,\n    \"key_2\": 633.2781614005878,\n    \"key_3\": false\n  },\n  {\n    \"id\": \"71aff266-fa7b-18a0-eb88-c891f584c623\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": \"string\",\n      \"key_1\": 962,\n      \"key_2\": 7332.994618064153\n    },\n    \"enabled\": true,\n    \"last_scan_at\": \"1953-05-16T19:18:42.783Z\",\n    \"last_scan_status\": \"string\",\n    \"last_scan_total\": null,\n    \"last_scan_error\": null,\n    \"created_at\": \"1969-07-25T07:00:45.337Z\",\n    \"updated_at\": null\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3716,7 +3716,7 @@
           }
         },
         {
-          "id": "5b797af0-d420-4f2a-af12-aef932a86610",
+          "id": "1ec44cd4-d21a-4808-b02b-06e1880cd95a",
           "name": "Create or upsert a cloud account",
           "request": {
             "name": "Create or upsert a cloud account",
@@ -3759,7 +3759,7 @@
           },
           "response": [
             {
-              "id": "916b1b1b-e302-4554-8287-eea0ae83c274",
+              "id": "3cc5d1a3-74d3-4ade-9135-7b80372fbd4e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3798,12 +3798,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"3d6549bc-927a-29da-bde2-b4502af53343\",\n  \"provider\": \"aws\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 6363.550428658451,\n    \"key_1\": \"string\",\n    \"key_2\": \"string\",\n    \"key_3\": \"string\"\n  },\n  \"enabled\": false,\n  \"last_scan_at\": \"2004-09-29T02:58:13.939Z\",\n  \"last_scan_status\": null,\n  \"last_scan_total\": null,\n  \"last_scan_error\": null,\n  \"created_at\": null,\n  \"updated_at\": \"1947-07-18T07:11:17.869Z\",\n  \"key_0\": false,\n  \"key_1\": 7129.567290489811,\n  \"key_2\": 5915.992511683808\n}",
+              "body": "{\n  \"id\": \"87610941-dd53-8d46-2d7d-712a486bc65d\",\n  \"provider\": \"azure\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 5642,\n    \"key_1\": 5320,\n    \"key_2\": 5599.497560797065\n  },\n  \"enabled\": false,\n  \"last_scan_at\": null,\n  \"last_scan_status\": null,\n  \"last_scan_total\": 8712,\n  \"last_scan_error\": \"string\",\n  \"created_at\": \"1960-06-03T14:34:25.232Z\",\n  \"updated_at\": \"1952-02-15T09:32:37.147Z\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "65c00445-b537-474b-8b0f-0000dde6e1fd",
+              "id": "dd1e71c0-5af7-4d24-8ece-99337e0dff12",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3847,7 +3847,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "14621c6b-edc3-47aa-b763-19f1242d4454",
+              "id": "c169435c-4643-4a06-ad05-ca5cb935fd81",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3897,7 +3897,7 @@
           }
         },
         {
-          "id": "e420d40a-95c4-45be-9eb6-88dc956c9360",
+          "id": "82394c90-db90-43ca-b3a9-ee21afb0e3ec",
           "name": "List enabled cloud accounts for a provider",
           "request": {
             "name": "List enabled cloud accounts for a provider",
@@ -3919,7 +3919,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "gcp",
+                  "value": "azure",
                   "key": "provider",
                   "description": "(Required) "
                 }
@@ -3936,7 +3936,7 @@
           },
           "response": [
             {
-              "id": "92031c76-0140-461d-8bed-3fcbb4541bed",
+              "id": "f7f0c2ae-a7b2-497d-bdce-72d2975b8fcc",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -3953,7 +3953,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "gcp",
+                      "value": "azure",
                       "key": "provider",
                       "description": "(Required) "
                     }
@@ -3976,7 +3976,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"78ba2914-75dc-d584-a699-2ce555275736\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": \"string\",\n      \"key_1\": 4900,\n      \"key_2\": false\n    },\n    \"enabled\": false,\n    \"last_scan_at\": \"1981-03-16T00:06:48.375Z\",\n    \"last_scan_status\": null,\n    \"last_scan_total\": 3906,\n    \"last_scan_error\": null,\n    \"created_at\": null,\n    \"updated_at\": null\n  },\n  {\n    \"id\": \"47c2e463-88aa-0502-1841-a1b040cbfeb7\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": true,\n      \"key_1\": 8728.774488075798\n    },\n    \"enabled\": true,\n    \"last_scan_at\": \"1965-07-30T14:22:03.598Z\",\n    \"last_scan_status\": \"string\",\n    \"last_scan_total\": 7447,\n    \"last_scan_error\": \"string\",\n    \"created_at\": null,\n    \"updated_at\": null,\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"a1d265d5-1db9-7cea-3f7a-35401b558668\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": 8081\n    },\n    \"enabled\": false,\n    \"last_scan_at\": \"1986-04-02T22:46:59.314Z\",\n    \"last_scan_status\": \"string\",\n    \"last_scan_total\": 5511,\n    \"last_scan_error\": \"string\",\n    \"created_at\": null,\n    \"updated_at\": \"1990-12-05T02:17:43.699Z\",\n    \"key_0\": 2631,\n    \"key_1\": false,\n    \"key_2\": 633.2781614005878,\n    \"key_3\": false\n  },\n  {\n    \"id\": \"71aff266-fa7b-18a0-eb88-c891f584c623\",\n    \"provider\": \"aws\",\n    \"name\": \"string\",\n    \"config\": {\n      \"key_0\": \"string\",\n      \"key_1\": 962,\n      \"key_2\": 7332.994618064153\n    },\n    \"enabled\": true,\n    \"last_scan_at\": \"1953-05-16T19:18:42.783Z\",\n    \"last_scan_status\": \"string\",\n    \"last_scan_total\": null,\n    \"last_scan_error\": null,\n    \"created_at\": \"1969-07-25T07:00:45.337Z\",\n    \"updated_at\": null\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3987,7 +3987,7 @@
           }
         },
         {
-          "id": "9a17e610-3c5e-41c5-ac65-528e5b3f6ee9",
+          "id": "019796b8-b8dc-43d8-b755-abe04c0efd66",
           "name": "Update a cloud account (partial)",
           "request": {
             "name": "Update a cloud account (partial)",
@@ -4029,7 +4029,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 8123,\n    \"key_1\": false\n  },\n  \"enabled\": false\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 2539.7039033349333,\n    \"key_1\": \"string\"\n  },\n  \"enabled\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4039,7 +4039,7 @@
           },
           "response": [
             {
-              "id": "1568e561-5659-41dd-a20f-126dda0be600",
+              "id": "3e321f2d-d67f-4b5d-a34d-7ab54f31d1c7",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4071,7 +4071,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 8123,\n    \"key_1\": false\n  },\n  \"enabled\": false\n}",
+                  "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 2539.7039033349333,\n    \"key_1\": \"string\"\n  },\n  \"enabled\": true\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4087,12 +4087,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"3d6549bc-927a-29da-bde2-b4502af53343\",\n  \"provider\": \"aws\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 6363.550428658451,\n    \"key_1\": \"string\",\n    \"key_2\": \"string\",\n    \"key_3\": \"string\"\n  },\n  \"enabled\": false,\n  \"last_scan_at\": \"2004-09-29T02:58:13.939Z\",\n  \"last_scan_status\": null,\n  \"last_scan_total\": null,\n  \"last_scan_error\": null,\n  \"created_at\": null,\n  \"updated_at\": \"1947-07-18T07:11:17.869Z\",\n  \"key_0\": false,\n  \"key_1\": 7129.567290489811,\n  \"key_2\": 5915.992511683808\n}",
+              "body": "{\n  \"id\": \"87610941-dd53-8d46-2d7d-712a486bc65d\",\n  \"provider\": \"azure\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 5642,\n    \"key_1\": 5320,\n    \"key_2\": 5599.497560797065\n  },\n  \"enabled\": false,\n  \"last_scan_at\": null,\n  \"last_scan_status\": null,\n  \"last_scan_total\": 8712,\n  \"last_scan_error\": \"string\",\n  \"created_at\": \"1960-06-03T14:34:25.232Z\",\n  \"updated_at\": \"1952-02-15T09:32:37.147Z\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "069207fa-a633-4bcd-911e-b8eb40df9479",
+              "id": "ea3b9e37-bd6f-437b-b68b-c75bed093f8a",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4124,7 +4124,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 8123,\n    \"key_1\": false\n  },\n  \"enabled\": false\n}",
+                  "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 2539.7039033349333,\n    \"key_1\": \"string\"\n  },\n  \"enabled\": true\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4151,7 +4151,7 @@
           }
         },
         {
-          "id": "e5bb57db-0e71-4d5b-ac7e-357dc238e1b0",
+          "id": "b5978b3e-448c-41d4-86f4-6f5284c06dea",
           "name": "Delete a cloud account",
           "request": {
             "name": "Delete a cloud account",
@@ -4190,7 +4190,7 @@
           },
           "response": [
             {
-              "id": "b17b915a-7691-4497-9a86-89ef836dda95",
+              "id": "da0ea9ba-d71b-4f6a-ad74-e48fc9fc26b0",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4229,7 +4229,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "4f247be4-da92-4bdd-915c-3446eefa7909",
+              "id": "c8baec98-706c-4dba-ae45-b4c5978ddf54",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4280,7 +4280,7 @@
           }
         },
         {
-          "id": "136a2bd1-7baa-4379-a6d6-12f5a3eef7a6",
+          "id": "5656b71c-e97b-48d4-961f-96832b09c429",
           "name": "One-time migration: copy CloudAccount nodes from Neo4j to Postgres",
           "request": {
             "name": "One-time migration: copy CloudAccount nodes from Neo4j to Postgres",
@@ -4311,7 +4311,7 @@
           },
           "response": [
             {
-              "id": "0e47996a-b76c-48b0-b4e0-b4fe710629bb",
+              "id": "e04971c4-e520-4118-a78a-174c0b31f30e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4343,7 +4343,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4354,7 +4354,7 @@
           }
         },
         {
-          "id": "a2180489-bcd4-4607-ae7f-3846df33b9f0",
+          "id": "86b688e0-0ba3-4ac5-872f-be8ffa2e4a3b",
           "name": "Internal — record a scan outcome on a cloud account",
           "request": {
             "name": "Internal — record a scan outcome on a cloud account",
@@ -4397,7 +4397,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"error\",\n  \"total\": 8932,\n  \"error\": \"string\",\n  \"key_0\": 1501\n}",
+              "raw": "{\n  \"status\": \"success\",\n  \"total\": 4567,\n  \"error\": \"string\",\n  \"key_0\": \"string\",\n  \"key_1\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4407,7 +4407,7 @@
           },
           "response": [
             {
-              "id": "95c44026-3411-4ea0-834e-0032b73de626",
+              "id": "03b35384-709b-4817-a144-ef7ef362cb0f",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4440,7 +4440,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"status\": \"error\",\n  \"total\": 8932,\n  \"error\": \"string\",\n  \"key_0\": 1501\n}",
+                  "raw": "{\n  \"status\": \"success\",\n  \"total\": 4567,\n  \"error\": \"string\",\n  \"key_0\": \"string\",\n  \"key_1\": \"string\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4456,7 +4456,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"updated\": true\n}",
+              "body": "{\n  \"updated\": false\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4467,7 +4467,7 @@
           }
         },
         {
-          "id": "533b73c0-7c85-402e-a0a0-b173f857301e",
+          "id": "a4767810-5c94-4a8f-b819-11395a9a8893",
           "name": "Get the active cloud-AI provider configuration",
           "request": {
             "name": "Get the active cloud-AI provider configuration",
@@ -4497,7 +4497,7 @@
           },
           "response": [
             {
-              "id": "31f22db1-a0b7-4695-a401-94bf99b4ac02",
+              "id": "6795f1f1-23a2-47f1-9492-39214206ccea",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4528,7 +4528,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4539,7 +4539,7 @@
           }
         },
         {
-          "id": "f53de08c-69e8-4411-b900-c639e22000ea",
+          "id": "596c49e9-659a-4519-9668-fa87787ff73d",
           "name": "Save (upsert) the cloud-AI provider configuration",
           "request": {
             "name": "Save (upsert) the cloud-AI provider configuration",
@@ -4572,7 +4572,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"azure\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
+              "raw": "{\n  \"provider\": \"anthropic\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4582,7 +4582,7 @@
           },
           "response": [
             {
-              "id": "5d40e1a6-8994-47e8-a91c-d9744d0da843",
+              "id": "1f9f9bec-d6bb-4f3f-b74f-072d9e248fad",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4605,7 +4605,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"provider\": \"azure\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
+                  "raw": "{\n  \"provider\": \"anthropic\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4621,7 +4621,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4632,7 +4632,7 @@
           }
         },
         {
-          "id": "f9aad275-b05d-4f50-9468-681af60bfeea",
+          "id": "8e37e0b7-fe36-4eed-ba69-14f26fa6d006",
           "name": "Delete the saved cloud-AI provider configuration",
           "request": {
             "name": "Delete the saved cloud-AI provider configuration",
@@ -4662,7 +4662,7 @@
           },
           "response": [
             {
-              "id": "ca127d2d-c887-4c96-9a04-3afa3267419c",
+              "id": "28af78c5-4238-421a-a70d-62bbaa4c69c8",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4692,7 +4692,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "00e7c242-5a30-4d2e-8399-b6c81d20360f",
+              "id": "fd4fbb1a-0ffa-482a-9384-33146839987a",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4734,7 +4734,7 @@
           }
         },
         {
-          "id": "4d402147-a729-4542-9937-dd9dbb1d3dd8",
+          "id": "dcb2f91e-3939-4d78-a309-135fcdcaa144",
           "name": "Test the saved cloud-AI configuration",
           "request": {
             "name": "Test the saved cloud-AI configuration",
@@ -4765,7 +4765,7 @@
           },
           "response": [
             {
-              "id": "3c2ba4f5-3abf-4e57-943f-7e037a9c3135",
+              "id": "09f6e54e-1c1e-4a6a-9927-b9009389c96e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4797,7 +4797,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4808,7 +4808,7 @@
           }
         },
         {
-          "id": "fb1598be-0d18-4b33-87df-b5b5c68ae512",
+          "id": "fad99a67-d720-4dd3-b5d1-4bedb7753831",
           "name": "List configured connector instances",
           "request": {
             "name": "List configured connector instances",
@@ -4838,7 +4838,7 @@
           },
           "response": [
             {
-              "id": "a46e1064-a8fa-4752-9d37-ed0caa7cf7c0",
+              "id": "2a85f2b7-7b0d-4bf4-bde1-a68d99562bf5",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4869,7 +4869,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4880,7 +4880,7 @@
           }
         },
         {
-          "id": "901fbfc4-df8c-4f2d-9c1f-681c77ed99bb",
+          "id": "3fd74821-8633-4afb-960b-fcae823bcf9a",
           "name": "Create a connector instance",
           "request": {
             "name": "Create a connector instance",
@@ -4913,7 +4913,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 44.93785690812491\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 8726\n}",
+              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": \"string\"\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4923,7 +4923,7 @@
           },
           "response": [
             {
-              "id": "935d0055-ee46-4bb0-9a19-844009bf644d",
+              "id": "e75d51de-fa65-4995-bdf0-c6362510c385",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4946,7 +4946,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 44.93785690812491\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 8726\n}",
+                  "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": \"string\"\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4962,12 +4962,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "911121ce-0fea-4cda-b22b-a12b152d96d4",
+              "id": "b4604ed6-d7b1-426d-bb81-6930f7fd44f1",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -4990,7 +4990,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 44.93785690812491\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 8726\n}",
+                  "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": \"string\"\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5006,7 +5006,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5017,7 +5017,7 @@
           }
         },
         {
-          "id": "718b189c-fa38-40b6-b06c-ecba7463fc3e",
+          "id": "9d6bff1d-5d00-49f2-8b97-a9fe853dd3e3",
           "name": "Get one connector instance",
           "request": {
             "name": "Get one connector instance",
@@ -5038,7 +5038,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                  "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -5055,7 +5055,7 @@
           },
           "response": [
             {
-              "id": "c890e903-cc16-4394-b580-f79895ac2c7a",
+              "id": "e14dc6e6-8b94-492e-bb68-d97d57eb74ad",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5071,7 +5071,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5094,12 +5094,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "966f070a-067e-4e25-8e18-1b1d7192d154",
+              "id": "97436879-a632-4386-8f75-ec81394c11b9",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5115,7 +5115,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5138,7 +5138,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5149,7 +5149,7 @@
           }
         },
         {
-          "id": "fc94cb0d-6b17-47f8-928b-900ce7c004a4",
+          "id": "0ed77563-2111-4d01-bbbd-5c02fbf5be06",
           "name": "Update a connector instance (partial)",
           "request": {
             "name": "Update a connector instance (partial)",
@@ -5170,7 +5170,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                  "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -5190,7 +5190,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"key_0\": 7841.045137351183,\n    \"key_1\": 831.5284618905938\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 8411,\n  \"key_0\": 3103.3953887291354\n}",
+              "raw": "{\n  \"config\": {\n    \"key_0\": 3246,\n    \"key_1\": false\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 1426,\n  \"key_0\": 8040.048302839616,\n  \"key_1\": 3898.406319008727,\n  \"key_2\": 3331.493168858082,\n  \"key_3\": 5597\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5200,7 +5200,7 @@
           },
           "response": [
             {
-              "id": "331f1eee-3cba-471e-8c4a-6f78c4c17021",
+              "id": "90e96ef5-b99a-435d-b048-a3e673d52b5e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5216,7 +5216,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5231,7 +5231,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"config\": {\n    \"key_0\": 7841.045137351183,\n    \"key_1\": 831.5284618905938\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 8411,\n  \"key_0\": 3103.3953887291354\n}",
+                  "raw": "{\n  \"config\": {\n    \"key_0\": 3246,\n    \"key_1\": false\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 1426,\n  \"key_0\": 8040.048302839616,\n  \"key_1\": 3898.406319008727,\n  \"key_2\": 3331.493168858082,\n  \"key_3\": 5597\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5247,12 +5247,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "27a62ade-2882-494e-b067-cd3ca0b59db6",
+              "id": "63a01a65-d385-4979-aa23-42b4540f96d3",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5268,7 +5268,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5283,7 +5283,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"config\": {\n    \"key_0\": 7841.045137351183,\n    \"key_1\": 831.5284618905938\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 8411,\n  \"key_0\": 3103.3953887291354\n}",
+                  "raw": "{\n  \"config\": {\n    \"key_0\": 3246,\n    \"key_1\": false\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 1426,\n  \"key_0\": 8040.048302839616,\n  \"key_1\": 3898.406319008727,\n  \"key_2\": 3331.493168858082,\n  \"key_3\": 5597\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5299,7 +5299,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5310,7 +5310,7 @@
           }
         },
         {
-          "id": "e9fbee6c-370a-447d-a449-56c8b53d1040",
+          "id": "f50bcf41-9be9-417a-abea-29eaeb03ac9d",
           "name": "Delete a connector instance",
           "request": {
             "name": "Delete a connector instance",
@@ -5331,7 +5331,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                  "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -5348,7 +5348,7 @@
           },
           "response": [
             {
-              "id": "e11761f8-d4e0-4fe0-9dce-a6ffc411904e",
+              "id": "63963138-746e-4db9-b0b7-696826b59279",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5364,7 +5364,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5386,7 +5386,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "6629abf2-78a4-45d4-98c6-1de7b53c5143",
+              "id": "7a7c95cf-c0d6-4050-b44e-ac9cd7fd56dc",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5402,7 +5402,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5425,7 +5425,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5436,7 +5436,7 @@
           }
         },
         {
-          "id": "eb1d2078-6cba-4191-9c3a-68d0f696e320",
+          "id": "cc272172-6e72-469f-99fa-b40f5526b9e7",
           "name": "Test a connector's healthCheck",
           "request": {
             "name": "Test a connector's healthCheck",
@@ -5458,7 +5458,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                  "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -5475,7 +5475,7 @@
           },
           "response": [
             {
-              "id": "cd95c7df-da7d-4efe-800c-c538a6bde972",
+              "id": "824d49af-6766-4b0f-82a8-5ff8030cf8b8",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5492,7 +5492,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5515,7 +5515,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5526,7 +5526,7 @@
           }
         },
         {
-          "id": "37410191-c4a2-465a-8552-bd420c7e3a6e",
+          "id": "6e557be8-6fba-4c6d-aec7-0c1925cb282a",
           "name": "Trigger a one-off ingest pass",
           "request": {
             "name": "Trigger a one-off ingest pass",
@@ -5548,7 +5548,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                  "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -5565,7 +5565,7 @@
           },
           "response": [
             {
-              "id": "acb894bf-0a63-4848-9aae-a1417aa9784a",
+              "id": "ff626ca4-5cd8-49a4-bacb-2f165f6b3dab",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5582,7 +5582,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5605,12 +5605,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "5aca5764-1f75-4bc2-8334-78c95817c7aa",
+              "id": "c20067b3-3b56-4b0f-8578-4a6af02a2999",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5627,7 +5627,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5650,7 +5650,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5661,7 +5661,7 @@
           }
         },
         {
-          "id": "52e533cf-9af0-45ba-a957-7ccfba933ecd",
+          "id": "57577c4d-6306-4686-a595-c3c5624f1a8c",
           "name": "Connector instance sync history",
           "request": {
             "name": "Connector instance sync history",
@@ -5683,7 +5683,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                  "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -5700,7 +5700,7 @@
           },
           "response": [
             {
-              "id": "b97bcb6e-5521-4728-aca6-0618d8d78aa1",
+              "id": "17c9171e-98f9-47ed-9e7d-bd4c74cfdaee",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5717,7 +5717,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "9e25af02-59e1-96d2-a0ea-d9091958825a",
+                      "value": "64020aa2-1f86-9651-04b9-14eb5d9054b0",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -5740,7 +5740,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5754,7 +5754,7 @@
       "event": []
     },
     {
-      "id": "9f28d2b6-629c-41bf-b08e-37894922c4da",
+      "id": "881d5a0f-14f0-4755-b4e8-2b6f49080aa6",
       "name": "Discovery",
       "description": {
         "content": "",
@@ -5762,7 +5762,7 @@
       },
       "item": [
         {
-          "id": "cec8fa64-af83-4168-8107-d262220638f8",
+          "id": "a9de0f02-7626-4f6b-8f03-74f7b29f723e",
           "name": "Scan AWS via Config aggregator",
           "request": {
             "name": "Scan AWS via Config aggregator",
@@ -5796,7 +5796,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\"\n  },\n  \"key_0\": \"string\"\n}",
+              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": false,\n    \"key_1\": true,\n    \"key_2\": 3412\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5806,7 +5806,7 @@
           },
           "response": [
             {
-              "id": "7e54fae6-78f5-4c0a-b1e6-85d35cd2aaa0",
+              "id": "8e69464a-fe0e-401b-bd15-4831727af292",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5830,7 +5830,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\"\n  },\n  \"key_0\": 4070.7963384870773,\n  \"key_1\": \"string\",\n  \"key_2\": 211.06196694864465\n}",
+                  "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": 8763.362740428149,\n    \"key_1\": true,\n    \"key_2\": 7645\n  },\n  \"key_0\": 5432.9884596472475\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5846,12 +5846,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"provider\": \"azure\",\n  \"accounts\": 3432,\n  \"duration\": 5224,\n  \"total\": 1152,\n  \"breakdown\": {\n    \"key_0\": false,\n    \"key_1\": false,\n    \"key_2\": \"string\"\n  },\n  \"stale\": {\n    \"removed\": 6579,\n    \"markedStale\": 1104,\n    \"skipped\": true,\n    \"errors\": [\n      \"string\",\n      \"string\"\n    ],\n    \"key_0\": \"string\",\n    \"key_1\": 2320.4136461300795,\n    \"key_2\": 7504.277802656907\n  },\n  \"bootstrap\": null,\n  \"enrichment\": null,\n  \"completedAt\": \"2024-11-26T06:05:50.285Z\",\n  \"key_0\": false,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"provider\": \"gcp\",\n  \"accounts\": 4241,\n  \"duration\": 6469,\n  \"total\": 3981,\n  \"breakdown\": {\n    \"key_0\": 9625\n  },\n  \"stale\": {\n    \"removed\": 2920,\n    \"markedStale\": 198,\n    \"skipped\": false,\n    \"errors\": [\n      \"string\",\n      \"string\"\n    ]\n  },\n  \"bootstrap\": {\n    \"key_0\": 8311\n  },\n  \"enrichment\": null,\n  \"completedAt\": \"1977-04-08T00:00:19.104Z\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "9614300c-d97b-4101-9192-ff96ed3d8b2e",
+              "id": "f4818b4a-8583-4188-843c-2acaaeb2210a",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5875,7 +5875,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\"\n  },\n  \"key_0\": 4070.7963384870773,\n  \"key_1\": \"string\",\n  \"key_2\": 211.06196694864465\n}",
+                  "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": 8763.362740428149,\n    \"key_1\": true,\n    \"key_2\": 7645\n  },\n  \"key_0\": 5432.9884596472475\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5896,7 +5896,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "abcffa8b-799e-4ce0-887f-2253be30b253",
+              "id": "f158c2c6-5323-4704-b862-0501a2d1caaf",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -5920,7 +5920,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\"\n  },\n  \"key_0\": 4070.7963384870773,\n  \"key_1\": \"string\",\n  \"key_2\": 211.06196694864465\n}",
+                  "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": 8763.362740428149,\n    \"key_1\": true,\n    \"key_2\": 7645\n  },\n  \"key_0\": 5432.9884596472475\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5947,7 +5947,7 @@
           }
         },
         {
-          "id": "56fa2c99-b158-44e7-9aba-f8696f81fe66",
+          "id": "e58050c6-6976-4eb9-a62f-176cb6e5f5d3",
           "name": "Scan Azure via Resource Graph",
           "request": {
             "name": "Scan Azure via Resource Graph",
@@ -5981,7 +5981,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\",\n    \"key_0\": \"string\"\n  }\n}",
+              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5991,7 +5991,7 @@
           },
           "response": [
             {
-              "id": "75a819c7-5066-43f4-91a3-530a601ebaed",
+              "id": "3beb0d5d-de9e-48c2-a453-aeb2dd98ee66",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6015,7 +6015,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\",\n    \"key_0\": \"string\"\n  }\n}",
+                  "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6031,12 +6031,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"provider\": \"azure\",\n  \"accounts\": 3432,\n  \"duration\": 5224,\n  \"total\": 1152,\n  \"breakdown\": {\n    \"key_0\": false,\n    \"key_1\": false,\n    \"key_2\": \"string\"\n  },\n  \"stale\": {\n    \"removed\": 6579,\n    \"markedStale\": 1104,\n    \"skipped\": true,\n    \"errors\": [\n      \"string\",\n      \"string\"\n    ],\n    \"key_0\": \"string\",\n    \"key_1\": 2320.4136461300795,\n    \"key_2\": 7504.277802656907\n  },\n  \"bootstrap\": null,\n  \"enrichment\": null,\n  \"completedAt\": \"2024-11-26T06:05:50.285Z\",\n  \"key_0\": false,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"provider\": \"gcp\",\n  \"accounts\": 4241,\n  \"duration\": 6469,\n  \"total\": 3981,\n  \"breakdown\": {\n    \"key_0\": 9625\n  },\n  \"stale\": {\n    \"removed\": 2920,\n    \"markedStale\": 198,\n    \"skipped\": false,\n    \"errors\": [\n      \"string\",\n      \"string\"\n    ]\n  },\n  \"bootstrap\": {\n    \"key_0\": 8311\n  },\n  \"enrichment\": null,\n  \"completedAt\": \"1977-04-08T00:00:19.104Z\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "71f8fa3f-7cdb-4b0a-b19f-9ad72bdf4b20",
+              "id": "bd74e290-6044-442d-b255-391f1519ad0d",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6060,7 +6060,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\",\n    \"key_0\": \"string\"\n  }\n}",
+                  "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6087,7 +6087,7 @@
           }
         },
         {
-          "id": "9b7ea34e-5c62-4cb8-9f96-7c27a646fab8",
+          "id": "243ba193-359d-49ba-90c2-c873a48a185c",
           "name": "Scan GCP via Cloud Asset Inventory",
           "request": {
             "name": "Scan GCP via Cloud Asset Inventory",
@@ -6121,7 +6121,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 1329,\n    \"key_1\": false\n  },\n  \"key_0\": 8235\n}",
+              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": true,\n    \"key_1\": \"string\",\n    \"key_2\": false,\n    \"key_3\": 6764\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6131,7 +6131,7 @@
           },
           "response": [
             {
-              "id": "cb34dd22-d5d1-4fc1-a175-d1f757714bb0",
+              "id": "21bb8d2c-4d08-4bca-8534-e232c812b67e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6155,7 +6155,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 1329,\n    \"key_1\": false\n  },\n  \"key_0\": 8235\n}",
+                  "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": true,\n    \"key_1\": \"string\",\n    \"key_2\": false,\n    \"key_3\": 6764\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6171,12 +6171,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"provider\": \"azure\",\n  \"accounts\": 3432,\n  \"duration\": 5224,\n  \"total\": 1152,\n  \"breakdown\": {\n    \"key_0\": false,\n    \"key_1\": false,\n    \"key_2\": \"string\"\n  },\n  \"stale\": {\n    \"removed\": 6579,\n    \"markedStale\": 1104,\n    \"skipped\": true,\n    \"errors\": [\n      \"string\",\n      \"string\"\n    ],\n    \"key_0\": \"string\",\n    \"key_1\": 2320.4136461300795,\n    \"key_2\": 7504.277802656907\n  },\n  \"bootstrap\": null,\n  \"enrichment\": null,\n  \"completedAt\": \"2024-11-26T06:05:50.285Z\",\n  \"key_0\": false,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"provider\": \"gcp\",\n  \"accounts\": 4241,\n  \"duration\": 6469,\n  \"total\": 3981,\n  \"breakdown\": {\n    \"key_0\": 9625\n  },\n  \"stale\": {\n    \"removed\": 2920,\n    \"markedStale\": 198,\n    \"skipped\": false,\n    \"errors\": [\n      \"string\",\n      \"string\"\n    ]\n  },\n  \"bootstrap\": {\n    \"key_0\": 8311\n  },\n  \"enrichment\": null,\n  \"completedAt\": \"1977-04-08T00:00:19.104Z\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "9cf70602-2016-44f0-bbe4-f85e9332223a",
+              "id": "f8321a23-318a-44c0-93d0-5b647bf7327f",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6200,7 +6200,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 1329,\n    \"key_1\": false\n  },\n  \"key_0\": 8235\n}",
+                  "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": true,\n    \"key_1\": \"string\",\n    \"key_2\": false,\n    \"key_3\": 6764\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6227,7 +6227,7 @@
           }
         },
         {
-          "id": "c43017d0-4517-4079-abb8-94e79133ced7",
+          "id": "9b6917ab-dcb2-41af-aded-3e8f92fe6e08",
           "name": "Scan every configured cloud account in parallel",
           "request": {
             "name": "Scan every configured cloud account in parallel",
@@ -6258,7 +6258,7 @@
           },
           "response": [
             {
-              "id": "b66cfc18-6b9e-4bfa-8f28-4ab503a51ab0",
+              "id": "d60678d0-4713-4cfc-a056-30d4a475298f",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6290,7 +6290,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"duration\": 966,\n  \"total\": 9022,\n  \"providers\": [\n    \"string\",\n    \"string\"\n  ],\n  \"results\": {\n    \"key_0\": true,\n    \"key_1\": \"string\",\n    \"key_2\": false\n  },\n  \"errors\": {\n    \"key_0\": 2756.839053908742,\n    \"key_1\": 316.5610058673063\n  },\n  \"stale\": {\n    \"key_0\": false,\n    \"key_1\": false,\n    \"key_2\": \"string\"\n  },\n  \"bootstrap\": {\n    \"key_0\": false,\n    \"key_1\": 9829.51981087809\n  },\n  \"completedAt\": \"1992-12-05T13:08:51.773Z\"\n}",
+              "body": "{\n  \"duration\": 3900,\n  \"total\": 5495,\n  \"providers\": [\n    \"string\",\n    \"string\"\n  ],\n  \"results\": {\n    \"key_0\": \"string\",\n    \"key_1\": \"string\"\n  },\n  \"errors\": {\n    \"key_0\": \"string\",\n    \"key_1\": \"string\",\n    \"key_2\": 6114\n  },\n  \"stale\": {\n    \"key_0\": 4489,\n    \"key_1\": true\n  },\n  \"bootstrap\": {\n    \"key_0\": false,\n    \"key_1\": true,\n    \"key_2\": \"string\",\n    \"key_3\": \"string\"\n  },\n  \"completedAt\": \"2014-05-30T18:52:11.841Z\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6301,7 +6301,7 @@
           }
         },
         {
-          "id": "53e78b06-af5a-4dba-a275-a9c8231775ef",
+          "id": "46c15f10-2777-4868-927e-ef24d5f04f19",
           "name": "Current discovery scheduler state",
           "request": {
             "name": "Current discovery scheduler state",
@@ -6331,7 +6331,7 @@
           },
           "response": [
             {
-              "id": "07faa623-27d6-4fd3-9dd6-2df71e0d571f",
+              "id": "04da8267-a7b2-4970-9bef-db24f5c4023d",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6362,7 +6362,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6373,7 +6373,7 @@
           }
         },
         {
-          "id": "70d99398-1414-4bab-ae54-9c383e9d6f3b",
+          "id": "dcee571f-f30c-41e6-aedb-e220b4b46ff7",
           "name": "Set the discovery scheduler",
           "request": {
             "name": "Set the discovery scheduler",
@@ -6406,7 +6406,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enabled\": true,\n  \"cron\": \"0 */6 * * *\"\n}",
+              "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6416,7 +6416,7 @@
           },
           "response": [
             {
-              "id": "9a91b9ab-403e-4ab5-9a4f-ce0cbd8af91b",
+              "id": "2e10be7e-44f5-4451-9c37-3606d22c635b",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6439,7 +6439,7 @@
                 "method": "PUT",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"enabled\": true,\n  \"cron\": \"0 */6 * * *\"\n}",
+                  "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": \"string\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6455,7 +6455,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6466,7 +6466,7 @@
           }
         },
         {
-          "id": "6a08ebf4-710c-4f2c-be48-b25398f11d9c",
+          "id": "d3b6f760-a95e-4af9-8dfb-4b6e06fefe29",
           "name": "Trigger the scheduled scan immediately",
           "request": {
             "name": "Trigger the scheduled scan immediately",
@@ -6497,7 +6497,7 @@
           },
           "response": [
             {
-              "id": "7c8f6283-7005-49f9-839f-3bdf94853e10",
+              "id": "73ea003a-952d-4290-b923-b630204224d0",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6529,7 +6529,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6540,7 +6540,7 @@
           }
         },
         {
-          "id": "19e00fbf-9690-4575-be18-e7802ebe9a7c",
+          "id": "03b46eca-99f7-4970-b870-c347e26d23bd",
           "name": "Per-resource debug dump (admin + APPCLOUD_DEBUG only)",
           "request": {
             "name": "Per-resource debug dump (admin + APPCLOUD_DEBUG only)",
@@ -6579,7 +6579,7 @@
           },
           "response": [
             {
-              "id": "3520df6f-b1ad-4b9e-9f90-3d9279a6382e",
+              "id": "c0a336b9-aec8-4ee5-a04f-8bacd7a9a63c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6619,7 +6619,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6630,7 +6630,7 @@
           }
         },
         {
-          "id": "b6f88b4d-0c8a-4465-803e-d0a9af9449ab",
+          "id": "e5499c7d-a79a-4fc8-8766-2ea49ffb1673",
           "name": "Pull the suggest engine's current output",
           "request": {
             "name": "Pull the suggest engine's current output",
@@ -6660,7 +6660,7 @@
           },
           "response": [
             {
-              "id": "451d78b9-b2ef-4092-92c9-f96334b54389",
+              "id": "d0b7a2b7-1516-4e42-8194-469adef17181",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6691,7 +6691,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6702,7 +6702,7 @@
           }
         },
         {
-          "id": "e47208ba-d58e-47c3-93b0-d31bcef49a92",
+          "id": "7b009206-91e5-4c1c-8d00-47faa4f574b2",
           "name": "Apply a batch of confirmed mappings (legacy single-action endpoint)",
           "request": {
             "name": "Apply a batch of confirmed mappings (legacy single-action endpoint)",
@@ -6736,7 +6736,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": true,\n      \"componentId\": 8669.044584744574\n    },\n    {\n      \"infraId\": true,\n      \"componentId\": 9761\n    }\n  ]\n}",
+              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": 6468,\n      \"componentId\": \"string\"\n    },\n    {\n      \"infraId\": 9484.633707056482,\n      \"componentId\": 9367.559770393791\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6746,7 +6746,7 @@
           },
           "response": [
             {
-              "id": "595c6d3a-fc35-43c9-bc49-75c84b87d295",
+              "id": "961ada4d-c52e-4387-8d72-930179696b90",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6770,7 +6770,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": \"string\",\n      \"componentId\": 6386\n    },\n    {\n      \"infraId\": \"string\",\n      \"componentId\": 8680\n    }\n  ]\n}",
+                  "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": 7641,\n      \"componentId\": false\n    },\n    {\n      \"infraId\": 9091,\n      \"componentId\": false\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6786,7 +6786,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6797,7 +6797,7 @@
           }
         },
         {
-          "id": "1ff9587e-8762-43fb-ad4c-8bf0dc0e487c",
+          "id": "60e0bdbf-e9a6-4a98-9e37-f3d3b91d64c4",
           "name": "Apply a mixed-action batch from the suggest engine",
           "request": {
             "name": "Apply a mixed-action batch from the suggest engine",
@@ -6831,7 +6831,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 2,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 5492.541506398434\n        },\n        {\n          \"key_0\": 8231\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": \"string\",\n          \"key_1\": 9125,\n          \"key_2\": \"string\",\n          \"key_3\": \"string\"\n        },\n        {\n          \"key_0\": false,\n          \"key_1\": true,\n          \"key_2\": true\n        }\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"create_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 6820.467984175305,\n          \"key_1\": \"string\",\n          \"key_2\": 8536.797342168828,\n          \"key_3\": \"string\"\n        },\n        {\n          \"key_0\": 6808,\n          \"key_1\": \"string\",\n          \"key_2\": true\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": true\n        },\n        {\n          \"key_0\": \"string\"\n        }\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6841,7 +6841,7 @@
           },
           "response": [
             {
-              "id": "902c4b39-620d-4eeb-8245-c69f9b08ed70",
+              "id": "b08c4a7a-11ee-45c5-beda-7fbaa959a6f4",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6865,7 +6865,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"create_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 663.65622518322\n        },\n        {\n          \"key_0\": 7852,\n          \"key_1\": \"string\",\n          \"key_2\": true,\n          \"key_3\": false\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": false,\n          \"key_1\": false\n        },\n        {\n          \"key_0\": 7472.306401469115\n        }\n      ]\n    }\n  ]\n}",
+                  "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"link_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 1301,\n          \"key_1\": true,\n          \"key_2\": 2669,\n          \"key_3\": 964.8136264620911\n        },\n        {\n          \"key_0\": \"string\",\n          \"key_1\": 2583,\n          \"key_2\": 2099,\n          \"key_3\": \"string\"\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 2,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 9219.884321031392,\n          \"key_1\": 8314,\n          \"key_2\": true\n        },\n        {\n          \"key_0\": 2393.20933629986,\n          \"key_1\": 5500,\n          \"key_2\": false\n        }\n      ]\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -6881,7 +6881,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6892,7 +6892,7 @@
           }
         },
         {
-          "id": "28e43540-736e-45b8-97c7-d4b0b325ee01",
+          "id": "b0f214b8-c11c-443b-9caa-9a53aad0aa65",
           "name": "Refresh tags for a single Infra (currently a hint)",
           "request": {
             "name": "Refresh tags for a single Infra (currently a hint)",
@@ -6932,7 +6932,7 @@
           },
           "response": [
             {
-              "id": "ebc19ec5-7db1-40f1-a42f-a85ce92a9efd",
+              "id": "e88f6651-6dc8-4d8e-8325-865035e34ae1",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -6973,7 +6973,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6984,7 +6984,7 @@
           }
         },
         {
-          "id": "33fdd715-c351-49ae-81a8-1d86b052ebfc",
+          "id": "d1224a2d-ce74-4250-a929-45e8b5ef6747",
           "name": "List discovered Infra (with mapping status)",
           "request": {
             "name": "List discovered Infra (with mapping status)",
@@ -7004,7 +7004,7 @@
                 {
                   "disabled": false,
                   "key": "provider",
-                  "value": "gcp"
+                  "value": "azure"
                 },
                 {
                   "disabled": false,
@@ -7030,7 +7030,7 @@
           },
           "response": [
             {
-              "id": "a2b740a4-228d-4bef-9779-63cb74d28c17",
+              "id": "6b5ef93c-114e-4a51-b81b-fecdbd664941",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7044,7 +7044,7 @@
                   "query": [
                     {
                       "key": "provider",
-                      "value": "gcp"
+                      "value": "azure"
                     },
                     {
                       "key": "resourceType",
@@ -7074,7 +7074,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7085,7 +7085,7 @@
           }
         },
         {
-          "id": "c944dda7-9033-4da9-a362-3fe4385a0efe",
+          "id": "a8154f32-268d-4eb7-ab44-5e309e66eb3d",
           "name": "Discovery summary — counts by provider and type",
           "request": {
             "name": "Discovery summary — counts by provider and type",
@@ -7115,7 +7115,7 @@
           },
           "response": [
             {
-              "id": "df0895b9-4021-481d-be19-26f71581d842",
+              "id": "bbc643a4-9590-48de-880f-75f0a877a6ae",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7146,7 +7146,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"total\": 9566,\n  \"totalMapped\": 1519,\n  \"unmapped\": 3539,\n  \"byProvider\": {\n    \"key_0\": 1912\n  }\n}",
+              "body": "{\n  \"total\": 7598,\n  \"totalMapped\": 4137,\n  \"unmapped\": 1950,\n  \"byProvider\": {\n    \"key_0\": 3328,\n    \"key_1\": 6218\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7157,7 +7157,7 @@
           }
         },
         {
-          "id": "c02428c4-a9c7-4c2a-a79f-5f7ea1423296",
+          "id": "250084f6-be1f-419f-a6b9-9faf46a5f024",
           "name": "Manually link an Infra to a Component",
           "request": {
             "name": "Manually link an Infra to a Component",
@@ -7190,7 +7190,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"infraId\": \"fd58604c-c671-e796-b0ed-8614e37209fa\",\n  \"componentId\": \"561a580e-e8cb-2c7b-43f9-7749c6e12802\"\n}",
+              "raw": "{\n  \"infraId\": \"a89cbfdb-1b3b-a6aa-54e5-55484dc2eed3\",\n  \"componentId\": \"925bf7c9-56ce-c592-9434-8056fcd8ff18\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7200,7 +7200,7 @@
           },
           "response": [
             {
-              "id": "804a89dd-50a1-4d40-8928-58d3d1ee1d97",
+              "id": "c5f67bc6-9a62-43f9-8767-d5bc95b4834a",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7223,7 +7223,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"infraId\": \"fd58604c-c671-e796-b0ed-8614e37209fa\",\n  \"componentId\": \"561a580e-e8cb-2c7b-43f9-7749c6e12802\"\n}",
+                  "raw": "{\n  \"infraId\": \"a89cbfdb-1b3b-a6aa-54e5-55484dc2eed3\",\n  \"componentId\": \"925bf7c9-56ce-c592-9434-8056fcd8ff18\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -7239,12 +7239,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "ab020fbe-d8d9-4479-840a-7964b8d98f9c",
+              "id": "9d8edd1d-acee-43db-923f-58959883402c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7267,7 +7267,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"infraId\": \"fd58604c-c671-e796-b0ed-8614e37209fa\",\n  \"componentId\": \"561a580e-e8cb-2c7b-43f9-7749c6e12802\"\n}",
+                  "raw": "{\n  \"infraId\": \"a89cbfdb-1b3b-a6aa-54e5-55484dc2eed3\",\n  \"componentId\": \"925bf7c9-56ce-c592-9434-8056fcd8ff18\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -7294,7 +7294,7 @@
           }
         },
         {
-          "id": "18c6ddd7-f02a-4f92-b9a7-ff8f6cf04cd4",
+          "id": "be7ec2cc-3c09-4b63-9b4b-1f832629d783",
           "name": "Delete a discovered Infra resource",
           "request": {
             "name": "Delete a discovered Infra resource",
@@ -7333,7 +7333,7 @@
           },
           "response": [
             {
-              "id": "15ef6d50-9914-40b2-b754-ad66252fe991",
+              "id": "bf3ae757-2a3c-4c7d-ab05-9abb025b4305",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7372,7 +7372,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "a28ad877-cb90-49ab-9800-dd857392cf0a",
+              "id": "5fbb8c7e-04c9-451f-a065-eeb1f692eb2b",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7417,7 +7417,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "6e82aa8e-41f6-4f89-9820-52d1f1269704",
+              "id": "9ff7b119-1ced-422f-aecd-c788c8ce89e6",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7468,7 +7468,7 @@
           }
         },
         {
-          "id": "fc028ee4-51b8-4806-9810-a7c86d73b3ed",
+          "id": "7b045e26-8082-408a-a857-84681c9245d6",
           "name": "Delete multiple Infra resources by id",
           "request": {
             "name": "Delete multiple Infra resources by id",
@@ -7502,7 +7502,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ids\": [\n    \"76bd20e1-8454-4398-084f-64809ee55fbe\",\n    \"27fa47b6-f19f-0da2-ae80-d95a4f0b10c7\"\n  ]\n}",
+              "raw": "{\n  \"ids\": [\n    \"e9125ca8-d5f5-f79c-2d3a-830e1fababa9\",\n    \"494ac10b-bd85-3b9a-879a-829dd6568568\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7512,7 +7512,7 @@
           },
           "response": [
             {
-              "id": "e5e78ec6-1325-48fc-9b5c-9571e97eee40",
+              "id": "e850a2a7-ff17-4b0a-a743-46fd950b6cd1",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7536,7 +7536,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"ids\": [\n    \"83d14704-d69c-7fcf-3423-2ea950c09981\",\n    \"5faec272-84ee-09aa-1b4b-771a01984bbc\"\n  ]\n}",
+                  "raw": "{\n  \"ids\": [\n    \"bbc58b0d-9073-b21f-e9f0-1d613c463fa8\",\n    \"d0764c0c-6b7f-efc6-8bed-ccbc8c7005a5\"\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -7552,7 +7552,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7563,7 +7563,7 @@
           }
         },
         {
-          "id": "a4f8b0f8-d319-4f50-b1dd-e2d401b3667b",
+          "id": "2c245d6b-ab1a-4813-82d1-ddc395e57f30",
           "name": "Run bootstrap (tag + RG-propagation auto-link) without scanning",
           "request": {
             "name": "Run bootstrap (tag + RG-propagation auto-link) without scanning",
@@ -7593,7 +7593,7 @@
           },
           "response": [
             {
-              "id": "c13fd4e9-a28e-477a-8911-60b6665760d0",
+              "id": "042d2135-2f03-4845-bcf9-f43e655bc562",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7624,7 +7624,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7635,7 +7635,7 @@
           }
         },
         {
-          "id": "ff566781-98c1-4c2c-bf8f-60e39514cbd1",
+          "id": "87de6044-2f64-44d6-99ed-9307b21ef722",
           "name": "Linking strategy catalog (Azure)",
           "request": {
             "name": "Linking strategy catalog (Azure)",
@@ -7665,7 +7665,7 @@
           },
           "response": [
             {
-              "id": "d92348ef-bfa1-4b6c-91cb-949346c52629",
+              "id": "46999a24-1d6b-401f-ab2f-61b319c3f842",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7696,7 +7696,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7707,7 +7707,7 @@
           }
         },
         {
-          "id": "30dd427c-8cec-4cad-8c46-86eb9d255cf5",
+          "id": "41559c05-023e-4f62-94c4-a38f60b4a99c",
           "name": "Run Azure supplement layers (Network Watcher / VM Insights / auto-link)",
           "request": {
             "name": "Run Azure supplement layers (Network Watcher / VM Insights / auto-link)",
@@ -7741,7 +7741,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategy\": \"monitor-insights\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60\n}",
+              "raw": "{\n  \"strategy\": \"name-heuristics\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60,\n  \"key_0\": 9020.199367422,\n  \"key_1\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7751,7 +7751,7 @@
           },
           "response": [
             {
-              "id": "a4abc136-b2bc-448c-945e-05c87b319ebb",
+              "id": "53892fd9-1be7-4a4a-8ad3-6055380c7224",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7775,7 +7775,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"strategy\": \"monitor-insights\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60\n}",
+                  "raw": "{\n  \"strategy\": \"name-heuristics\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60,\n  \"key_0\": 9020.199367422,\n  \"key_1\": false\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -7791,7 +7791,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7802,7 +7802,7 @@
           }
         },
         {
-          "id": "be3f4f7c-9104-46b8-91f9-f91db2c4d692",
+          "id": "7853f684-5976-4650-a080-7e20690aef1a",
           "name": "Catalogue of supported cloud providers",
           "request": {
             "name": "Catalogue of supported cloud providers",
@@ -7832,7 +7832,7 @@
           },
           "response": [
             {
-              "id": "4bba5103-d79c-4f5b-bb76-d22002f03868",
+              "id": "aaa12488-420d-4e1c-8322-ee51e56f8552",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7863,7 +7863,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"providers\": [\n    {\n      \"key_0\": 9739\n    },\n    {\n      \"key_0\": 8383.778759022864\n    }\n  ]\n}",
+              "body": "{\n  \"providers\": [\n    {\n      \"key_0\": 7197.550059998177\n    },\n    {\n      \"key_0\": \"string\",\n      \"key_1\": 9741.138678159597\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7874,7 +7874,7 @@
           }
         },
         {
-          "id": "09696df2-98f0-412f-9816-8901a20e96ca",
+          "id": "839a7669-ecfd-446e-b3f4-38aad79584ec",
           "name": "Catalogue of recognised resource types",
           "request": {
             "name": "Catalogue of recognised resource types",
@@ -7904,7 +7904,7 @@
           },
           "response": [
             {
-              "id": "e92c1687-c3c5-47d1-9805-2bcc21fd3008",
+              "id": "1e218ccc-fcb0-4681-8502-ceb44aa13928",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -7935,7 +7935,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7949,7 +7949,7 @@
       "event": []
     },
     {
-      "id": "6281e0df-1b92-4006-a502-9bd2353072d4",
+      "id": "581e479e-c2ab-43c3-96ba-e78cd31eec6f",
       "name": "Audit",
       "description": {
         "content": "",
@@ -7957,7 +7957,7 @@
       },
       "item": [
         {
-          "id": "c25a70bf-2d69-4e14-a99a-4fa4c204a5e9",
+          "id": "f2ded8ee-be21-4258-9d48-ff29acb173a5",
           "name": "Paginated audit log",
           "request": {
             "name": "Paginated audit log",
@@ -8014,23 +8014,23 @@
                 {
                   "disabled": false,
                   "key": "keyId",
-                  "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                  "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                   "description": "Exact match on actor_key_id — see GET /admin/api-keys for ids."
                 },
                 {
                   "disabled": false,
                   "key": "scope",
-                  "value": "read"
+                  "value": "write"
                 },
                 {
                   "disabled": false,
                   "key": "from",
-                  "value": "1947-08-07T20:54:20.375Z"
+                  "value": "1951-04-10T19:03:12.983Z"
                 },
                 {
                   "disabled": false,
                   "key": "to",
-                  "value": "1947-08-07T20:54:20.375Z"
+                  "value": "1951-04-10T19:03:12.983Z"
                 },
                 {
                   "disabled": false,
@@ -8051,7 +8051,7 @@
           },
           "response": [
             {
-              "id": "5a81e845-50b7-4f57-8581-bbfa30e71b4d",
+              "id": "845c46a7-f308-4f5c-b458-cbbe954577f4",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8093,19 +8093,19 @@
                     },
                     {
                       "key": "keyId",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea"
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d"
                     },
                     {
                       "key": "scope",
-                      "value": "read"
+                      "value": "write"
                     },
                     {
                       "key": "from",
-                      "value": "1947-08-07T20:54:20.375Z"
+                      "value": "1951-04-10T19:03:12.983Z"
                     },
                     {
                       "key": "to",
-                      "value": "1947-08-07T20:54:20.375Z"
+                      "value": "1951-04-10T19:03:12.983Z"
                     },
                     {
                       "key": "q",
@@ -8131,7 +8131,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -8142,7 +8142,7 @@
           }
         },
         {
-          "id": "749dadb5-5f2a-40de-91d0-a55a85361b3a",
+          "id": "7d501be9-185e-4cbf-b09d-bd0c5e2ddc68",
           "name": "Audit-log analytics for the last N days",
           "request": {
             "name": "Audit-log analytics for the last N days",
@@ -8178,7 +8178,7 @@
           },
           "response": [
             {
-              "id": "d2eb0ba7-ebde-4451-a5a8-1f61574108b2",
+              "id": "abf817cc-e389-4e49-af69-c16656d044fa",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8214,7 +8214,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -8225,7 +8225,7 @@
           }
         },
         {
-          "id": "c1357a34-0782-453f-9181-82e4e13bfae3",
+          "id": "c58ed09c-204d-407d-8ea5-357805bf848d",
           "name": "Full audit history for a specific resource",
           "request": {
             "name": "Full audit history for a specific resource",
@@ -8272,7 +8272,7 @@
           },
           "response": [
             {
-              "id": "ef8ffcf0-812a-4899-81a2-e398882b11ff",
+              "id": "f749f296-0ab4-4b0c-9942-08c6651e2c9e",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8320,7 +8320,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -8331,7 +8331,7 @@
           }
         },
         {
-          "id": "ae61640a-7b2d-4802-aae5-5cd7f04869b0",
+          "id": "eb0e7bd4-4bb5-4732-a082-6ba0528c285b",
           "name": "All audit events by a specific actor (paginated)",
           "request": {
             "name": "All audit events by a specific actor (paginated)",
@@ -8362,12 +8362,12 @@
                 {
                   "disabled": false,
                   "key": "keyId",
-                  "value": "349800a1-0d48-cad6-638c-3641687b91ea"
+                  "value": "799c493e-59cc-b083-25e6-1664c5e6928d"
                 },
                 {
                   "disabled": false,
                   "key": "scope",
-                  "value": "read"
+                  "value": "write"
                 },
                 {
                   "disabled": false,
@@ -8380,7 +8380,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "tJHBIvkFulgvmJ1BLfU7_87nEX47T8TKBdvNkvJdiMU.6dMy@fsLWVoGBQ+V+FeSSmLzzxy5z6QTyVqwUy0s4H@@4uGTmHMpz@q",
+                  "value": "QGelWHcpjWngOn.7N4s_qk7FPyAqD+KdA2tGQyNuQb",
                   "key": "name",
                   "description": "(Required) "
                 }
@@ -8397,7 +8397,7 @@
           },
           "response": [
             {
-              "id": "e35e6d2b-18ea-4db3-b3ab-210e0e0332d3",
+              "id": "14201ffa-60af-45bf-ad70-5dc97e5eefdb",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8420,11 +8420,11 @@
                     },
                     {
                       "key": "keyId",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea"
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d"
                     },
                     {
                       "key": "scope",
-                      "value": "read"
+                      "value": "write"
                     },
                     {
                       "key": "like",
@@ -8435,7 +8435,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "tJHBIvkFulgvmJ1BLfU7_87nEX47T8TKBdvNkvJdiMU.6dMy@fsLWVoGBQ+V+FeSSmLzzxy5z6QTyVqwUy0s4H@@4uGTmHMpz@q",
+                      "value": "QGelWHcpjWngOn.7N4s_qk7FPyAqD+KdA2tGQyNuQb",
                       "key": "name",
                       "description": "(Required) "
                     }
@@ -8458,7 +8458,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -8472,7 +8472,7 @@
       "event": []
     },
     {
-      "id": "307b0fc0-e17f-4550-8b81-474b0dfd87ea",
+      "id": "f99e2416-0cb6-48bd-a0f8-5414bfc5ac14",
       "name": "CMDB",
       "description": {
         "content": "",
@@ -8480,7 +8480,7 @@
       },
       "item": [
         {
-          "id": "b32685c4-357d-4e8f-83df-801eac5d3251",
+          "id": "c476f364-7ea4-46be-9270-983f9f711c08",
           "name": "/cmdb/assessment",
           "request": {
             "name": "/cmdb/assessment",
@@ -8501,7 +8501,7 @@
           },
           "response": [
             {
-              "id": "f061da5a-92de-4cbc-9818-88ea3d380a3f",
+              "id": "8994a305-af55-4c77-bc01-f68169d33de9",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8537,7 +8537,7 @@
           }
         },
         {
-          "id": "f93e7292-8390-496e-ab4c-00bee4732324",
+          "id": "b20483eb-43c2-41bc-85f4-5e02d0320b8f",
           "name": "/cmdb/assessment/state",
           "request": {
             "name": "/cmdb/assessment/state",
@@ -8559,7 +8559,7 @@
           },
           "response": [
             {
-              "id": "24c1eec1-223d-4fc9-a367-9b46da6486e2",
+              "id": "cef466dc-f378-4aa0-98b1-c265e34f7291",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8596,7 +8596,7 @@
           }
         },
         {
-          "id": "16dad70c-0592-4083-8e86-ff8ecb3ef1d7",
+          "id": "62788366-07d4-4707-9f8a-d4ccf41bdd71",
           "name": "/cmdb/assessment/runs",
           "request": {
             "name": "/cmdb/assessment/runs",
@@ -8618,7 +8618,7 @@
           },
           "response": [
             {
-              "id": "852f515c-d0d0-4b6c-a5ce-3af024a626b1",
+              "id": "ba516a62-d57f-404e-bd45-0b832e93b01c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8655,7 +8655,7 @@
           }
         },
         {
-          "id": "22539af3-4466-4310-a4b9-5375c216c414",
+          "id": "96915109-8ef5-41ae-96bb-1c6732b71693",
           "name": "/cmdb/assessment/:sys_id",
           "request": {
             "name": "/cmdb/assessment/:sys_id",
@@ -8685,7 +8685,7 @@
           },
           "response": [
             {
-              "id": "af1ac074-c912-4a1d-91e3-b3604e838bd8",
+              "id": "6092c9d1-bb42-4517-92e8-a653deb9ccc1",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8730,7 +8730,7 @@
           }
         },
         {
-          "id": "e6113946-bc0e-4cc9-a75a-4c854942125c",
+          "id": "fbc5fb1e-d3cd-4051-9654-c3877ceafd52",
           "name": "/cmdb/assessment/refresh",
           "request": {
             "name": "/cmdb/assessment/refresh",
@@ -8752,7 +8752,7 @@
           },
           "response": [
             {
-              "id": "279493a7-4768-4c07-b762-b474a3765e58",
+              "id": "364b4125-a867-4912-8e1e-74199d36e14c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8792,7 +8792,7 @@
       "event": []
     },
     {
-      "id": "5c69c9a9-be51-4df6-bafc-42d813b9a4ee",
+      "id": "a33c6da4-fc1a-4f39-ad40-1bc396635506",
       "name": "AI",
       "description": {
         "content": "",
@@ -8800,7 +8800,7 @@
       },
       "item": [
         {
-          "id": "9199444e-bff5-4290-95ac-623f8a6ea5f4",
+          "id": "2664fe59-5a4b-43a3-a5d4-c2c9b23a9748",
           "name": "AI provider availability snapshot",
           "request": {
             "name": "AI provider availability snapshot",
@@ -8830,7 +8830,7 @@
           },
           "response": [
             {
-              "id": "21db40da-760c-4cc4-8fd8-846d503e6157",
+              "id": "79d00b75-396a-4f68-a756-59e4f6f87c06",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8861,7 +8861,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -8872,7 +8872,7 @@
           }
         },
         {
-          "id": "873e0bc7-81aa-4d59-b30e-2feaa2333428",
+          "id": "287c3688-4f4d-438e-9824-9aa23900cfeb",
           "name": "Plain-English explanation for a mapping suggestion",
           "request": {
             "name": "Plain-English explanation for a mapping suggestion",
@@ -8906,7 +8906,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"infra\": {\n    \"key_0\": 3894\n  },\n  \"suggestion\": {\n    \"key_0\": true\n  }\n}",
+              "raw": "{\n  \"infra\": {\n    \"key_0\": false,\n    \"key_1\": \"string\",\n    \"key_2\": 8468.772027158866\n  },\n  \"suggestion\": {\n    \"key_0\": 4400.398718311014\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8916,7 +8916,7 @@
           },
           "response": [
             {
-              "id": "7c565556-2dc0-4e33-8c25-d134ffb9ab99",
+              "id": "1c8d3726-d83c-472c-bb10-0e99fb0836dc",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -8940,7 +8940,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"infra\": {\n    \"key_0\": 3894\n  },\n  \"suggestion\": {\n    \"key_0\": true\n  }\n}",
+                  "raw": "{\n  \"infra\": {\n    \"key_0\": false,\n    \"key_1\": \"string\",\n    \"key_2\": 8468.772027158866\n  },\n  \"suggestion\": {\n    \"key_0\": 4400.398718311014\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -8956,7 +8956,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -8967,7 +8967,7 @@
           }
         },
         {
-          "id": "7e4b900c-a2f3-4e16-8333-795c3f951ce9",
+          "id": "428e1ca6-a364-4d10-b8c7-14af8a177b6d",
           "name": "AI-augmented Application/Component scoring for one Infra",
           "request": {
             "name": "AI-augmented Application/Component scoring for one Infra",
@@ -9001,7 +9001,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"infraId\": \"fc3371ff-c9d0-02e5-c92f-0bbcda90f17c\"\n}",
+              "raw": "{\n  \"infraId\": \"989e082a-512b-acd0-0734-5063bdae3b58\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9011,7 +9011,7 @@
           },
           "response": [
             {
-              "id": "851f587c-a016-4b85-b8fe-4f1d0fce6b7b",
+              "id": "3afce81c-2eba-4181-92f7-78bd257cf6b0",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9035,7 +9035,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"infraId\": \"fc3371ff-c9d0-02e5-c92f-0bbcda90f17c\"\n}",
+                  "raw": "{\n  \"infraId\": \"989e082a-512b-acd0-0734-5063bdae3b58\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9051,7 +9051,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -9062,7 +9062,7 @@
           }
         },
         {
-          "id": "cd24dee5-dd7b-4bd7-925e-e14c8379366d",
+          "id": "a06a3350-f4a7-4d5d-8fe1-0686f796fc27",
           "name": "Plain-English blast-radius narrative for one Infra",
           "request": {
             "name": "Plain-English blast-radius narrative for one Infra",
@@ -9085,7 +9085,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                  "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -9102,7 +9102,7 @@
           },
           "response": [
             {
-              "id": "e94eff80-abd5-475d-8b7f-b7efef377aa7",
+              "id": "a131e869-fb23-439c-ab71-aca29fad758d",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9120,7 +9120,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -9143,7 +9143,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -9154,7 +9154,7 @@
           }
         },
         {
-          "id": "0a6ee362-b85f-4bc3-8cad-9298e3892272",
+          "id": "2184f91e-554c-43bb-b4ed-c1d8a66457ca",
           "name": "High-level architectural plan over the whole graph (cloud LLM)",
           "request": {
             "name": "High-level architectural plan over the whole graph (cloud LLM)",
@@ -9185,7 +9185,7 @@
           },
           "response": [
             {
-              "id": "ebf138b1-d1fe-492c-96a6-0e9d13c5384e",
+              "id": "06b865ce-206d-43c8-a32c-f04337c5ac32",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9217,12 +9217,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "a959109d-89cf-40ce-9360-e54282d626e6",
+              "id": "00a25159-0392-49be-9194-d307ca3ef9e6",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9265,7 +9265,7 @@
           }
         },
         {
-          "id": "3f9562ed-2273-40f0-be4f-4ec8acb1ae2e",
+          "id": "e8e40562-9fab-44f2-998e-fbd0c30fe3b3",
           "name": "Remediation plan for unmapped/drifted Infra (cloud LLM)",
           "request": {
             "name": "Remediation plan for unmapped/drifted Infra (cloud LLM)",
@@ -9299,7 +9299,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 7511,\n      \"key_1\": 4199,\n      \"key_2\": 2512.304205485156\n    },\n    {\n      \"key_0\": \"string\",\n      \"key_1\": true,\n      \"key_2\": \"string\"\n    }\n  ],\n  \"key_0\": \"string\"\n}",
+              "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 9953,\n      \"key_1\": true,\n      \"key_2\": 7874.77357309198,\n      \"key_3\": 2137.81793612706\n    },\n    {\n      \"key_0\": 6085,\n      \"key_1\": true\n    }\n  ],\n  \"key_0\": true,\n  \"key_1\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9309,7 +9309,7 @@
           },
           "response": [
             {
-              "id": "a1347dc7-0005-4885-ba6b-6b2c7c0a0998",
+              "id": "7017f25f-1f9e-46fa-898b-0e906f2b1f5c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9333,7 +9333,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 7437,\n      \"key_1\": 3412,\n      \"key_2\": 8617.781312223842,\n      \"key_3\": 8284.487041899118\n    },\n    {\n      \"key_0\": true,\n      \"key_1\": false\n    }\n  ],\n  \"key_0\": 2162.4729329355173,\n  \"key_1\": 8087\n}",
+                  "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 4854.537137793873,\n      \"key_1\": 6192.548770506261\n    },\n    {\n      \"key_0\": 7553,\n      \"key_1\": 8897\n    }\n  ],\n  \"key_0\": true,\n  \"key_1\": true,\n  \"key_2\": \"string\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9349,12 +9349,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "09785311-80f8-4da9-b557-b2bef82d892e",
+              "id": "31df3c03-b6bb-4296-b3d3-2ecb76a55dda",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9378,7 +9378,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 7437,\n      \"key_1\": 3412,\n      \"key_2\": 8617.781312223842,\n      \"key_3\": 8284.487041899118\n    },\n    {\n      \"key_0\": true,\n      \"key_1\": false\n    }\n  ],\n  \"key_0\": 2162.4729329355173,\n  \"key_1\": 8087\n}",
+                  "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 4854.537137793873,\n      \"key_1\": 6192.548770506261\n    },\n    {\n      \"key_0\": 7553,\n      \"key_1\": 8897\n    }\n  ],\n  \"key_0\": true,\n  \"key_1\": true,\n  \"key_2\": \"string\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9405,7 +9405,7 @@
           }
         },
         {
-          "id": "93825590-afbc-47ea-b25e-37ec369a3db1",
+          "id": "8b622f89-4946-4d25-8b91-068150d15ddc",
           "name": "Cross-app dependency analysis (cloud LLM)",
           "request": {
             "name": "Cross-app dependency analysis (cloud LLM)",
@@ -9436,7 +9436,7 @@
           },
           "response": [
             {
-              "id": "2a4928ba-be6e-4bb9-b52a-660ebcc8b704",
+              "id": "2a257d42-2933-465b-9eca-dfe6f6582e55",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9468,12 +9468,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "06463244-2dde-49f1-8271-0581d5fbe73b",
+              "id": "d23bfe53-e6cd-4c34-8894-9193ab1f8b46",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9516,7 +9516,7 @@
           }
         },
         {
-          "id": "08f8c1e3-c7c6-4b6e-8aa0-37912ed49c29",
+          "id": "e729fa0e-eebc-4069-b705-122fc8464d68",
           "name": "Conversational chat with live graph context",
           "request": {
             "name": "Conversational chat with live graph context",
@@ -9549,7 +9549,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"assistant\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    }\n  ]\n}",
+              "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9559,7 +9559,7 @@
           },
           "response": [
             {
-              "id": "e3412563-3ace-4f88-865b-bf488dfc6730",
+              "id": "e115be82-2451-496f-87c3-bea291e5bf11",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9582,7 +9582,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    }\n  ]\n}",
+                  "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"assistant\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"system\",\n      \"content\": \"string\"\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9598,12 +9598,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "60953cf5-ee0b-4759-be21-ebdbc5a92830",
+              "id": "0114bb16-e469-4d35-9ca2-598f08a03dfc",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9626,7 +9626,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    }\n  ]\n}",
+                  "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"assistant\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"system\",\n      \"content\": \"string\"\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9656,7 +9656,7 @@
       "event": []
     },
     {
-      "id": "30211bba-0574-4955-adb7-d228d8305d2d",
+      "id": "124fcc5a-77d8-4de8-aaa6-d47b0858902e",
       "name": "Admin",
       "description": {
         "content": "",
@@ -9664,7 +9664,7 @@
       },
       "item": [
         {
-          "id": "581b9932-78c8-4cab-9615-3ad8040d2c2e",
+          "id": "7caf2b3e-64f3-4120-806d-a0f5363a0d48",
           "name": "Create a new API key",
           "request": {
             "name": "Create a new API key",
@@ -9707,7 +9707,7 @@
           },
           "response": [
             {
-              "id": "2e97f579-8db3-4f01-b5b2-1d6f616b1b05",
+              "id": "b5d6cf89-f1e6-44bb-840f-ae1c030c9d5c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9746,7 +9746,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"27b4aa6c-bc56-9d62-807b-36675c108fc4\",\n  \"name\": \"string\",\n  \"key_prefix\": \"string\",\n  \"scopes\": [\n    \"admin\",\n    \"admin\"\n  ],\n  \"created_at\": \"1973-08-20T12:52:14.357Z\",\n  \"created_by\": \"string\",\n  \"last_used_at\": \"1958-10-01T15:27:17.371Z\",\n  \"revoked_at\": \"1994-02-18T09:48:34.854Z\",\n  \"expires_at\": \"1952-02-23T13:27:42.833Z\",\n  \"is_bootstrap\": false,\n  \"plaintext\": \"string\"\n}",
+              "body": "{\n  \"id\": \"3eb286a7-c31d-81e0-092f-1719d0e1fa1e\",\n  \"name\": \"string\",\n  \"key_prefix\": \"string\",\n  \"scopes\": [\n    \"read\",\n    \"admin\"\n  ],\n  \"created_at\": \"2000-02-15T15:41:45.767Z\",\n  \"created_by\": \"string\",\n  \"last_used_at\": \"2025-04-30T15:00:52.397Z\",\n  \"revoked_at\": \"1959-09-01T00:42:31.243Z\",\n  \"expires_at\": \"2009-07-15T05:29:30.308Z\",\n  \"is_bootstrap\": true,\n  \"plaintext\": \"string\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -9757,7 +9757,7 @@
           }
         },
         {
-          "id": "38d61d77-7ff8-44b6-958e-f3f411a66ede",
+          "id": "19b93346-d5e6-4348-920a-7803c38429df",
           "name": "List API keys",
           "request": {
             "name": "List API keys",
@@ -9793,7 +9793,7 @@
           },
           "response": [
             {
-              "id": "03a873d6-8fc4-47d5-83b5-02afaa27e541",
+              "id": "21344038-a8ce-467f-b3f2-eab8b10d5803",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9829,7 +9829,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"2183e5a6-3de9-ee5f-9c06-2a786355bc37\",\n    \"name\": \"string\",\n    \"key_prefix\": \"string\",\n    \"scopes\": [\n      \"admin\",\n      \"read\"\n    ],\n    \"created_at\": \"1983-02-19T21:10:23.456Z\",\n    \"created_by\": null,\n    \"last_used_at\": \"1975-12-03T11:44:05.859Z\",\n    \"revoked_at\": null,\n    \"expires_at\": null,\n    \"is_bootstrap\": false\n  },\n  {\n    \"id\": \"735544db-17ba-5048-254c-f0b97b7848d5\",\n    \"name\": \"string\",\n    \"key_prefix\": \"string\",\n    \"scopes\": [\n      \"admin\",\n      \"write\"\n    ],\n    \"created_at\": \"2020-01-31T00:51:59.831Z\",\n    \"created_by\": \"string\",\n    \"last_used_at\": null,\n    \"revoked_at\": \"2025-04-08T09:54:17.521Z\",\n    \"expires_at\": \"2005-06-28T14:50:24.258Z\",\n    \"is_bootstrap\": false\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"84487195-c22f-8647-88b5-2b938e2f5b09\",\n    \"name\": \"string\",\n    \"key_prefix\": \"string\",\n    \"scopes\": [\n      \"write\",\n      \"write\"\n    ],\n    \"created_at\": \"1994-10-20T05:04:19.889Z\",\n    \"created_by\": \"string\",\n    \"last_used_at\": \"1991-09-02T10:41:17.356Z\",\n    \"revoked_at\": \"1959-12-12T11:28:19.730Z\",\n    \"expires_at\": null,\n    \"is_bootstrap\": true\n  },\n  {\n    \"id\": \"cce4da56-ae48-84be-71e8-d152aafefa29\",\n    \"name\": \"string\",\n    \"key_prefix\": \"string\",\n    \"scopes\": [\n      \"read\",\n      \"admin\"\n    ],\n    \"created_at\": \"1989-03-30T08:54:39.272Z\",\n    \"created_by\": null,\n    \"last_used_at\": null,\n    \"revoked_at\": null,\n    \"expires_at\": null,\n    \"is_bootstrap\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -9840,7 +9840,7 @@
           }
         },
         {
-          "id": "bbf4c424-38dc-4bb0-b258-63b2b2cc73ca",
+          "id": "dafb323f-185b-401e-8b81-8013517b0681",
           "name": "Revoke an API key",
           "request": {
             "name": "Revoke an API key",
@@ -9862,7 +9862,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                  "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -9879,7 +9879,7 @@
           },
           "response": [
             {
-              "id": "222e4ccc-fa41-426a-b879-a7b3968d6128",
+              "id": "dc088023-acde-4e67-850a-8b7705e99a50",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9896,7 +9896,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -9918,7 +9918,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "7f7f286e-8370-4be8-b658-563721e30a0e",
+              "id": "4a074481-b8aa-44d4-8302-af8f02580f47",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9935,7 +9935,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -9963,7 +9963,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "dbc87d91-c381-4f7b-9bee-a75074359f71",
+              "id": "ca6555d6-f775-447a-bb2b-463453781e7c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -9980,7 +9980,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -10014,7 +10014,7 @@
           }
         },
         {
-          "id": "dd556989-3b95-46d7-aa9b-f498b4beb34e",
+          "id": "0ca6c112-9f6c-4bbd-81b1-6fbf8ec8447d",
           "name": "Update an API key (name / scopes / expiresAt)",
           "request": {
             "name": "Update an API key (name / scopes / expiresAt)",
@@ -10036,7 +10036,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                  "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -10056,7 +10056,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"g:rwu9c6Di3lR8xaDwSERSU9_4H+\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": \"2018-04-29T21:47:22.439Z\"\n}",
+              "raw": "{\n  \"name\": \"jDOmJAU2@EvCsDO.hxV0VkvyaujMd:mIpEady:zcFr6maAhxRsJGoUPJgYf6ArAdgSZmseglzgu0Pmuw+ja0pmFCJvkcNBAMQh@b.RVy20dgTPLgs1Zj5yH5Fn6zh5m\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10066,7 +10066,7 @@
           },
           "response": [
             {
-              "id": "0e992e32-660a-46c6-b3f0-914ee9fe5281",
+              "id": "fed7bbf1-3907-4838-93f7-ac89cce9370b",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10083,7 +10083,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -10098,7 +10098,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"g:rwu9c6Di3lR8xaDwSERSU9_4H+\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": \"2018-04-29T21:47:22.439Z\"\n}",
+                  "raw": "{\n  \"name\": \"jDOmJAU2@EvCsDO.hxV0VkvyaujMd:mIpEady:zcFr6maAhxRsJGoUPJgYf6ArAdgSZmseglzgu0Pmuw+ja0pmFCJvkcNBAMQh@b.RVy20dgTPLgs1Zj5yH5Fn6zh5m\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10114,12 +10114,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"id\": \"6e029b60-439c-a090-e78b-8e4ab7dec02d\",\n  \"name\": \"string\",\n  \"key_prefix\": \"string\",\n  \"scopes\": [\n    \"write\",\n    \"read\"\n  ],\n  \"created_at\": \"2007-11-14T04:11:17.883Z\",\n  \"created_by\": \"string\",\n  \"last_used_at\": null,\n  \"revoked_at\": null,\n  \"expires_at\": null,\n  \"is_bootstrap\": true\n}",
+              "body": "{\n  \"id\": \"456f8392-fa69-479c-11f3-f63d8f7b1fe1\",\n  \"name\": \"string\",\n  \"key_prefix\": \"string\",\n  \"scopes\": [\n    \"write\",\n    \"admin\"\n  ],\n  \"created_at\": \"2012-02-25T03:10:10.737Z\",\n  \"created_by\": \"string\",\n  \"last_used_at\": \"2000-09-08T14:03:16.254Z\",\n  \"revoked_at\": null,\n  \"expires_at\": null,\n  \"is_bootstrap\": true\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "cac4885f-9da3-41b9-856f-53cdf2241b2d",
+              "id": "d57aba81-3172-49af-81b4-739128513766",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10136,7 +10136,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -10151,7 +10151,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"g:rwu9c6Di3lR8xaDwSERSU9_4H+\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": \"2018-04-29T21:47:22.439Z\"\n}",
+                  "raw": "{\n  \"name\": \"jDOmJAU2@EvCsDO.hxV0VkvyaujMd:mIpEady:zcFr6maAhxRsJGoUPJgYf6ArAdgSZmseglzgu0Pmuw+ja0pmFCJvkcNBAMQh@b.RVy20dgTPLgs1Zj5yH5Fn6zh5m\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10172,7 +10172,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "2695459e-6a91-4a82-9905-c8b769c5d935",
+              "id": "edcdd0da-f8d9-43f5-83a9-e01bfcdc6df5",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10189,7 +10189,7 @@
                     {
                       "disabled": false,
                       "type": "any",
-                      "value": "349800a1-0d48-cad6-638c-3641687b91ea",
+                      "value": "799c493e-59cc-b083-25e6-1664c5e6928d",
                       "key": "id",
                       "description": "(Required) "
                     }
@@ -10204,7 +10204,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"g:rwu9c6Di3lR8xaDwSERSU9_4H+\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": \"2018-04-29T21:47:22.439Z\"\n}",
+                  "raw": "{\n  \"name\": \"jDOmJAU2@EvCsDO.hxV0VkvyaujMd:mIpEady:zcFr6maAhxRsJGoUPJgYf6ArAdgSZmseglzgu0Pmuw+ja0pmFCJvkcNBAMQh@b.RVy20dgTPLgs1Zj5yH5Fn6zh5m\",\n  \"scopes\": [\n    \"read\"\n  ],\n  \"expiresAt\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10234,7 +10234,7 @@
       "event": []
     },
     {
-      "id": "32b73bfd-7c66-4a7b-9c5c-dd3af5de7f48",
+      "id": "ddcd335c-a83a-4799-b2de-9c38a07a1b58",
       "name": "Connectors",
       "description": {
         "content": "",
@@ -10242,7 +10242,7 @@
       },
       "item": [
         {
-          "id": "3b3c836c-ea05-4fe8-9b65-3d5697331408",
+          "id": "baf96fc2-9d24-407b-993d-2dc49367e714",
           "name": "List available connectors (registry)",
           "request": {
             "name": "List available connectors (registry)",
@@ -10272,7 +10272,7 @@
           },
           "response": [
             {
-              "id": "2347aa8e-2cd6-4b7b-b7c6-7d52e71a4e37",
+              "id": "bd98d136-cd2f-44b2-8361-bb01f368f419",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10303,7 +10303,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"key_0\": 2237.4769485609922,\n    \"key_1\": 8520,\n    \"key_2\": 6409\n  },\n  {\n    \"key_0\": false\n  }\n]",
+              "body": "[\n  {\n    \"key_0\": true\n  },\n  {\n    \"key_0\": 4184.605427424249,\n    \"key_1\": 8589.747705310645,\n    \"key_2\": true\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -10314,7 +10314,7 @@
           }
         },
         {
-          "id": "6869aaab-6b7f-4c00-8941-1013dacc6aa6",
+          "id": "f363eff9-9d12-4909-b510-9f894b626307",
           "name": "Get one connector's schema",
           "request": {
             "name": "Get one connector's schema",
@@ -10352,7 +10352,7 @@
           },
           "response": [
             {
-              "id": "2568fe88-1faf-446e-959a-7bab7daf3b25",
+              "id": "7e9170b5-d7dc-499b-9217-aa49e101146c",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10391,12 +10391,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "2ddd0e0a-85ba-4906-8ec4-fdc6b674ef09",
+              "id": "76d2f5b2-f912-47aa-a652-3447dc81df96",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10435,7 +10435,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"key_0\": 9464.018294685862,\n  \"key_1\": \"string\"\n}",
+              "body": "{\n  \"key_0\": false,\n  \"key_1\": 7028\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -10449,7 +10449,7 @@
       "event": []
     },
     {
-      "id": "48684c43-fb02-48a1-b3b6-d7e32e745f68",
+      "id": "e74ceda1-9516-4e3a-9742-24a198a33d85",
       "name": "Health",
       "description": {
         "content": "",
@@ -10457,7 +10457,7 @@
       },
       "item": [
         {
-          "id": "aca6f8f3-5d85-47a5-88e5-c4049db1a7c4",
+          "id": "08953d41-4360-4655-83d3-9b057e5a41ac",
           "name": "Liveness probe",
           "request": {
             "name": "Liveness probe",
@@ -10477,7 +10477,7 @@
           },
           "response": [
             {
-              "id": "7deabb46-9ce5-45c7-915d-20828f60f870",
+              "id": "50449c2d-e54c-4039-84c5-bf632337f286",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10512,7 +10512,7 @@
           }
         },
         {
-          "id": "06c51a72-e032-491d-8706-476c30976c3f",
+          "id": "3eb52db8-9057-4a83-a686-819226cd57de",
           "name": "API banner",
           "request": {
             "name": "API banner",
@@ -10532,7 +10532,7 @@
           },
           "response": [
             {
-              "id": "e6ce06fa-37b0-4b36-8428-773a186933ba",
+              "id": "77d20eca-e660-4f48-b755-a7aa85bb7372",
               "name": "Default Response",
               "originalRequest": {
                 "url": {
@@ -10604,7 +10604,7 @@
     ]
   },
   "info": {
-    "_postman_id": "3aaa1e8d-e68f-4ca1-b68e-56c7efa1f78d",
+    "_postman_id": "e9eee385-aecb-46f3-afcc-fb0070e7ce8b",
     "name": "AppCloud API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "description": "Generated from docs/openapi.yaml via `npm run openapi:export`.\n\n## Setup\n1. Set `baseUrl` (default `http://localhost:3000`) and `apiKey`\n2. Hit `Quickstart → GET /health`\n3. Walk the per-tag folders for full CRUD coverage\n\nFor narrative workflow recipes, see `docs/api-guide.md §13`."
