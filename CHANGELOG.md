@@ -76,6 +76,23 @@ DB-backed multi-key RBAC system replacing the previous single-env-var auth.
   (`APPCLOUD_ADMIN_API_KEY` env var) is now the lower-effort path; for
   multi-team operation, create separate keys via `/admin/api-keys`.
 
+### Reliability — audit log
+- **`pg.audit()` retry buffer.** Failed INSERTs no longer disappear into a
+  silent try/catch. Rows queue in an in-memory ring buffer (capped via
+  `APPCLOUD_AUDIT_BUFFER_MAX`, default 1000) and drain on a timer
+  (`APPCLOUD_AUDIT_BUFFER_DRAIN_MS`, default 30s) plus opportunistically
+  after every successful audit. Order of original `audit()` calls is
+  preserved across recovery — backlog drains FIFO before the new row
+  inserts. Buffer overflow evicts the OLDEST row and increments a
+  `stats.dropped` counter (logged at every 100 evictions). Final drain on
+  graceful shutdown, bounded to 5 seconds.
+- **`audit_log` retention.** A new `auditCleanupPlugin` runs a CTE-batched
+  DELETE on a fixed cadence to bound table size. Configurable via
+  `APPCLOUD_AUDIT_RETENTION_DAYS` (default 365), `APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS`
+  (default 24h), `APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE` (default 10 000).
+  Retention=0 disables the job. Decorator `fastify.auditCleanup.runNow()`
+  exposed for ops automation. First run staggered 30s after startup.
+
 ---
 
 ## release/0.1.0.0

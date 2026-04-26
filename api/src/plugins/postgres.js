@@ -1,4 +1,5 @@
 import fs from 'fs'
+import { makeAuditMachinery } from '../utils/audit-buffer.js'
 
 function readSecret(fileEnvVar, plainEnvVar, fallback = '') {
   const filePath = process.env[fileEnvVar]
@@ -9,6 +10,9 @@ function readSecret(fileEnvVar, plainEnvVar, fallback = '') {
 }
 
 const stub = { pool: null, query: async () => [], audit: async () => {} }
+
+const AUDIT_BUFFER_MAX      = parseInt(process.env.APPCLOUD_AUDIT_BUFFER_MAX      || '1000',  10)
+const AUDIT_BUFFER_DRAIN_MS = parseInt(process.env.APPCLOUD_AUDIT_BUFFER_DRAIN_MS || '30000', 10)
 
 // Called directly on the root fastify instance — no encapsulation issues
 export async function postgresPlugin(fastify) {
@@ -64,36 +68,57 @@ export async function postgresPlugin(fastify) {
     fastify.log.warn(`[pg] audit_log evolution skipped: ${err.message}`)
   }
 
+  // Audit machinery — buffer + retry. The factory in utils/audit-buffer.js
+  // owns the algorithm so the integration test can exercise the same
+  // logic without spinning a duplicate pool.
+  const auditMachinery = makeAuditMachinery({
+    runQuery: (sql, params) => pool.query(sql, params),
+    log:      fastify.log,
+    bufferMax: AUDIT_BUFFER_MAX,
+  })
+
+  // Periodic drain — rescues rows that piled up while Postgres was
+  // unavailable. Cleared in onClose. unref() so the timer alone doesn't
+  // keep the process alive.
+  const drainTimer = setInterval(() => {
+    auditMachinery.drain().catch(() => {})
+  }, AUDIT_BUFFER_DRAIN_MS)
+  drainTimer.unref?.()
+
   fastify.decorate('pg', {
     pool,
     query: async (sql, params = []) => (await pool.query(sql, params)).rows,
-    // audit() accepts the actor as a string (legacy) OR an object of the
-    // shape { name, keyId, scope } (since slice 5 — RBAC). The object form
-    // populates the new audit_log columns; the string form leaves them
-    // NULL, which means rows from system jobs / schedulers stay readable
-    // but with no key attribution.
-    audit: async (actor, action, resourceType, resourceId, resourceName, metadata = {}, diff = null) => {
-      try {
-        let actorName, actorKeyId = null, actorScope = null
-        if (typeof actor === 'string') {
-          actorName = actor
-        } else if (actor && typeof actor === 'object') {
-          actorName  = actor.name  || 'system'
-          actorKeyId = actor.keyId || null
-          actorScope = actor.scope || null
-        } else {
-          actorName = 'system'
-        }
-        await pool.query(
-          `INSERT INTO audit_log(actor, actor_key_id, actor_scope, action, resource_type, resource_id, resource_name, metadata, diff)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [actorName, actorKeyId, actorScope,
-           action, resourceType, resourceId, resourceName,
-           JSON.stringify(metadata), diff ? JSON.stringify(diff) : null]
-        )
-      } catch {}
-    }
+    // audit() — see utils/audit-buffer.js for full semantics. Briefly:
+    //   - hot path: direct INSERT
+    //   - on failure or backlog: queue + periodic retry
+    //   - bounded buffer with oldest-eviction on overflow
+    audit: auditMachinery.audit,
+    // Test/inspection accessors so an integration test (or a future ops
+    // endpoint) can assert on buffer state without poking module internals.
+    auditBuffer: {
+      pending: auditMachinery.pending,
+      stats:   auditMachinery.stats,
+      drain:   auditMachinery.drain,
+    },
   })
 
-  fastify.addHook('onClose', async () => pool.end())
+  fastify.addHook('onClose', async () => {
+    clearInterval(drainTimer)
+    // Best-effort final flush so rows queued during the last request
+    // survive the process exit. Bounded by 5s so a hard outage doesn't
+    // hang shutdown.
+    try {
+      await Promise.race([
+        auditMachinery.drain(),
+        new Promise(r => setTimeout(r, 5000)),
+      ])
+    } catch {}
+    if (auditMachinery.pending() > 0) {
+      fastify.log.warn(
+        { pending: auditMachinery.pending(), dropped: auditMachinery.stats().dropped },
+        '[pg] shutdown with audit rows still buffered — they will be lost',
+      )
+    }
+    await pool.end()
+  })
 }

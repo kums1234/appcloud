@@ -7,6 +7,7 @@ import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
 import { authPlugin } from './plugins/auth.js'
+import { auditCleanupPlugin } from './plugins/audit-cleanup.js'
 import applicationRoutes from './routes/applications.js'
 import componentRoutes from './routes/components.js'
 import infraRoutes from './routes/infra.js'
@@ -186,6 +187,11 @@ await postgresPlugin(fastify)
 
 // Auth plugin — must come after DB plugins (uses User nodes) and before routes
 await authPlugin(fastify)
+
+// Audit retention — periodic DELETE of audit_log rows older than
+// APPCLOUD_AUDIT_RETENTION_DAYS (default 365). Direct call (not register())
+// so it shares the root fastify decorators with no encapsulation barrier.
+await auditCleanupPlugin(fastify)
 
 // Connector framework — loads registry, applies integrations-table evolution
 // DDL, and registers push-style receivers (e.g. OTel ingest). Must come after
