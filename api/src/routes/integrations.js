@@ -6,6 +6,7 @@
 // one-shot multipart upload → parse → ingest.
 import { parseTerraformState } from '../utils/terraform-state-parser.js'
 import { ingestIacResources }  from '../utils/iac-ingest.js'
+import { systemActor }         from '../utils/audit.js'
 
 // ── Route handler ────────────────────────────────────────────────────────────
 export default async function integrationRoutes(fastify) {
@@ -93,13 +94,24 @@ export default async function integrationRoutes(fastify) {
          ingestResult.resourcesSkipped,
          JSON.stringify(summary), jobId]
       )
+      // Audit attribution: the import runs server-side after we accept the
+      // upload. The user who triggered it is in req.principal, but the
+      // legacy behaviour was to record this as a system action — preserve
+      // that intent and use the explicit systemActor() helper so
+      // actor_key_id / actor_scope are deliberately NULL rather than
+      // accidentally dropped from the bare-string code path.
       await fastify.pg.audit(
-        'system', 'import', 'TerraformImport', jobId, filename,
+        systemActor('terraform-import'),
+        'import', 'TerraformImport', jobId, filename,
         {
-          created: ingestResult.resourcesCreated,
-          updated: ingestResult.resourcesUpdated,
-          skipped: ingestResult.resourcesSkipped,
-          total:   resources.length,
+          created:    ingestResult.resourcesCreated,
+          updated:    ingestResult.resourcesUpdated,
+          skipped:    ingestResult.resourcesSkipped,
+          total:      resources.length,
+          // Surface the principal that triggered the import in metadata so
+          // an auditor can still trace it back even though the row's actor
+          // field is the system label.
+          triggeredBy: req.principal?.name || null,
         }
       )
     }

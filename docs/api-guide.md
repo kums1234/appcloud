@@ -430,17 +430,31 @@ Every mutation is recorded in Postgres with `actor`, `action`, `resource`,
 and timestamp.
 
 ```bash
-# History (filterable by actor / action / resource type)
+# History (filterable by actor / action / resource type / scope / key)
 curl -s -H "X-API-Key: $KEY" "$BASE/audit?limit=50"
 
-# Aggregated stats (counts by action type)
+# Aggregated stats (counts by action type, scope, top actors per key)
 curl -s -H "X-API-Key: $KEY" "$BASE/audit/stats"
 
 # History for a specific resource (provider-aware)
 curl -s -H "X-API-Key: $KEY" "$BASE/audit/resource/Application/<id>"
 
-# History for a specific actor
+# ── Per-actor history ─────────────────────────────────────────────────────
+# Recommended: filter by the API-key UUID. Stable, unique even if two keys
+# share a display name, and the UUID lives in the create-key response and
+# in GET /admin/api-keys.
+curl -s -H "X-API-Key: $KEY" "$BASE/audit?keyId=<uuid>&limit=50"
+
+# Or by actor name (exact match by default).
 curl -s -H "X-API-Key: $KEY" "$BASE/audit/actor/system"
+
+# Legacy substring match — opt in via ?like=true. Use this only when you
+# don't know the exact name; it collapses similarly-named keys
+# (`ci-deploy-staging` + `ci-deploy-prod` etc.) into one query result.
+curl -s -H "X-API-Key: $KEY" "$BASE/audit/actor/ci-deploy?like=true"
+
+# Filter by privilege tier (admin | write | read).
+curl -s -H "X-API-Key: $KEY" "$BASE/audit?scope=admin"
 ```
 
 ---

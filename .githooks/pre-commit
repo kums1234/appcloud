@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+#
+# Block any commit while a stray api/src/node_modules/ directory exists.
+#
+# Why: Node's resolver walks upward from the importing file, so a
+# node_modules tree in api/src shadows the canonical api/node_modules
+# install. During the Fastify 5 upgrade this caused builds and tests to
+# pick up stale transitive deps without any visible warning. The fix is
+# to never let that directory exist on disk in the first place — npm/yarn
+# scripts run from api/ should always resolve to api/node_modules.
+#
+# Install this hook on a fresh clone with:
+#   git config core.hooksPath .githooks
+# (DEVELOPMENT.md links to this; the repo intentionally does not auto-set
+# core.hooksPath so a clone never silently changes git config.)
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+STRAY="$REPO_ROOT/api/src/node_modules"
+
+if [[ -e "$STRAY" ]]; then
+  cat >&2 <<EOF
+pre-commit: stray api/src/node_modules/ detected.
+
+  $STRAY
+
+This shadows api/node_modules and silently breaks dep resolution. Remove
+it before committing:
+
+  rm -rf api/src/node_modules
+
+(Most likely cause: ran npm install from api/src/ instead of api/.)
+EOF
+  exit 1
+fi

@@ -204,6 +204,28 @@ npx jest __tests__/specific.test.js
 sudo chown -R $USER:$USER api/
 ```
 
+### Stray `api/src/node_modules/` shadowing dependencies
+
+If a Fastify (or any other) version warning surfaces during test runs
+that doesn't match the version in `api/package.json` — e.g. tests
+fail with `expected '5.x' fastify version, '4.29.1' is installed`
+even though `npm ls fastify` reports the upgraded version — check
+for an unintended `api/src/node_modules/` directory and delete it:
+
+```bash
+ls api/src/node_modules >/dev/null 2>&1 && rm -rf api/src/node_modules
+```
+
+This typically appears after an accidental `cd api/src && npm install`,
+which creates a separate dependency tree there. Node's module
+resolution walks UP the directory tree from each test file, so
+`api/src/__tests__/foo.test.js` finds `api/src/node_modules/` BEFORE
+`api/node_modules/` and resolves the wrong copy of any package
+present in both. The repo's `.gitignore` already excludes
+`node_modules` at every depth, so the directory never makes it into
+git — but it can persist in a working tree until you notice the
+symptom.
+
 ## Connector framework
 
 The API's third-party integrations (IaC state sources, cloud accounts, APM
@@ -331,6 +353,28 @@ npm run test:coverage
   out of route handlers / plugins into siblings that unit tests can import
   directly — `otel-ingest/parse.js` and the exported helpers in
   `otel-aggregator.js` are the pattern.
+
+## Local hygiene — git hooks, Node version, audit
+
+Three small tools live alongside the repo to catch the boring failure modes early. None are wired in automatically (a fresh clone never silently changes git config); enable them once per checkout.
+
+**Node version pin.** `api/.nvmrc` declares Node 22. With `fnm` or `nvm`, running `nvm use` (or letting `fnm` auto-switch) inside `api/` picks it up — one less "wrong Node version" footgun when bouncing between projects.
+
+**Pre-commit hook — stray `api/src/node_modules/`.** A `node_modules` tree under `api/src/` shadows `api/node_modules` because Node's resolver walks upward from the importing file. This cost real time during the Fastify 5 upgrade. The checked-in hook at `.githooks/pre-commit` refuses to commit while that directory exists; running `cd api && npm install` (or `npm ci`) wires it up automatically via the `prepare` lifecycle, which calls `scripts/install-hooks.sh` and points `core.hooksPath` at `.githooks/`. Run the script directly if your workflow skips `npm install`:
+
+```bash
+scripts/install-hooks.sh
+```
+
+If the stray directory ever appears, remove it with `rm -rf api/src/node_modules`.
+
+**Dependency audit summary.** `scripts/audit-summary.sh` prints the `npm audit` by-severity breakdown for `api/` and compares it against `scripts/audit-baseline.json`. CI calls it without flags and fails on regression; locally:
+
+```bash
+scripts/audit-summary.sh                  # print + compare
+scripts/audit-summary.sh --update-baseline    # lock in the current state after fixing/accepting findings
+scripts/audit-summary.sh --no-fail        # print + compare without exiting non-zero
+```
 
 ## Integration with CI/CD
 

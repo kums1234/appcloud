@@ -14,6 +14,9 @@ import Fastify from 'fastify'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { autoTagRoute } from '../src/utils/openapi-tags.js'
+import { registerAllRoutes } from '../src/utils/route-modules.js'
+import { withDeterministicGlobals } from './_lib/with-deterministic-globals.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot  = path.resolve(__dirname, '..', '..')
@@ -38,18 +41,6 @@ fastify.decorate('cmdbAssessment',   { markDirty: () => {}, run: async () => ({}
 const swagger   = (await import('@fastify/swagger')).default
 const swaggerUI = (await import('@fastify/swagger-ui')).default
 
-const PATH_SEG_TO_TAG = {
-  applications: 'Applications', components: 'Components', infra: 'Infra',
-  graph: 'Graph', ai: 'AI', audit: 'Audit', cmdb: 'CMDB',
-  discovery: 'Discovery', integrations: 'Integrations',
-  connectors: 'Connectors', health: 'Health', docs: 'OpenAPI', openapi: 'OpenAPI',
-}
-function autoTagRoute({ schema, url }) {
-  if (schema?.tags?.length) return { schema, url }
-  const seg = url.split('/').filter(Boolean)[0]
-  return { schema: { ...(schema || {}), tags: [PATH_SEG_TO_TAG[seg] || 'Other'] }, url }
-}
-
 await fastify.register(swagger, {
   openapi: {
     openapi: '3.0.3',
@@ -73,37 +64,8 @@ await fastify.register(swagger, {
 })
 await fastify.register(swaggerUI, { routePrefix: '/docs' })
 
-// Register every route module.
-const apiSrc = path.join(repoRoot, 'api', 'src')
-const modules = [
-  ['./routes/applications.js',          { prefix: '/applications' }],
-  ['./routes/components.js',            { prefix: '/components'   }],
-  ['./routes/infra.js',                 { prefix: '/infra'        }],
-  ['./routes/graph.js',                 { prefix: '/graph'        }],
-  ['./routes/integrations.js',          { prefix: '/integrations' }],
-  ['./routes/integrations-cloud.js',    { prefix: '/integrations' }],
-  ['./routes/integrations-ai.js',       { prefix: '/integrations' }],
-  ['./routes/integrations.management.js', { prefix: '/integrations' }],
-  ['./routes/discovery.js',             { prefix: '/discovery'    }],
-  ['./routes/discovery.metadata.js',    { prefix: '/discovery'    }],
-  ['./routes/audit.js',                 { prefix: '/audit'        }],
-  ['./routes/cmdb.js',                  { prefix: '/cmdb'         }],
-  ['./routes/ai.js',                    { prefix: '/ai'           }],
-]
-for (const [rel, opts] of modules) {
-  try {
-    const mod = await import(path.join(apiSrc, rel))
-    await fastify.register(mod.default, opts)
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`[export-openapi] skipped ${rel}: ${err.message}`)
-  }
-}
-// Connectors registry
-try {
-  const m = await import(path.join(apiSrc, './routes/integrations.management.js'))
-  if (m.connectorsRegistryRoutes) await fastify.register(m.connectorsRegistryRoutes, { prefix: '/connectors' })
-} catch {}
+// Register every route module — same list (and order) the live server uses.
+await registerAllRoutes(fastify)
 
 // Health endpoints — match server.js
 fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },
@@ -132,24 +94,33 @@ console.log(`[export-openapi] wrote docs/openapi.{json,yaml} — ${pathCount} pa
 // Convert OpenAPI → Postman v2.1 collection. Hand-curated Quickstart
 // folder is prepended; otherwise content is mechanically derived from
 // the spec. Use `Import → File` in Postman.
-const postman = (await import('openapi-to-postmanv2')).default
-const postmanSpec = await new Promise((resolve, reject) => {
-  postman.convert(
-    { type: 'json', data: JSON.stringify(spec) },
-    {
-      folderStrategy:        'Tags',                 // group by OpenAPI tag
-      requestParametersResolution: 'Example',
-      exampleParametersResolution: 'Example',
-      includeAuthInfoInExample:    false,
-      enableOptionalParameters:    true,
-    },
-    (err, result) => err ? reject(err) : resolve(result),
-  )
+//
+// openapi-to-postmanv2 ships a vendored copy of json-schema-faker that
+// pulls non-deterministic values from three sources (Math.random,
+// crypto.randomUUID, Date) — withDeterministicGlobals() pins all three
+// while convert() runs so the on-disk output is byte-stable. The
+// converter import has to happen INSIDE the callback because the faker
+// captures Math.random at module-load time.
+const collection = await withDeterministicGlobals(async () => {
+  const postman = (await import('openapi-to-postmanv2')).default
+  const result  = await new Promise((resolve, reject) => {
+    postman.convert(
+      { type: 'json', data: JSON.stringify(spec) },
+      {
+        folderStrategy:              'Tags',          // group by OpenAPI tag
+        requestParametersResolution: 'Example',
+        exampleParametersResolution: 'Example',
+        includeAuthInfoInExample:    false,
+        enableOptionalParameters:    true,
+      },
+      (err, r) => err ? reject(err) : resolve(r),
+    )
+  })
+  if (!result.result || !result.output?.length) {
+    throw new Error(`openapi-to-postmanv2 conversion failed: ${JSON.stringify(result.reason || result)}`)
+  }
+  return result.output[0].data
 })
-if (!postmanSpec.result || !postmanSpec.output?.length) {
-  throw new Error(`openapi-to-postmanv2 conversion failed: ${JSON.stringify(postmanSpec.reason || postmanSpec)}`)
-}
-const collection = postmanSpec.output[0].data
 
 // Inject the human-curated Quickstart group so the generated collection
 // keeps the same ergonomic onboarding the hand-curated one had.
@@ -199,6 +170,31 @@ collection.info = {
   description: 'Generated from docs/openapi.yaml via `npm run openapi:export`.\n\n## Setup\n1. Set `baseUrl` (default `http://localhost:3000`) and `apiKey`\n2. Hit `Quickstart → GET /health`\n3. Walk the per-tag folders for full CRUD coverage\n\nFor narrative workflow recipes, see `docs/api-guide.md §13`.',
   schema:      'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
 }
+
+// Determinism pass — openapi-to-postmanv2 generates non-stable output:
+//   - Random UUIDs at every level (collection / folder / request /
+//     response). Postman regenerates these on import, so the on-disk
+//     copy doesn't need them.
+//   - Per-request `response` arrays whose body strings come from a
+//     faker-style sampler (random `key_0`, integer counts, UUIDs).
+//     They masquerade as documentation but show users values that
+//     don't match the actual API; better to drop them and let users
+//     hit the live endpoint.
+// Stripping both makes the file deterministic — re-running the export
+// produces byte-identical output unless the spec actually changed.
+function makeDeterministic(node) {
+  if (Array.isArray(node)) {
+    for (const v of node) makeDeterministic(v)
+    return
+  }
+  if (node && typeof node === 'object') {
+    delete node.id
+    delete node._postman_id      // collection-level ID, regenerated on import
+    delete node.response
+    for (const v of Object.values(node)) makeDeterministic(v)
+  }
+}
+makeDeterministic(collection)
 
 await fs.writeFile(
   path.join(docsDir, 'api-postman-collection.json'),

@@ -1,5 +1,6 @@
 import { props, serialize } from '../utils/serialize.js'
 import { makeRouteHelpers } from '../utils/route-helpers.js'
+import { actorFromReq } from '../utils/audit.js'
 import {
   InfraSchema,
   InfraCreateBodySchema,
@@ -11,7 +12,7 @@ import {
 export default async function infraRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const { withAuth } = makeRouteHelpers(fastify)
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
 
   // GET /infra
   fastify.get('/', {

@@ -13,6 +13,7 @@
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { serializeSpec } from '../connectors/index.js'
 import { validateRequired, ConnectorError } from '../connectors/base.js'
+import { actorFromReq } from '../utils/audit.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -31,7 +32,7 @@ function redact(row) {
 
 export default async function integrationManagementRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.headers['x-actor'] || 'system'
+  const actor = actorFromReq
 
   // ── GET /integrations ───────────────────────────────────────────────────────
   // List all configured connector instances. Secrets are decrypted so the UI

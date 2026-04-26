@@ -54,10 +54,17 @@ function isPublicByConvention(routeOptions) {
 
 async function buildAndCollect() {
   const prevKey = process.env.APPCLOUD_API_KEY
-  process.env.APPCLOUD_API_KEY = 'test-default-deny-key'
+  // 32+ chars so the auth plugin's bootstrap-key length warn does not
+  // fire on every test run (MIN_KEY_LEN in plugins/auth.js is 32).
+  process.env.APPCLOUD_API_KEY = 'test-default-deny-key-padded-to-32ch'
 
   const fastify = Fastify({
-    logger: false,
+    // Cap the test logger at silent rather than disabling it outright —
+    // the auth plugin's req.log.warn for stray X-Actor headers is one of
+    // the things we don't want leaking into test output, and capping the
+    // level keeps that local to the logger config instead of relying on
+    // a per-warning override at the call site.
+    logger: { level: 'silent' },
     ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
   })
 
@@ -78,13 +85,18 @@ async function buildAndCollect() {
   // the post-attachment state of routeOptions.preHandler.
   const collected = []
   fastify.addHook('onRoute', (routeOptions) => {
+    const ph = Array.isArray(routeOptions.preHandler) ? routeOptions.preHandler : (routeOptions.preHandler ? [routeOptions.preHandler] : [])
+    const scopeHandler = Object.entries(fastify.scopeHandlers || {}).find(([, fn]) => ph.includes(fn))
     collected.push({
-      method:   routeOptions.method,
-      url:      routeOptions.url,
-      hasAuth:  hasAuthPreHandler(routeOptions, fastify.authenticate),
-      isAdmin:  isAdminRoute(routeOptions),
+      method:        routeOptions.method,
+      url:           routeOptions.url,
+      hasAuth:       hasAuthPreHandler(routeOptions, fastify.authenticate),
+      isAdmin:       isAdminRoute(routeOptions),
       hasAdminGuard: hasAdminPreHandler(routeOptions, fastify.requireAdmin),
-      isPublic: isPublicByConvention(routeOptions),
+      isPublic:      isPublicByConvention(routeOptions),
+      attachedScope: scopeHandler?.[0] ?? null,
+      resolvedScope: routeOptions.config?._resolvedScope ?? null,
+      explicitScope: routeOptions.config?.scope ?? null,
     })
   })
 
@@ -102,6 +114,7 @@ async function buildAndCollect() {
     ['./routes/audit.js',                   { prefix: '/audit'        }],
     ['./routes/cmdb.js',                    { prefix: '/cmdb'         }],
     ['./routes/ai.js',                      { prefix: '/ai'           }],
+    ['./routes/admin-api-keys.js',          { prefix: '/admin'        }],
   ]
   for (const [rel, opts] of modules) {
     const mod = await import(path.join(apiSrc, rel))
@@ -166,5 +179,44 @@ describe('Auth coverage — default-deny invariant', () => {
       .filter(r => !r.isAdmin)
       .map(r => `${r.method} ${r.url}`)
     expect(notAdmin).toEqual([])
+  })
+
+  test('every non-public route has exactly one scope handler attached', () => {
+    const violations = routes
+      .filter(r => !r.isPublic && !r.attachedScope)
+      .map(r => `${r.method} ${r.url}`)
+    expect(violations).toEqual([])
+  })
+
+  test('the attached scope matches the resolved scope per route', () => {
+    const mismatches = routes
+      .filter(r => !r.isPublic && r.attachedScope !== r.resolvedScope)
+      .map(r => `${r.method} ${r.url}: attached=${r.attachedScope}, resolved=${r.resolvedScope}`)
+    expect(mismatches).toEqual([])
+  })
+
+  test('GET / HEAD routes default to the read scope (unless overridden)', () => {
+    const wrongDefaults = routes
+      .filter(r => !r.isPublic && (r.method === 'GET' || r.method === 'HEAD'))
+      .filter(r => !r.explicitScope && !r.isAdmin)            // exclude explicit overrides
+      .filter(r => r.attachedScope !== 'read')
+      .map(r => `${r.method} ${r.url}: attached=${r.attachedScope}`)
+    expect(wrongDefaults).toEqual([])
+  })
+
+  test('mutation routes default to the write scope (unless overridden)', () => {
+    const wrongDefaults = routes
+      .filter(r => !r.isPublic && r.method !== 'GET' && r.method !== 'HEAD')
+      .filter(r => !r.explicitScope && !r.isAdmin)            // exclude admin overrides
+      .filter(r => r.attachedScope !== 'write')
+      .map(r => `${r.method} ${r.url}: attached=${r.attachedScope}`)
+    expect(wrongDefaults).toEqual([])
+  })
+
+  test('admin-flagged routes resolve to the admin scope', () => {
+    const violations = routes
+      .filter(r => r.isAdmin && r.attachedScope !== 'admin')
+      .map(r => `${r.method} ${r.url}: attached=${r.attachedScope}`)
+    expect(violations).toEqual([])
   })
 })

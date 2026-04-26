@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: api/.nvmrc
           cache: npm
           cache-dependency-path: api/package-lock.json
 
@@ -37,6 +37,45 @@ jobs:
         working-directory: api
         run: npm run test:unit
 
+      # The unit tests already include the drift assertion, but it
+      # surfaces as a Jest failure with no diff context. Re-run the
+      # exporter and fail on any modification — this gives the PR
+      # author the actual line-level changes they need to commit.
+      - name: OpenAPI / Postman docs are up to date
+        working-directory: api
+        run: |
+          npm run openapi:export
+          if ! git -C "$GITHUB_WORKSPACE" diff --exit-code -- docs/openapi.json docs/openapi.yaml docs/api-postman-collection.json; then
+            echo
+            echo "::error::docs/openapi.{json,yaml} or docs/api-postman-collection.json drifted from the route registrations."
+            echo "Run 'cd api && npm run openapi:export' locally and commit the changes."
+            exit 1
+          fi
+
+  audit:
+    name: npm audit (severity baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: api/.nvmrc
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      # `npm ci --ignore-scripts` is enough — audit reads from the lockfile
+      # and the install tree, but doesn't need transitive build steps to
+      # run. Skipping scripts also avoids the prepare hook attempting to
+      # `git config` against a checkout the runner may discard.
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci --ignore-scripts
+
+      - name: Audit summary vs baseline
+        run: scripts/audit-summary.sh
+
   integration:
     name: Integration tests (Testcontainers)
     runs-on: ubuntu-latest
@@ -46,7 +85,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: api/.nvmrc
           cache: npm
           cache-dependency-path: api/package-lock.json
 
