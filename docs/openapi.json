@@ -87,6 +87,7 @@
         ],
         "description": "Creates a new Application node. `tier` is required; reasonable defaults are filled in for `availability` (`99.9`) and `confidentiality` (`internal`).",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -131,8 +132,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -487,6 +487,7 @@
         ],
         "description": "Any subset of the create fields. Unspecified fields keep their existing values via `coalesce`.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1067,6 +1068,7 @@
         ],
         "description": "Creates a Component node, optionally attaching it to an existing Application via `:CONTAINS`. Either `applicationId` or `appId` works (legacy alias).",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1108,8 +1110,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1266,6 +1267,7 @@
         ],
         "description": "Partial update on `name` / `type` / `runtime`. Other fields preserved.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1443,6 +1445,7 @@
         ],
         "description": "Idempotently MERGEs a `:CONNECTS_TO {protocol, port}` edge from this Component to the target. No `via` is set — the endpoint labels (`:Component`→`:Component`) distinguish it from infra-side edges.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1476,8 +1479,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "parameters": [
           {
@@ -1518,6 +1520,7 @@
         ],
         "description": "Idempotently MERGEs a `:CONNECTS_TO {via:\"component-mapping\", source:\"manual-deploy\", confidence:100}` edge from the Component to the Infra. Use this to record human-confirmed ownership.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1538,8 +1541,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "parameters": [
           {
@@ -1679,6 +1681,7 @@
         ],
         "description": "Most Infra comes from discovery scans (`/discovery/scan/*`). Use this for resources that aren't in any cloud-API surface — e.g. an on-prem appliance you want represented in the graph.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -1722,8 +1725,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1907,6 +1909,7 @@
           "Infra"
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -2655,6 +2658,7 @@
         ],
         "description": "Creates a `:Snapshot` node with the current node counts and an optional `label`. Snapshots are append-only — there's no DELETE endpoint.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -2841,6 +2845,7 @@
         ],
         "description": "On unique-key conflict (provider, name) the row is updated, not duplicated. Secret fields in `config` (clientSecret, secretAccessKey, private_key) are AES-256-GCM-encrypted before INSERT.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -2885,8 +2890,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -3139,6 +3143,7 @@
         ],
         "description": "Any subset of `name` / `config` / `enabled`. The `config` shape is *merged* into the existing decrypted config and re-encrypted, so you can patch one secret without re-supplying the others.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3365,6 +3370,7 @@
         ],
         "description": "Called by the scan handlers in discovery.js to stamp `last_scan_at / last_scan_status / last_scan_total / last_scan_error` on the account row. Not typically called directly by external consumers.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3451,6 +3457,7 @@
         ],
         "description": "Replaces any existing config (only one active at a time). `apiKey` is AES-256-GCM-encrypted before INSERT. Setting Azure also requires `azureEndpoint` and `azureDeployment`.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3486,8 +3493,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -3584,6 +3590,7 @@
         ],
         "description": "Body shape: `{ type, name, config, enabled?, pollIntervalSeconds? }`. The `type` must match a registered connector (`/connectors`); the connector's `beforeUpsert` runs before validation to fill defaults / auto-generate secrets, and `afterUpsert` runs after persist to sync derived rows. Secret fields are AES-256-GCM-encrypted before INSERT.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3618,8 +3625,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -3697,6 +3703,7 @@
         ],
         "description": "Patches `config` (merged + re-encrypted), `enabled`, or `pollIntervalSeconds`. The connector's before/afterUpsert hooks run on each update.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3981,6 +3988,7 @@
         ],
         "description": "Pages every aggregated resource via `SelectAggregateResourceConfig` and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied credentials; without one, scans every enabled AWS account from `/integrations/cloud`. Requires `aggregatorName` + `aggregatorRegion` (or `AWS_CONFIG_AGGREGATOR_NAME` env var). See [docs/aws-config-aggregator-coverage.md](../docs/aws-config-aggregator-coverage.md).",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4171,6 +4179,7 @@
         ],
         "description": "Pages a single ARG KQL query and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied subscription/credentials; without one, scans every enabled Azure account from `/integrations/cloud`. See [docs/azure-resource-graph-coverage.md](../docs/azure-resource-graph-coverage.md).",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4321,6 +4330,7 @@
         ],
         "description": "Pages `cloudasset.assets.listAssets` for the project and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan; without one, scans every enabled GCP account from `/integrations/cloud`. See [docs/gcp-cloud-asset-coverage.md](../docs/gcp-cloud-asset-coverage.md).",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4540,6 +4550,7 @@
         ],
         "description": "Replaces the schedule with `{ enabled, cron }`. The cron string is standard 5-field; consult any cron reference. Setting `enabled: false` disables future runs without deleting the config.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4662,6 +4673,7 @@
         ],
         "description": "Each mapping creates a `:CONNECTS_TO {via:\"component-mapping\", source:\"auto-mapped\"}` edge. For mixed-action batches (link + create-component + create-application), use `/discovery/suggest/apply-all`.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4685,8 +4697,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -4711,6 +4722,7 @@
         ],
         "description": "Three action shapes share one endpoint:\n- `link_component` — link existing Component to existing Infra\n- `create_component` — create a Component under an existing Application + link\n- `create_application` — create Application + Component(s) + link\n\nPhase 2 also runs after the batch: tag-based auto-link sweeps any still-unmapped Infra against the newly-created components.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4808,8 +4820,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -4965,6 +4976,7 @@
         ],
         "description": "Idempotent MERGE of `:CONNECTS_TO {via:\"component-mapping\", source:\"manual-link\", confidence:100}`. Use this when the suggest engine missed a mapping.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -4986,8 +4998,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -5128,6 +5139,7 @@
         ],
         "description": "Per-id behavior matches `DELETE /discovery/resources/:id`: linked Infra is skipped (with reason), unlinked is removed. The response details deleted / skipped / errored.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -5147,8 +5159,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -5220,6 +5231,7 @@
         ],
         "description": "Invokes one of the named strategies from `/discovery/linking-strategies` against the configured Azure account. Idempotent — safe to re-run. `monitor-insights` requires a Log Analytics workspace ID; `network-watcher` requires Network Watcher Reader.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -5714,6 +5726,7 @@
         ],
         "description": "Generates a fresh `ak_…` plaintext, stores SHA-256(plaintext) + the requested scopes, and returns the plaintext **once**. Save it immediately — it is never recoverable.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -5759,8 +5772,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -6025,6 +6037,7 @@
         ],
         "description": "Updates the row metadata. The secret cannot be patched — generate a new key and revoke the old one. Bootstrap rows are read-only. Pass `expiresAt: null` to clear an expiry, or an ISO instant to set/extend.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -6234,6 +6247,7 @@
         ],
         "description": "Given an Infra + a candidate Component mapping (output of `/discovery/suggest`), the local LLM produces a human-readable rationale. Useful for tooltips on suggestion cards.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -6255,8 +6269,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -6281,6 +6294,7 @@
         ],
         "description": "Given an Infra id, returns LLM-scored candidate Applications. Complements the rule-based scores from the suggest engine; clients combine both.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -6297,8 +6311,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -6408,6 +6421,7 @@
         ],
         "description": "Without a body, picks up to 50 unmapped discovered Infra nodes and asks the cloud LLM to propose mappings or tag changes. With a body, scores the supplied items.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -6531,6 +6545,7 @@
         ],
         "description": "Injects a fresh snapshot of applications + infra + unmapped resources + cross-app deps into the system prompt before forwarding the conversation. Returns the assistant's reply plus a reference to the context used.",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -6567,8 +6582,7 @@
                 }
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {

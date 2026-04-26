@@ -204,6 +204,28 @@ npx jest __tests__/specific.test.js
 sudo chown -R $USER:$USER api/
 ```
 
+### Stray `api/src/node_modules/` shadowing dependencies
+
+If a Fastify (or any other) version warning surfaces during test runs
+that doesn't match the version in `api/package.json` — e.g. tests
+fail with `expected '5.x' fastify version, '4.29.1' is installed`
+even though `npm ls fastify` reports the upgraded version — check
+for an unintended `api/src/node_modules/` directory and delete it:
+
+```bash
+ls api/src/node_modules >/dev/null 2>&1 && rm -rf api/src/node_modules
+```
+
+This typically appears after an accidental `cd api/src && npm install`,
+which creates a separate dependency tree there. Node's module
+resolution walks UP the directory tree from each test file, so
+`api/src/__tests__/foo.test.js` finds `api/src/node_modules/` BEFORE
+`api/node_modules/` and resolves the wrong copy of any package
+present in both. The repo's `.gitignore` already excludes
+`node_modules` at every depth, so the directory never makes it into
+git — but it can persist in a working tree until you notice the
+symptom.
+
 ## Connector framework
 
 The API's third-party integrations (IaC state sources, cloud accounts, APM
