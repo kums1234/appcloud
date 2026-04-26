@@ -58,11 +58,17 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     const { authPlugin } = await import('../../plugins/auth.js')
     await authPlugin(fastify)
 
-    // A test route — uses the auth preHandler attached by the onRoute hook.
+    // A small set of test routes covering the three scope-resolution paths
+    // the onRoute hook handles:
+    //   GET    → defaults to read
+    //   POST   → defaults to write
+    //   admin  → explicit config.scope
     fastify.get('/whoami', async (req) => ({
       name:   req.principal?.name,
       scopes: req.principal?.scopes,
     }))
+    fastify.post('/things', async () => ({ ok: true }))
+    fastify.get('/admin/secret', { config: { scope: 'admin' } }, async () => ({ secret: 42 }))
     await fastify.ready()
   }, 180_000)
 
@@ -158,6 +164,72 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
       headers: { 'x-api-key': fresh },
     })
     expect(r.statusCode).toBe(401)
+  })
+
+  test('scope enforcement: read key cannot POST (403)', async () => {
+    const readKey = generateKey()
+    await pgClient.query(`
+      INSERT INTO api_keys (name, key_hash, key_prefix, scopes)
+      VALUES ('scope-read-test', $1, $2, ARRAY['read'])
+    `, [hashKey(readKey), prefixOf(readKey)])
+    await new Promise(r => setTimeout(r, 80))
+
+    // GET works.
+    let r = await fastify.inject({
+      method: 'GET', url: '/whoami',
+      headers: { 'x-api-key': readKey },
+    })
+    expect(r.statusCode).toBe(200)
+
+    // POST is blocked — the route resolves to write scope by default.
+    r = await fastify.inject({
+      method: 'POST', url: '/things',
+      headers: { 'x-api-key': readKey, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    expect(r.statusCode).toBe(403)
+    expect(JSON.parse(r.payload).message).toMatch(/scope 'write' required/)
+
+    // Admin route is also blocked.
+    r = await fastify.inject({
+      method: 'GET', url: '/admin/secret',
+      headers: { 'x-api-key': readKey },
+    })
+    expect(r.statusCode).toBe(403)
+    expect(JSON.parse(r.payload).message).toMatch(/scope 'admin' required/)
+  })
+
+  test('scope enforcement: write key can POST but not access admin', async () => {
+    const writeKey = bootstrapKey                         // bootstrap-api-key has write
+    let r = await fastify.inject({
+      method: 'POST', url: '/things',
+      headers: { 'x-api-key': writeKey, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    expect(r.statusCode).toBe(200)
+
+    r = await fastify.inject({
+      method: 'GET', url: '/admin/secret',
+      headers: { 'x-api-key': writeKey },
+    })
+    expect(r.statusCode).toBe(403)
+  })
+
+  test('scope enforcement: admin key reaches every scope tier', async () => {
+    const adminKey = bootstrapAdminKey                    // bootstrap-admin-key has admin
+    for (const url of ['/whoami', '/admin/secret']) {
+      const r = await fastify.inject({
+        method: 'GET', url,
+        headers: { 'x-api-key': adminKey },
+      })
+      expect(r.statusCode).toBe(200)
+    }
+    const post = await fastify.inject({
+      method: 'POST', url: '/things',
+      headers: { 'x-api-key': adminKey, 'content-type': 'application/json' },
+      payload: '{}',
+    })
+    expect(post.statusCode).toBe(200)
   })
 
   test('rotating the bootstrap env var refreshes the row hash', async () => {

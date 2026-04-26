@@ -275,25 +275,52 @@ export async function authPlugin(fastify) {
     }
   }
 
-  // Backwards-compat wrapper: routes that used `config.requireAdmin: true`
-  // continue to work via the same name. Stage 3 will deprecate this in
-  // favour of `config.scope: 'admin'`, but for this commit we want the
-  // existing call sites and the auth-coverage test to keep passing.
-  const requireAdmin = requireScope(SCOPES.ADMIN)
+  // Stable per-scope handlers, reused across every route so dedupe works
+  // and tests can match by reference. New scopes added later go here.
+  const scopeHandlers = {
+    [SCOPES.ADMIN]: requireScope(SCOPES.ADMIN),
+    [SCOPES.WRITE]: requireScope(SCOPES.WRITE),
+    [SCOPES.READ]:  requireScope(SCOPES.READ),
+  }
+  const requireAdmin = scopeHandlers[SCOPES.ADMIN]   // backwards-compat alias
 
   fastify.decorate('authenticate', authenticate)
   fastify.decorate('requireAdmin', requireAdmin)
   fastify.decorate('requireScope', requireScope)
+  fastify.decorate('scopeHandlers', scopeHandlers)
   // Expose the cache so future stages (admin endpoints) can invalidate it
   // immediately on key create/revoke instead of waiting for TTL.
   fastify.decorate('apiKeyCache', cache)
 
+  // Method-based scope default: GET / HEAD are read-only; everything else
+  // mutates and needs write. Routes can override via config.scope.
+  function defaultScopeForMethod(method) {
+    const m = String(method || 'GET').toUpperCase()
+    return (m === 'GET' || m === 'HEAD') ? SCOPES.READ : SCOPES.WRITE
+  }
+
+  // Resolve the required scope for a route: explicit config.scope wins,
+  // legacy config.requireAdmin: true maps to admin, otherwise method-default.
+  function resolveScope(routeOptions) {
+    const explicit = routeOptions.config?.scope
+    if (explicit) {
+      if (!scopeHandlers[explicit]) {
+        throw new Error(`unknown route scope '${explicit}' — use one of admin, write, read`)
+      }
+      return explicit
+    }
+    if (routeOptions.config?.requireAdmin) return SCOPES.ADMIN
+    return defaultScopeForMethod(routeOptions.method)
+  }
+
   fastify.addHook('onRoute', (routeOptions) => {
     if (isPublicRoute(routeOptions)) return
     prependPreHandler(routeOptions, authenticate)
-    if (routeOptions.config?.requireAdmin) {
-      attachPreHandler(routeOptions, requireAdmin)
-    }
+    const scope   = resolveScope(routeOptions)
+    const handler = scopeHandlers[scope]
+    attachPreHandler(routeOptions, handler)
+    // Stash the resolved scope for the auth-coverage test + diagnostic tooling.
+    routeOptions.config = { ...(routeOptions.config || {}), _resolvedScope: scope }
   })
 
   fastify.log.info(
