@@ -38,9 +38,15 @@ describe('ServiceNowClient', () => {
 
   test('constructor preserves full hostname when already qualified', async () => {
     const fake = makeFakeFetch([{ offset: 0, rows: [{ sys_id: '1' }] }])
-    const c = new ServiceNowClient({ instance: 'my.custom.host', username: 'u', password: 'p', fetchFn: fake })
+    const c = new ServiceNowClient({ instance: 'mycompany.service-now.com', username: 'u', password: 'p', fetchFn: fake })
     await c.ping()
-    expect(new URL(fake.__calls[0]).host).toBe('my.custom.host')
+    expect(new URL(fake.__calls[0]).host).toBe('mycompany.service-now.com')
+  })
+
+  test('rejects an instance that escapes the .service-now.com host suffix (SSRF guard)', () => {
+    expect(() =>
+      new ServiceNowClient({ instance: 'attacker.example.com', username: 'u', password: 'p' }),
+    ).toThrow(/refusing to fetch/)
   })
 
   test('sends a Basic Authorization header', async () => {

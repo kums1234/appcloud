@@ -94,7 +94,9 @@ describe('TfcClient.getCurrentStateVersion + downloadStateJson', () => {
   })
 
   test('downloadStateJson fetches the pre-signed URL without bearer auth', async () => {
-    const signedUrl = 'https://tfc-state.s3.example.com/my-state.json?signature=abc'
+    // Real TFC pre-signed URLs land on archivist-v1.terraform.io (TFC's
+    // CDN) or *.amazonaws.com (TFE-on-S3). The SSRF guard accepts both.
+    const signedUrl = 'https://archivist-v1.terraform.io/v1/object/abc?signature=xyz'
     fetchSpy.mockResolvedValueOnce(mockResp({
       body: { resources: [], version: 4 },
       headers: { 'content-type': 'application/json' },
@@ -108,6 +110,19 @@ describe('TfcClient.getCurrentStateVersion + downloadStateJson', () => {
     expect(init.headers?.Authorization).toBeUndefined()
     expect(init.headers?.authorization).toBeUndefined()
     expect(fetchSpy.mock.calls[0][0]).toBe(signedUrl)
+  })
+
+  test('downloadStateJson refuses a poisoned URL pointing off-domain (SSRF guard)', async () => {
+    const c = new TfcClient({ apiToken: TOKEN })
+    await expect(
+      c.downloadStateJson('https://attacker.example.com/state.json'),
+    ).rejects.toThrow(/refusing to fetch/)
+  })
+
+  test('TfcClient constructor refuses a non-Hashicorp hostname (SSRF guard)', () => {
+    expect(() =>
+      new TfcClient({ hostname: 'attacker.example.com', apiToken: TOKEN }),
+    ).toThrow(/refusing to fetch/)
   })
 })
 

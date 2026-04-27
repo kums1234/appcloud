@@ -16,9 +16,26 @@
 // Consul stores TF state as a raw JSON blob in a single KV entry; if you
 // scope multiple workspaces under one prefix, set recurse:true.
 
+import { assertSafeUrl } from '../../../utils/url-guard.js'
+
+// Local-dev allowance: when APPCLOUD_CONSUL_ALLOW_LOCAL=true, the
+// SSRF guard skips the private-IP / loopback denylist so a developer
+// can point at a docker-compose Consul on 127.0.0.1. NEVER set this
+// in production — an admin would be able to fetch the metadata
+// service and any internal-network host.
+const allowLocal = () => /^(true|1|yes)$/i.test(process.env.APPCLOUD_CONSUL_ALLOW_LOCAL || '')
+
 function buildBaseUrl(cfg) {
   if (!cfg.address) throw new Error('consul: address is required')
-  return cfg.address.replace(/\/+$/, '')
+  // SSRF guard: cfg.address comes from operator config, which means
+  // an admin (or compromised admin key) can otherwise drive an HTTP
+  // call to an arbitrary host. Validate once here; the parsed URL
+  // becomes the base for every subsequent request.
+  const parsed = assertSafeUrl(cfg.address.replace(/\/+$/, ''), {
+    allowedSchemes:    ['https:', 'http:'],
+    allowPrivateHosts: allowLocal(),
+  })
+  return parsed.toString().replace(/\/+$/, '')
 }
 
 function buildHeaders(cfg) {

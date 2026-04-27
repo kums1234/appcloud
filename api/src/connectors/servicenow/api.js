@@ -8,6 +8,8 @@
 // No retries or concurrency here — runPullScan drives fetch one batch at a
 // time and the framework's withRetry wrapper is opt-in at the caller.
 
+import { assertSafeUrl } from '../../utils/url-guard.js'
+
 const DEFAULT_PAGE_SIZE = 500
 
 export class ServiceNowClient {
@@ -24,10 +26,21 @@ export class ServiceNowClient {
     if (!username)  throw new Error('username is required')
     if (!password)  throw new Error('password is required')
     const host = instance.includes('.') ? instance : `${instance}.service-now.com`
-    this.baseUrl  = `https://${host}`
+    // SSRF guard. ServiceNow customer instances live on
+    // *.service-now.com (or *.servicenowservices.com for FedRAMP /
+    // gov clouds). Pin to those suffixes so an admin who sets
+    // `instance: 'attacker.com'` (or even a typoed shape) gets a
+    // clear refusal at construction time instead of a confused 401
+    // later. https-only — ServiceNow doesn't terminate HTTP.
+    const baseUrl = `https://${host}`
+    assertSafeUrl(baseUrl, {
+      allowedSchemes:      ['https:'],
+      allowedHostSuffixes: ['.service-now.com', '.servicenowservices.com'],
+    })
+    this.baseUrl    = baseUrl
     this.authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
-    this.signal  = signal
-    this.fetch   = fetchFn || globalThis.fetch
+    this.signal     = signal
+    this.fetch      = fetchFn || globalThis.fetch
   }
 
   async _get(path, params) {

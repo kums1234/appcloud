@@ -13,12 +13,38 @@
 //   · TFC rate limits to ~30 req/s per token; we don't proactively throttle.
 //     Back-off on 429 comes from withRetry at the connector level.
 
+import { assertSafeUrl } from '../../utils/url-guard.js'
+
+// Allowed TFC / TFE host suffixes. The two HCP-hosted suffixes cover
+// every customer that uses Terraform Cloud / HCP Terraform; TFE
+// (Terraform Enterprise) deployments are self-hosted and the suffix
+// is whatever the operator picks — we accept those via the
+// `APPCLOUD_TFE_HOST_SUFFIXES` env override (comma-separated, e.g.
+// `.terraform.example.com`).
+const HCP_TFC_HOST_SUFFIXES = ['.terraform.io', '.hashicorp.cloud']
+function tfcAllowedSuffixes() {
+  const extra = (process.env.APPCLOUD_TFE_HOST_SUFFIXES || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+  return [...HCP_TFC_HOST_SUFFIXES, ...extra]
+}
+
 export class TfcClient {
   constructor({ hostname = 'app.terraform.io', apiToken, signal } = {}) {
     if (!apiToken) throw new Error('terraform-cloud: apiToken is required')
-    this.baseUrl = `https://${hostname.replace(/\/+$/, '')}/api/v2`
-    this.token   = apiToken
-    this.signal  = signal
+    const cleanHost = hostname.replace(/\/+$/, '')
+    const baseUrl   = `https://${cleanHost}/api/v2`
+    // SSRF guard. Operator-supplied hostname; without enforcement an
+    // admin (or compromised admin key) could redirect every request +
+    // bearer token to attacker.example. Pin to the HCP suffixes by
+    // default; self-hosted TFE adds its suffix via env override.
+    assertSafeUrl(baseUrl, {
+      allowedSchemes:      ['https:'],
+      allowedHostSuffixes: tfcAllowedSuffixes(),
+    })
+    this.baseUrl     = baseUrl
+    this.allowedTfc  = tfcAllowedSuffixes()
+    this.token       = apiToken
+    this.signal      = signal
   }
 
   async #request(pathOrUrl, opts = {}) {
@@ -123,6 +149,16 @@ export class TfcClient {
 
   /** Download state JSON from the (pre-signed) URL returned by getCurrentStateVersion. */
   async downloadStateJson(downloadUrl) {
+    // The pre-signed URL comes from the TFC API response, which is
+    // signed by HCP Terraform's CDN — it should always live on a
+    // hashicorp-controlled host. Validate before fetching: a
+    // poisoned API response (man-in-the-middle, or a compromised
+    // proxy) could otherwise redirect us to attacker-controlled
+    // storage, and we'd fetch with default credentials.
+    assertSafeUrl(downloadUrl, {
+      allowedSchemes:      ['https:'],
+      allowedHostSuffixes: this.allowedTfc.concat(['.amazonaws.com']),  // TFC stores on S3
+    })
     const resp = await fetch(downloadUrl, { signal: this.signal })
     if (!resp.ok) {
       const body = await resp.text().catch(() => '')
