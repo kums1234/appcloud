@@ -1,3 +1,4 @@
+import neo4j from 'neo4j-driver'
 import { props, serialize } from '../utils/serialize.js'
 import { makeRouteHelpers } from '../utils/route-helpers.js'
 import { actorFromReq } from '../utils/audit.js'
@@ -18,12 +19,20 @@ export default async function infraRoutes(fastify) {
   fastify.get('/', {
     schema: {
       summary:     'List Infra',
-      description: 'Returns every Infra node, ordered by provider then name. Filterable by `provider` (aws/azure/gcp) and `public` (true/false).',
-      querystring: { type: 'object', properties: { provider: { type: 'string', enum: ['aws', 'azure', 'gcp'] }, public: { type: 'string', enum: ['true', 'false'] } } },
+      description: 'Returns Infra nodes ordered by provider then name. Filter by `provider` (aws/azure/gcp) and/or `public` (true/false). Paginated — default page size 500, max 5000. At realistic data volumes (10k+ resources) pulling everything in one response is multi-second + memory-spike on the client; use `?offset=` to page through.',
+      querystring: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['aws', 'azure', 'gcp'] },
+          public:   { type: 'string', enum: ['true', 'false'] },
+          limit:    { type: 'integer', minimum: 1, maximum: 5000, default: 500 },
+          offset:   { type: 'integer', minimum: 0, default: 0 },
+        },
+      },
       response:    { 200: { type: 'array', items: InfraSchema } },
     },
   }, async (req, reply) => {
-    const { provider, public: isPublic } = req.query
+    const { provider, public: isPublic, limit = 500, offset = 0 } = req.query
     const filters = []
     if (provider)             filters.push('i.provider = $provider')
     if (isPublic !== undefined) filters.push('i.public = $isPublic')
@@ -31,7 +40,8 @@ export default async function infraRoutes(fastify) {
     const records = await query(`
       MATCH (i:Infra) ${where}
       RETURN i ORDER BY i.provider, i.name
-    `, { provider, isPublic: isPublic === 'true' })
+      SKIP $offset LIMIT $limit
+    `, { provider, isPublic: isPublic === 'true', limit: neo4j.int(limit), offset: neo4j.int(offset) })
     return records.map(r => props(r.get('i')))
   })
 

@@ -96,6 +96,27 @@ export async function metricsPlugin(fastify) {
     },
   })
 
+  // audit_log_default detached gauge — 1 when the default partition
+  // exists but is no longer attached to the partition tree (the
+  // post-DETACH state if redistributeDefaultPartition crashed before
+  // the finally re-attach landed). A detached default silently rejects
+  // INSERTs whose month has no monthly partition; the alert
+  // `appcloud_audit_log_default_detached == 1 for > 5m` should page
+  // ops, who run `ALTER TABLE audit_log ATTACH PARTITION
+  // audit_log_default DEFAULT` to recover.
+  new client.Gauge({
+    name:       'appcloud_audit_log_default_detached',
+    help:       'Set to 1 when audit_log_default exists but is detached from the partition tree; 0 otherwise.',
+    registers:  [register],
+    async collect() {
+      // fastify.auditCleanup is decorated by plugins/audit-cleanup.js.
+      // The probe is a fast pg_class / pg_inherits read — well under
+      // the typical Prometheus scrape budget.
+      const detached = await fastify.auditCleanup?.defaultPartitionDetached?.()
+      this.set(detached === true ? 1 : 0)
+    },
+  })
+
   fastify.decorate('metricsRegistry', register)
 
   fastify.get('/metrics', {

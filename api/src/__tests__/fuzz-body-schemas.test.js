@@ -140,11 +140,12 @@ async function buildFuzzServer() {
   // call into it (admin-audit-cleanup) would crash on an undefined.
   // Stub the surface they touch.
   fastify.decorate('auditCleanup', {
-    runNow:              async () => ({ skipped: 'no-pg' }),
-    redistributeDefault: async () => ({ skipped: 'no-pg' }),
-    retentionDays:       0,
-    intervalMs:          0,
-    batchSize:           0,
+    runNow:                    async () => ({ skipped: 'no-pg' }),
+    redistributeDefault:       async () => ({ skipped: 'no-pg' }),
+    defaultPartitionDetached:  async () => false,
+    retentionDays:             0,
+    intervalMs:                0,
+    batchSize:                 0,
   })
 
   // @fastify/sensible adds reply.notFound() / .badRequest() which a few

@@ -140,85 +140,78 @@ export async function schedulerPlugin(fastify) {
         byProvider[row.provider].push({ ...row, config: decryptConfig(row.config || {}) })
       }
 
-      // ── AWS ──────────────────────────────────────────────────────────────
-      if (byProvider.aws?.length) {
-        const { scanAWSAccounts } = await import('../routes/discovery.js').catch(() => ({}))
-        for (const account of byProvider.aws) {
-          try {
-            const cfg = account.config
-            const creds = cfg.accessKeyId
-              ? { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey || cfg.secretKey }
-              : null
-            const regions = cfg.regions
-              ? cfg.regions.split(',').map(r => r.trim())
-              : ['us-east-1']
-
-            // Use the internal scan function directly (bypass HTTP layer)
-            const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/aws`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ accountId: account.id, regions, ...(creds ? { credentials: creds } : {}) })
-            })
-            const data = await res.json()
-            grandTotal += data.total || 0
-            fastify.log.info(`[Scheduler] AWS ${account.name}: ${data.total || 0} resources`)
-          } catch (e) {
-            errors.push(`AWS/${account.name}: ${e.message}`)
-          }
-        }
+      // Per-provider scanner function. Each handles one account at a
+      // time (the cloud APIs themselves rate-limit cross-account
+      // concurrency anyway), but the THREE providers run in parallel —
+      // AWS+Azure+GCP no longer serialize at 30s+20s+40s = 90s per
+      // tick. The Promise.all aggregates each provider's local
+      // grandTotal/errors back into the outer accumulators.
+      const aiBaseUrl = `http://localhost:${process.env.PORT || 3000}`
+      async function scanAws(account) {
+        const cfg = account.config
+        const creds = cfg.accessKeyId
+          ? { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey || cfg.secretKey }
+          : null
+        const regions = cfg.regions
+          ? cfg.regions.split(',').map(r => r.trim())
+          : ['us-east-1']
+        const res = await fetch(`${aiBaseUrl}/discovery/scan/aws`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: account.id, regions, ...(creds ? { credentials: creds } : {}) }),
+        })
+        return res.json()
+      }
+      async function scanAzure(account) {
+        const cfg = account.config
+        const creds = cfg.clientId && cfg.clientSecret
+          ? { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret }
+          : null
+        const res = await fetch(`${aiBaseUrl}/discovery/scan/azure`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: account.id, subscriptionId: cfg.subscriptionId, ...(creds ? { credentials: creds } : {}) }),
+        })
+        return res.json()
+      }
+      async function scanGcp(account) {
+        const cfg = account.config
+        let gcpCreds = null
+        if (cfg.serviceAccount) { try { gcpCreds = JSON.parse(cfg.serviceAccount) } catch {} }
+        const res = await fetch(`${aiBaseUrl}/discovery/scan/gcp`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: account.id, projectId: cfg.projectId, ...(gcpCreds ? { credentials: gcpCreds } : {}) }),
+        })
+        return res.json()
       }
 
-      // ── Azure ─────────────────────────────────────────────────────────────
-      if (byProvider.azure?.length) {
-        for (const account of byProvider.azure) {
-          try {
-            const cfg = account.config
-            const creds = cfg.clientId && cfg.clientSecret
-              ? { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret }
-              : null
-            const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/azure`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                accountId: account.id,
-                subscriptionId: cfg.subscriptionId,
-                ...(creds ? { credentials: creds } : {})
-              })
-            })
-            const data = await res.json()
-            grandTotal += data.total || 0
-            fastify.log.info(`[Scheduler] Azure ${account.name}: ${data.total || 0} resources`)
-          } catch (e) {
-            errors.push(`Azure/${account.name}: ${e.message}`)
-          }
-        }
-      }
+      const PROVIDERS = [
+        { name: 'aws',   accounts: byProvider.aws   ?? [], fn: scanAws   },
+        { name: 'azure', accounts: byProvider.azure ?? [], fn: scanAzure },
+        { name: 'gcp',   accounts: byProvider.gcp   ?? [], fn: scanGcp   },
+      ]
 
-      // ── GCP ───────────────────────────────────────────────────────────────
-      if (byProvider.gcp?.length) {
-        for (const account of byProvider.gcp) {
-          try {
-            const cfg = account.config
-            let gcpCreds = null
-            if (cfg.serviceAccount) {
-              try { gcpCreds = JSON.parse(cfg.serviceAccount) } catch {}
+      const perProviderResults = await Promise.all(
+        PROVIDERS.filter(p => p.accounts.length > 0).map(async (p) => {
+          let provTotal = 0
+          const provErrors = []
+          for (const account of p.accounts) {
+            try {
+              const data = await p.fn(account)
+              provTotal += data.total || 0
+              fastify.log.info(`[Scheduler] ${p.name.toUpperCase()} ${account.name}: ${data.total || 0} resources`)
+            } catch (e) {
+              provErrors.push(`${p.name.toUpperCase()}/${account.name}: ${e.message}`)
+              fastify.log.error(
+                { provider: p.name, accountId: account.id, accountName: account.name, err: e.message, code: e.code },
+                `[Scheduler] ${p.name.toUpperCase()} scan failed`,
+              )
             }
-            const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/gcp`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                accountId: account.id,
-                projectId: cfg.projectId,
-                ...(gcpCreds ? { credentials: gcpCreds } : {})
-              })
-            })
-            const data = await res.json()
-            grandTotal += data.total || 0
-            fastify.log.info(`[Scheduler] GCP ${account.name}: ${data.total || 0} resources`)
-          } catch (e) {
-            errors.push(`GCP/${account.name}: ${e.message}`)
           }
-        }
+          return { provTotal, provErrors }
+        }),
+      )
+      for (const r of perProviderResults) {
+        grandTotal += r.provTotal
+        errors.push(...r.provErrors)
       }
 
       const duration = Date.now() - startedAt

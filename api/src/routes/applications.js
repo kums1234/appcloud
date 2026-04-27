@@ -104,7 +104,7 @@ export default async function applicationRoutes(fastify) {
         availability: $availability, confidentiality: $confidentiality,
         domain: $domain
       }) RETURN a
-    `, { name, tier: parseInt(tier), owner, environment,
+    `, { name, tier, owner, environment,
          availability: availability || '99.9',
          confidentiality: confidentiality || 'internal',
          domain: domain || '' })
@@ -139,7 +139,7 @@ export default async function applicationRoutes(fastify) {
           a.confidentiality  = coalesce($confidentiality, a.confidentiality),
           a.domain           = coalesce($domain, a.domain)
       RETURN a
-    `, { id: appId, name, tier: tier ? parseInt(tier) : null,
+    `, { id: appId, name, tier: tier ?? null,
          owner, environment, availability, confidentiality, domain })
     if (!records.length) return reply.notFound('Application not found')
     const result = props(records[0].get('a'))

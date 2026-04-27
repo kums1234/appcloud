@@ -87,6 +87,42 @@ export default async function adminAuditCleanupRoutes(fastify) {
     return { pending: buf.pending(), stats: buf.stats() }
   })
 
+  // Operator probe — is audit_log_default attached to the partition
+  // tree? Returns true only when the partition exists but is NOT in
+  // pg_inherits, which is the bad post-DETACH state where INSERTs for
+  // unrouted months silently fail. The Prometheus gauge
+  // `appcloud_audit_log_default_detached` is the alerting source;
+  // this endpoint is for a runbook clicking through to confirm + paste
+  // the recovery SQL.
+  fastify.get('/audit-cleanup/default-partition-state', {
+    config: { scope: 'admin' },
+    schema: {
+      summary:     'Audit-log default partition attachment state',
+      description: 'Reports whether audit_log_default is currently attached to the partition tree. A `detached: true` response is a paging condition — INSERTs whose month has no monthly partition will silently fail. Recover with: `ALTER TABLE audit_log ATTACH PARTITION audit_log_default DEFAULT`.',
+      tags:        ['Audit'],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            detached: { type: 'boolean' },
+            recoverySql: {
+              type: 'string',
+              description: 'SQL to run if `detached: true` — paste in psql or via your DB admin UI.',
+            },
+          },
+        },
+      },
+    },
+  }, async () => {
+    const detached = await fastify.auditCleanup.defaultPartitionDetached()
+    return {
+      detached,
+      recoverySql: detached
+        ? 'ALTER TABLE audit_log ATTACH PARTITION audit_log_default DEFAULT'
+        : '',
+    }
+  })
+
   // Push-button redistribute. Pre-partition rows park in audit_log_default
   // forever because retention's DROP PARTITION skips it. This sweeps them
   // into the matching monthly partitions, creating partitions as needed.

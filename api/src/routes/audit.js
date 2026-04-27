@@ -62,7 +62,10 @@ export default async function auditRoutes(fastify) {
         scope:        { type: 'string', enum: ['admin', 'write', 'read'] },
         from:         { type: 'string', format: 'date-time' },
         to:           { type: 'string', format: 'date-time' },
-        q:            { type: 'string' },
+        // Capped at 200 chars so an admin (or compromised admin key)
+        // can't pass a pathological pattern that costs Postgres minutes
+        // of CPU under ILIKE on the full audit_log table.
+        q:            { type: 'string', maxLength: 200 },
       } },
       response: { 200: { type: 'object', additionalProperties: true } },
     },

@@ -31,7 +31,7 @@ function isLikelyInsideContainer() {
   return false
 }
 
-function resolveOllamaBaseUrl(raw) {
+export function resolveOllamaBaseUrl(raw) {
   const base = (raw || process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')
   if (process.env.KUBERNETES_SERVICE_HOST || isLikelyInsideContainer()) return base
   try {
@@ -51,7 +51,7 @@ function resolveOllamaBaseUrl(raw) {
 // ─── Ollama (local) ───────────────────────────────────────────────────────────
 
 /** Transient errors when the API pod is up before Ollama has endpoints, or during pod restarts. */
-function isRetryableOllamaNetworkError(err) {
+export function isRetryableOllamaNetworkError(err) {
   const c = err?.cause?.code
   return (
     c === 'UND_ERR_SOCKET' ||

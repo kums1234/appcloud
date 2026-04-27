@@ -184,8 +184,15 @@ export async function aiPlugin(fastify) {
   // The effective cloud provider: env vars take priority, then DB
   let cloud = cloudEnv
 
-  // Track liveness — re-checked on each availability probe
-  let _localAvailable = false
+  // Track liveness with a short TTL — Ollama can crash mid-session and
+  // the previous behaviour (cached at boot, only re-checked when
+  // _localAvailable=false) would let a request 5xx with a confusing
+  // "available" claim. The TTL is short enough that ops sees the
+  // outage on the next request, long enough that we don't spam Ollama
+  // with isAvailable() checks under burst traffic.
+  let _localAvailable    = false
+  let _localCheckedAt    = 0
+  const LOCAL_CHECK_TTL_MS = parseInt(process.env.APPCLOUD_OLLAMA_CHECK_TTL_MS || '30000', 10)
 
   const checkLocal = async () => {
     try {
@@ -193,7 +200,19 @@ export async function aiPlugin(fastify) {
     } catch {
       _localAvailable = false
     }
+    _localCheckedAt = Date.now()
     return _localAvailable
+  }
+
+  // Probe-with-cache: true if the cached result is fresh AND positive,
+  // otherwise re-check. A negative cached result re-checks immediately
+  // — fast path for "Ollama is up" the common case, accurate path for
+  // "Ollama just came online or just crashed".
+  const isLocalAvailable = async () => {
+    if (_localAvailable && (Date.now() - _localCheckedAt) < LOCAL_CHECK_TTL_MS) {
+      return true
+    }
+    return checkLocal()
   }
 
   // Non-blocking initial check
@@ -251,9 +270,7 @@ export async function aiPlugin(fastify) {
   // that Fastify's reply.send() serialises correctly, rather than a raw Error.
 
   const getLocal = async () => {
-    // Re-check availability in case Ollama came online after startup
-    if (!_localAvailable) await checkLocal()
-    if (!_localAvailable) {
+    if (!(await isLocalAvailable())) {
       throw fastify.httpErrors.serviceUnavailable(
         `Local AI (Ollama) is not reachable at ${local.baseUrl}. ` +
         `Ensure Ollama is running and the model is pulled: ollama pull ${local.model}`

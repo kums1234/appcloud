@@ -89,7 +89,13 @@ export async function postgresPlugin(fastify) {
     )
   }
 
-  const pool = new pg.Pool({ host, port, database, user, password, ssl, max: 10,
+  // Pool size — bumpable via APPCLOUD_PG_POOL_MAX. 10 was the previous
+  // hardcoded default; higher values reduce queueing under bursty
+  // load (audit writes + user queries + scheduler ticks compete) at
+  // the cost of more idle connections. Tune against expected p95
+  // concurrency, not peak.
+  const poolMax = parseInt(process.env.APPCLOUD_PG_POOL_MAX || '10', 10)
+  const pool = new pg.Pool({ host, port, database, user, password, ssl, max: poolMax,
     connectionTimeoutMillis: 3000 })
 
   try {
@@ -148,9 +154,16 @@ export async function postgresPlugin(fastify) {
 
   // Periodic drain — rescues rows that piled up while Postgres was
   // unavailable. Cleared in onClose. unref() so the timer alone doesn't
-  // keep the process alive.
+  // keep the process alive. Errors are logged at WARN with structured
+  // fields so a sustained outage shows up in incident triage instead
+  // of being a silent gauge climb.
   const drainTimer = setInterval(() => {
-    auditMachinery.drain().catch(() => {})
+    auditMachinery.drain().catch(err =>
+      fastify.log.warn(
+        { err: err.message, code: err.code, pending: auditMachinery.pending() },
+        '[pg] audit-buffer drain failed — rows still queued for next tick',
+      ),
+    )
   }, AUDIT_BUFFER_DRAIN_MS)
   drainTimer.unref?.()
 

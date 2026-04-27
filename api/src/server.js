@@ -59,16 +59,34 @@ await fastify.register(helmet, {
   hsts: { maxAge: 31536000, includeSubDomains: true },
 })
 
-// Rate limiting — global 300 req/min per API key (or per IP if unauthed) is
-// generous for legitimate dashboards and tight enough that a leaked key can't
-// rack up millions of requests/hour. AI + discovery routes opt-in to stricter
-// limits via `config.rateLimit` on their schema (see ai.js, discovery.js):
-// LLM-touching endpoints cost real dollars, so default to 5/min there.
+// Rate limiting — two-tier so an unauthenticated attacker can't rotate
+// X-API-Key values to bypass the cap.
+//
+//   Authenticated request: bucket = `key:<x-api-key>`. The header is
+//   present and the request will eventually succeed or fail auth, but
+//   either way the per-key bucket caps spend per credential.
+//
+//   Unauthenticated request: bucket = `ip:<remote>`. The header is
+//   absent or empty; we ignore whatever it might say (attackers
+//   sending random keys all get the same `ip:…` bucket). The cap is
+//   tighter than the authenticated one — pre-auth surface should not
+//   absorb sustained traffic.
+//
+// AI + discovery routes opt into stricter per-route limits via
+// `config.rateLimit` on their schema (see ai.js, discovery.js).
+const RATE_LIMIT_AUTH_MAX   = parseInt(process.env.APPCLOUD_RATE_LIMIT_MAX        || '300', 10)
+const RATE_LIMIT_UNAUTH_MAX = parseInt(process.env.APPCLOUD_RATE_LIMIT_UNAUTH_MAX || '60',  10)
 await fastify.register(rateLimit, {
   global: true,
-  max: parseInt(process.env.APPCLOUD_RATE_LIMIT_MAX || '300', 10),
+  max: (req) => {
+    return (req.headers['x-api-key'] || '').trim() ? RATE_LIMIT_AUTH_MAX : RATE_LIMIT_UNAUTH_MAX
+  },
   timeWindow: process.env.APPCLOUD_RATE_LIMIT_WINDOW || '1 minute',
-  keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
+  keyGenerator: (req) => {
+    const key = (req.headers['x-api-key'] || '').trim()
+    if (key) return `key:${key}`
+    return `ip:${req.ip}`
+  },
   // Don't throttle the liveness probe — k8s polls it constantly.
   skipOnError: false,
   allowList: ['127.0.0.1'],

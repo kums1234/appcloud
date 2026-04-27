@@ -69,6 +69,20 @@ describe('partition naming + bounds', () => {
       .rejects.toThrow(/refusing to use unsafe partition name/)
   })
 
+  test('month bounds for December produce January-of-next-year as upper bound', async () => {
+    // Subtle: monthBounds() builds `to` as Date.UTC(year, month, 1).
+    // JS Date is 0-indexed, so month=12 wraps to month=0 of year+1
+    // (i.e. Jan-1 next year). Lock that contract — a refactor that
+    // accidentally subtracted 1 from `month` would silently produce a
+    // partition spanning Dec→Dec instead of Dec→Jan-next-year.
+    const fake = fakeQuery()
+    fake.setExists(false)
+    await ensureMonthlyPartition(fake.query, null, 2026, 12)
+    const createCall = fake.calls.find(c => c.sql.includes('PARTITION OF audit_log'))
+    expect(createCall.sql).toContain("FROM ('2026-12-01T00:00:00.000Z')")
+    expect(createCall.sql).toContain("TO ('2027-01-01T00:00:00.000Z')")
+  })
+
   test('December rolls over to next-year January for the "next month"', async () => {
     const fake = fakeQuery()
     fake.setExists(false)

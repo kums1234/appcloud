@@ -244,10 +244,24 @@ describe('writeStructuralEdge', () => {
 
 // ─── emitStructuralEdges ─────────────────────────────────────────────────────
 
+// emitStructuralEdges now writes ALL links from one resource in a
+// single batched UNWIND per call (params.links is an array). Tests
+// flatten the batch back to per-edge entries so per-via assertions
+// stay readable.
+function collectBatch(written, _, params) {
+  if (Array.isArray(params?.links)) {
+    for (const l of params.links) {
+      written.push({ via: l.via, source: l.source, evidence: l.evidence })
+    }
+  } else if (params?.via) {
+    written.push({ via: params.via, source: params.source, evidence: params.evidence })
+  }
+}
+
 describe('emitStructuralEdges — ec2_instance', () => {
   test('emits subnet/vpc/security-group/eni/disk/iam-role with expected vias', async () => {
     const written = []
-    const write = jest.fn(async (_, params) => { written.push({ via: params.via, source: params.source, evidence: params.evidence }) })
+    const write = jest.fn(async (sql, params) => collectBatch(written, sql, params))
     const stats = { edges: 0, errors: [] }
     const cidToNid = {
       'i-1234':                                                     'nid-vm',
@@ -285,7 +299,10 @@ describe('emitStructuralEdges — ec2_instance', () => {
 describe('emitStructuralEdges — subnet/security_group → vpc', () => {
   test('subnet emits exactly one vpc edge', async () => {
     const written = []
-    const write = jest.fn(async (_, params) => { written.push(params.via) })
+    const write = jest.fn(async (sql, params) => {
+      if (Array.isArray(params?.links)) for (const l of params.links) written.push(l.via)
+      else if (params?.via) written.push(params.via)
+    })
     const stats = { edges: 0, errors: [] }
     const cidToNid = {
       'arn:aws:ec2:us-east-1:111:subnet/subnet-1': 'nid-subnet',
@@ -307,7 +324,10 @@ describe('emitStructuralEdges — subnet/security_group → vpc', () => {
 describe('emitStructuralEdges — function (Lambda) — VPC config + role', () => {
   test('emits subnet/security-group/iam-role from vpcConfig and role fields', async () => {
     const written = []
-    const write = jest.fn(async (_, params) => { written.push(params.via) })
+    const write = jest.fn(async (sql, params) => {
+      if (Array.isArray(params?.links)) for (const l of params.links) written.push(l.via)
+      else if (params?.via) written.push(params.via)
+    })
     const stats = { edges: 0, errors: [] }
     const cidToNid = {
       'arn:aws:lambda:us-east-1:111:function:fn1': 'nid-fn',

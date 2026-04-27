@@ -309,11 +309,51 @@ export async function redistributeDefaultPartition(query, log) {
   } finally {
     // Always re-attach, even on partial failure — leaving audit_log
     // without a default would silently start rejecting INSERTs whose
-    // month has no partition yet.
-    await query(`ALTER TABLE audit_log ATTACH PARTITION ${DEFAULT_PARTITION} DEFAULT`)
+    // month has no partition yet. Log the result either way so an
+    // operator can see "did the re-attach happen" in the structured
+    // logs without needing to re-query pg_inherits manually.
+    try {
+      await query(`ALTER TABLE audit_log ATTACH PARTITION ${DEFAULT_PARTITION} DEFAULT`)
+      log?.info?.({ partition: DEFAULT_PARTITION },
+        '[audit-partitioning] default partition re-attached')
+    } catch (reattachErr) {
+      log?.error?.(
+        { err: reattachErr.message, partition: DEFAULT_PARTITION },
+        '[audit-partitioning] DEFAULT PARTITION RE-ATTACH FAILED — manual recovery required: ' +
+        `ALTER TABLE audit_log ATTACH PARTITION ${DEFAULT_PARTITION} DEFAULT`,
+      )
+      throw reattachErr
+    }
   }
 
   return { moved: totalMoved, partitionsCreated, months: perMonth }
+}
+
+// Returns true when audit_log_default exists as a regular table (i.e.
+// it is NOT attached to audit_log as a partition). Operators page on
+// this — a detached default rejects INSERTs whose month has no
+// matching monthly partition. Used by the metrics plugin to expose
+// `appcloud_audit_log_default_detached` and by /admin/audit-cleanup/
+// detached-state to surface the recovery procedure.
+export async function isDefaultPartitionDetached(query) {
+  const DEFAULT_PARTITION = `${PARTITION_PREFIX}default`
+  const rows = await query(`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM pg_class c
+        WHERE c.relname = $1
+          AND c.relnamespace = current_schema()::regnamespace
+      ) AS exists,
+      EXISTS (
+        SELECT 1 FROM pg_inherits i
+        JOIN pg_class child  ON child.oid  = i.inhrelid
+        JOIN pg_class parent ON parent.oid = i.inhparent
+        WHERE child.relname  = $1
+          AND parent.relname = 'audit_log'
+      ) AS attached
+  `, [DEFAULT_PARTITION])
+  if (!rows.length || !rows[0].exists) return false        // table absent
+  return rows[0].exists && !rows[0].attached
 }
 
 export async function dropPartition(query, log, name) {
