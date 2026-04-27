@@ -27,6 +27,11 @@ const ALLOWED_PUBLIC_ROUTES = new Set([
   'HEAD /',
   'GET /health',
   'HEAD /health',
+  // /ready — K8s readinessProbe target. Returns 503 when either DB is
+  // unreachable. Standard probe convention is unauthed; the response
+  // contains no sensitive information beyond DB connectivity status.
+  'GET /ready',
+  'HEAD /ready',
   // /metrics — Prometheus exposition. Standard practice is unauthed
   // scrape over the cluster network; access control belongs at the
   // network-policy layer, not as an X-API-Key header on the scraper.
@@ -76,8 +81,8 @@ async function buildAndCollect() {
 
   // Same decorator stubs the export script + drift test use, so route
   // registration succeeds without real DB connections.
-  fastify.decorate('pg',             { pool: null, query: async () => [], audit: async () => {} })
-  fastify.decorate('neo4j',          { write: async () => [], query: async () => [] })
+  fastify.decorate('pg',             { pool: null, query: async () => [], audit: async () => {}, ping: async () => true })
+  fastify.decorate('neo4j',          { write: async () => [], query: async () => [], ping: async () => true })
   fastify.decorate('ai',             { localAvailable: false, cloudAvailable: false })
   fastify.decorate('connectors',     { list: () => [], get: () => null })
   fastify.decorate('cmdbAssessment', { markDirty: () => {}, run: async () => ({}) })
@@ -136,8 +141,9 @@ async function buildAndCollect() {
   const { metricsPlugin } = await import(path.join(apiSrc, 'plugins/metrics.js'))
   await metricsPlugin(fastify)
 
-  // /health and / — match server.js.
+  // /health, /ready, and / — match server.js.
   fastify.get('/health', { schema: { security: [] } }, async () => ({ status: 'ok' }))
+  fastify.get('/ready',  { schema: { security: [] } }, async () => ({ status: 'ready' }))
   fastify.get('/',       { schema: { security: [] } }, async () => ({ name: 'AppCloud API' }))
 
   await fastify.ready()

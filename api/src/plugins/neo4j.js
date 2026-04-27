@@ -49,41 +49,64 @@ export async function neo4jPlugin(fastify) {
 
   fastify.log.info(`Neo4j connecting to: ${uri}`)
 
-  const driver = neo4j.driver(
-    uri,
-    neo4j.auth.basic(username, password)
-  )
-
+  // Graceful degradation: if Neo4j is unreachable at boot, decorate
+  // with a stub that returns 503 from query/write rather than crashing
+  // the entire API. The previous behaviour (throw on verifyConnectivity
+  // failure) meant a Neo4j rolling restart, version upgrade, or pre-
+  // ready-state during a fresh deploy would crash-loop the API pods.
+  // The /ready endpoint (server.js) probes connectivity per-request so
+  // K8s can route traffic away from a pod whose Neo4j is degraded.
+  let driver
+  let connected = false
   try {
+    driver = neo4j.driver(uri, neo4j.auth.basic(username, password))
     await driver.verifyConnectivity()
+    connected = true
     fastify.log.info('Neo4j connected successfully')
   } catch (err) {
-    fastify.log.error({ err }, 'Neo4j connection failed')
-    throw err
+    fastify.log.error({ err: err.message, uri }, 'Neo4j connection failed — decorating fastify.neo4j with a 503 stub')
+    if (driver) { try { await driver.close() } catch {} }
+    driver = null
   }
 
-  const query = async (cypher, params = {}) => {
-    const session = driver.session()
-    try {
-      const result = await session.run(cypher, params)
-      return result.records
-    } finally {
-      await session.close()
-    }
-  }
+  const unavailableErr = () => Object.assign(
+    new Error('neo4j unavailable'),
+    { code: 'NEO4J_UNAVAILABLE', statusCode: 503 },
+  )
 
-  const write = async (cypher, params = {}) => {
-    const session = driver.session({ defaultAccessMode: neo4j.session.WRITE })
-    try {
-      const result = await session.executeWrite(tx => tx.run(cypher, params))
-      return result.records
-    } finally {
-      await session.close()
-    }
-  }
+  const query = connected
+    ? async (cypher, params = {}) => {
+        const session = driver.session()
+        try {
+          const result = await session.run(cypher, params)
+          return result.records
+        } finally {
+          await session.close()
+        }
+      }
+    : async () => { throw unavailableErr() }
 
-  fastify.decorate('neo4j', { driver, query, write })
-  fastify.addHook('onClose', async () => { await driver.close() })
+  const write = connected
+    ? async (cypher, params = {}) => {
+        const session = driver.session({ defaultAccessMode: neo4j.session.WRITE })
+        try {
+          const result = await session.executeWrite(tx => tx.run(cypher, params))
+          return result.records
+        } finally {
+          await session.close()
+        }
+      }
+    : async () => { throw unavailableErr() }
+
+  // verifyConnectivity() called from /ready with a tight timeout; the
+  // stub returns immediately so a degraded pod stays unready instead
+  // of hanging until the probe deadline.
+  const ping = connected
+    ? async () => { await driver.verifyConnectivity(); return true }
+    : async () => { throw unavailableErr() }
+
+  fastify.decorate('neo4j', { driver, query, write, ping, connected })
+  fastify.addHook('onClose', async () => { if (driver) await driver.close() })
 
   // ── Ensure indexes on startup ──────────────────────────────────────────
   // Creates indexes for core Infra properties and typed labels.
@@ -120,11 +143,17 @@ export async function neo4jPlugin(fastify) {
     'CREATE INDEX IF NOT EXISTS FOR (c:Component) ON (c.name)',
   ]
 
-  // Run index creation in parallel, best-effort (never block startup)
-  try {
-    await Promise.allSettled(indexes.map(idx => write(idx)))
-    fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes)`)
-  } catch (err) {
-    fastify.log.warn(`Neo4j index creation: ${err.message}`)
+  // Run index creation in parallel, best-effort (never block startup).
+  // Skipped when Neo4j is unreachable (stub mode) since `write()` would
+  // throw NEO4J_UNAVAILABLE for every index.
+  if (connected) {
+    try {
+      await Promise.allSettled(indexes.map(idx => write(idx)))
+      fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes)`)
+    } catch (err) {
+      fastify.log.warn(`Neo4j index creation: ${err.message}`)
+    }
+  } else {
+    fastify.log.warn('[neo4j] index creation skipped — Neo4j unavailable (stub mode)')
   }
 }

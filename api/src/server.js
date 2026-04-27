@@ -201,7 +201,7 @@ fastify.get('/health', {
   schema: {
     tags:        ['Health'],
     summary:     'Liveness probe',
-    description: 'Open — no auth required. Returns 200 with `status: "ok"` and the server clock.',
+    description: 'Open — no auth required. Returns 200 with `status: "ok"` and the server clock. Use this for the K8s livenessProbe — it stays green even when DBs are degraded so pods aren\'t killed unnecessarily. Use /ready for the readinessProbe (which actually probes DB connectivity).',
     security:    [],
     response: {
       200: {
@@ -214,6 +214,58 @@ fastify.get('/health', {
     },
   },
 }, async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+
+// /ready — K8s readinessProbe target. Returns 200 only when both Postgres
+// AND Neo4j are reachable. A degraded DB (Neo4j stub mode after a failed
+// connect, or Postgres pool can't ping) returns 503 so K8s routes traffic
+// away from this pod. Distinct from /health so a transient DB blip
+// doesn't cause the pod to be killed (livenessProbe → restart) when
+// removing it from service (readinessProbe → no traffic) is enough.
+fastify.get('/ready', {
+  schema: {
+    tags:        ['Health'],
+    summary:     'Readiness probe (DB connectivity)',
+    description: 'Returns 200 + per-DB status when both Postgres and Neo4j are reachable. Returns 503 with the same shape (status `unavailable` for the failing DB) when either is unreachable — point K8s readinessProbe here so traffic routes away from degraded pods. Public — no auth required.',
+    security:    [],
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          status:   { type: 'string', example: 'ready' },
+          postgres: { type: 'string', example: 'ok' },
+          neo4j:    { type: 'string', example: 'ok' },
+        },
+      },
+      503: {
+        type: 'object',
+        properties: {
+          status:   { type: 'string', example: 'unavailable' },
+          postgres: { type: 'string' },
+          neo4j:    { type: 'string' },
+          error:    { type: 'string' },
+        },
+      },
+    },
+  },
+}, async (req, reply) => {
+  // Probe both in parallel — ~2× faster than serial when one is slow.
+  // Per-probe timeout via Promise.race so a hung backend doesn't blow
+  // past the readinessProbe deadline.
+  const PROBE_TIMEOUT_MS = parseInt(process.env.APPCLOUD_READY_TIMEOUT_MS || '2000', 10)
+  const probe = (fn) => Promise.race([
+    fn().then(() => 'ok').catch(err => err.message || 'failed'),
+    new Promise(r => setTimeout(() => r(`timeout after ${PROBE_TIMEOUT_MS}ms`), PROBE_TIMEOUT_MS)),
+  ])
+  const [pgStatus, neoStatus] = await Promise.all([
+    probe(() => fastify.pg.ping()),
+    probe(() => fastify.neo4j.ping()),
+  ])
+  if (pgStatus === 'ok' && neoStatus === 'ok') {
+    return { status: 'ready', postgres: 'ok', neo4j: 'ok' }
+  }
+  reply.code(503)
+  return { status: 'unavailable', postgres: pgStatus, neo4j: neoStatus }
+})
 
 fastify.get('/', {
   schema: {

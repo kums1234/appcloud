@@ -128,9 +128,10 @@ async function buildFuzzServer() {
     pool:        null,
     query:       async () => [],
     audit:       async () => {},
+    ping:        async () => true,
     auditBuffer: { pending: () => 0, stats: () => ({ accepted: 0, flushed: 0, dropped: 0, errors: 0 }) },
   })
-  fastify.decorate('neo4j',          { write: async () => [], query: async () => [] })
+  fastify.decorate('neo4j',          { write: async () => [], query: async () => [], ping: async () => true })
   fastify.decorate('ai',             { localAvailable: false, cloudAvailable: false })
   fastify.decorate('connectors',     { list: () => [], get: () => null })
   fastify.decorate('cmdbAssessment', { markDirty: () => {}, run: async () => ({}) })

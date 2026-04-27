@@ -10,7 +10,18 @@ function readSecret(fileEnvVar, plainEnvVar, fallback = '') {
   return process.env[plainEnvVar] || fallback
 }
 
-const stub = { pool: null, query: async () => [], audit: async () => {} }
+// Stub returned when Postgres isn't reachable. ping() always rejects so
+// /ready picks up the degraded state.
+const PG_UNAVAILABLE = () => Object.assign(
+  new Error('postgres unavailable'),
+  { code: 'POSTGRES_UNAVAILABLE', statusCode: 503 },
+)
+const stub = {
+  pool:  null,
+  query: async () => [],
+  audit: async () => {},
+  ping:  async () => { throw PG_UNAVAILABLE() },
+}
 
 const AUDIT_BUFFER_MAX      = parseInt(process.env.APPCLOUD_AUDIT_BUFFER_MAX      || '1000',  10)
 const AUDIT_BUFFER_DRAIN_MS = parseInt(process.env.APPCLOUD_AUDIT_BUFFER_DRAIN_MS || '30000', 10)
@@ -146,6 +157,11 @@ export async function postgresPlugin(fastify) {
   fastify.decorate('pg', {
     pool,
     query: async (sql, params = []) => (await pool.query(sql, params)).rows,
+    // ping() — used by /ready to probe connectivity per request. Tight
+    // SELECT 1 so a degraded pool / slow connection surfaces fast and
+    // the readinessProbe can mark the pod unready before the request
+    // backlog grows.
+    ping: async () => { await pool.query('SELECT 1'); return true },
     // audit() — see utils/audit-buffer.js for full semantics. Briefly:
     //   - hot path: direct INSERT
     //   - on failure or backlog: queue + periodic retry

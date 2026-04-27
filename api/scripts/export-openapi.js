@@ -32,8 +32,8 @@ const fastify = Fastify({
 // route registration doesn't blow up on missing fastify.authenticate /
 // fastify.pg / fastify.neo4j / fastify.ai / fastify.connectors.
 fastify.decorate('authenticate',     async () => {})
-fastify.decorate('pg',               { pool: null, query: async () => [], audit: async () => {} })
-fastify.decorate('neo4j',            { write: async () => [], query: async () => [] })
+fastify.decorate('pg',               { pool: null, query: async () => [], audit: async () => {}, ping: async () => true })
+fastify.decorate('neo4j',            { write: async () => [], query: async () => [], ping: async () => true })
 fastify.decorate('ai',               { localAvailable: false, cloudAvailable: false })
 fastify.decorate('connectors',       { list: () => [], get: () => null })
 fastify.decorate('cmdbAssessment',   { markDirty: () => {}, run: async () => ({}) })
@@ -76,6 +76,8 @@ await metricsPlugin(fastify)
 // Health endpoints — match server.js
 fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },
   async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+fastify.get('/ready', { schema: { tags: ['Health'], summary: 'Readiness probe', security: [] } },
+  async () => ({ status: 'ready', postgres: 'ok', neo4j: 'ok' }))
 fastify.get('/', { schema: { tags: ['Health'], summary: 'API banner', security: [] } },
   async () => ({ name: 'AppCloud API', version: '1.1.0' }))
 

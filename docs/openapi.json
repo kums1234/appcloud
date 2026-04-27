@@ -6805,6 +6805,20 @@
         }
       }
     },
+    "/ready": {
+      "get": {
+        "summary": "Readiness probe",
+        "tags": [
+          "Health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "API banner",

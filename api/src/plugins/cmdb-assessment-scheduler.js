@@ -19,6 +19,8 @@
 // without importing state-management SQL directly.
 
 import { runAssessment } from '../services/cmdb-assessment/index.js'
+import { makeOnceLock }  from '../utils/once-lock.js'
+import { withLeaderLock, SCHEDULER_LOCK_KEYS } from '../utils/leader-lock.js'
 
 const DEFAULT_INTERVAL_MS = 60_000           // 1 minute tick
 const DEFAULT_BACKSTOP_MS = 30 * 60_000      // 30 minutes
@@ -28,8 +30,10 @@ export async function cmdbAssessmentSchedulerPlugin(fastify) {
   const intervalMs = parseInt(process.env.CMDB_ASSESSMENT_INTERVAL_MS || String(DEFAULT_INTERVAL_MS), 10)
   const backstopMs = parseInt(process.env.CMDB_ASSESSMENT_BACKSTOP_MS || String(DEFAULT_BACKSTOP_MS), 10)
 
-  let running     = false
-  let timer       = null
+  // Promise-based lock — same fix the discovery scheduler got. The old
+  // `running` flag raced across awaits.
+  const runLock = makeOnceLock()
+  let timer = null
 
   async function readState() {
     const rows = await fastify.pg.query(
@@ -94,26 +98,35 @@ export async function cmdbAssessmentSchedulerPlugin(fastify) {
   }
 
   async function runOnce(trigger) {
-    if (running) {
+    // Two-layer lock: outer Postgres advisory lock (one replica per
+    // tick), inner promise lock (no overlap within a replica).
+    const outer = await withLeaderLock(fastify.pg?.pool, SCHEDULER_LOCK_KEYS.cmdbAssessmentRun, async () => {
+      return runLock.run(async () => {
+        try {
+          const result = await runAssessment({ neo4j: fastify.neo4j, log: fastify.log })
+          await clearDirty(result.episodeId)
+          await recordRun(trigger, result, 'ok')
+          fastify.log.info(
+            `[CmdbAssess] ${trigger}: ${result.matched}/${result.cis} matched, ${result.infra} Infra, ${result.durationMs}ms`,
+          )
+          return result
+        } catch (err) {
+          fastify.log.error(`[CmdbAssess] ${trigger} failed: ${err.message}`)
+          await recordRun(trigger, null, 'error', err.message)
+          return null
+        }
+      })
+    })
+    if (outer.skipped === 'leader-elsewhere') {
+      fastify.log.info('[CmdbAssess] another replica holds the leader lock — skipping tick')
+      return null
+    }
+    if (outer.skipped) return null
+    if (outer.result?.skipped) {
       fastify.log.info('[CmdbAssess] previous run still in flight — skipping tick')
       return null
     }
-    running = true
-    try {
-      const result = await runAssessment({ neo4j: fastify.neo4j, log: fastify.log })
-      await clearDirty(result.episodeId)
-      await recordRun(trigger, result, 'ok')
-      fastify.log.info(
-        `[CmdbAssess] ${trigger}: ${result.matched}/${result.cis} matched, ${result.infra} Infra, ${result.durationMs}ms`,
-      )
-      return result
-    } catch (err) {
-      fastify.log.error(`[CmdbAssess] ${trigger} failed: ${err.message}`)
-      await recordRun(trigger, null, 'error', err.message)
-      return null
-    } finally {
-      running = false
-    }
+    return outer.result?.result ?? null
   }
 
   async function tick() {

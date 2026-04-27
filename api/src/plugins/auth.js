@@ -268,8 +268,38 @@ export async function authPlugin(fastify) {
   // 4. Decorate fastify with the auth + scope-check primitives.
   const authDisabled = !bootstrapPlain && !bootstrapAdminPlain && cache.map.size === 0
   if (authDisabled) {
+    // Production-side hard gate: in NODE_ENV=production, refuse to start
+    // unless the operator has explicitly opted into open-auth via
+    // APPCLOUD_ALLOW_OPEN_AUTH=true. The trap we're closing: a deploy
+    // that loses its bootstrap secret (deleted ConfigMap, expired
+    // Secret, race during secret-mount) silently falls back to
+    // anonymous-admin, and the audit log records every request as
+    // 'anonymous' until someone notices.
+    if (process.env.NODE_ENV === 'production'
+        && !/^(true|1|yes)$/i.test(process.env.APPCLOUD_ALLOW_OPEN_AUTH || '')) {
+      throw new Error(
+        '[auth] refusing to start in NODE_ENV=production with no API keys — ' +
+        'set APPCLOUD_API_KEY (or APPCLOUD_ADMIN_API_KEY) to bootstrap a key, ' +
+        'or set APPCLOUD_ALLOW_OPEN_AUTH=true to acknowledge the open-auth risk.',
+      )
+    }
     fastify.log.warn('[auth] no bootstrap env keys + no DB keys — authentication disabled, all routes open')
+    // Periodic re-warn so the warning doesn't scroll out of operator
+    // view after boot. Every 60s (configurable) — long enough that a
+    // local-dev session isn't drowned in noise, short enough that a
+    // misconfigured deploy shows up in any reasonable log retention.
+    const reWarnIntervalMs = parseInt(process.env.APPCLOUD_AUTH_DISABLED_WARN_MS || '60000', 10)
+    if (reWarnIntervalMs > 0) {
+      const timer = setInterval(() => {
+        fastify.log.warn('[auth] STILL RUNNING WITH AUTH DISABLED — every request reaches handlers as anonymous-admin')
+      }, reWarnIntervalMs)
+      timer.unref?.()
+      fastify.addHook('onClose', async () => clearInterval(timer))
+    }
   }
+  // Expose the auth-state flag so the metrics plugin can publish it as
+  // a gauge — operators can alert on `appcloud_auth_disabled == 1`.
+  fastify.decorate('authDisabled', authDisabled)
 
   const authenticate = async (req, reply) => {
     if (authDisabled) {

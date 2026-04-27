@@ -6,11 +6,22 @@
 // The scheduler starts when the server starts and respects the enabled flag.
 // Interval changes take effect on the next tick without a server restart.
 
-import { systemActor, SYSTEM_ACTORS } from '../utils/audit.js'
+import { systemActor, SYSTEM_ACTORS }     from '../utils/audit.js'
+import { makeOnceLock }                    from '../utils/once-lock.js'
+import { withLeaderLock, SCHEDULER_LOCK_KEYS } from '../utils/leader-lock.js'
 
 export async function schedulerPlugin(fastify) {
   let timer = null
-  let running = false
+  // Replaces the old `let running = false` flag — that pattern raced
+  // across the await between `if (running) return` and `running = true`,
+  // letting two concurrent ticks both enter the scan. The promise-based
+  // lock holds atomically across awaits — covers the in-process case.
+  // For multi-pod (K8s replicas > 1), withLeaderLock adds a Postgres
+  // advisory-lock outer gate so only one replica's tick wins per
+  // interval. Both layers run together: the in-process lock prevents
+  // overlapping ticks within a single replica; the Postgres lock
+  // prevents concurrent ticks across replicas.
+  const scanLock = makeOnceLock()
 
   const INIT_SQL = `
     CREATE TABLE IF NOT EXISTS discovery_schedule (
@@ -63,12 +74,20 @@ export async function schedulerPlugin(fastify) {
   }
 
   // ── Run a full scan across all configured accounts ───────────────────────
+  // The two-layer lock: outer Postgres advisory lock (inter-pod), inner
+  // in-process promise lock (intra-pod). The outer one is opportunistic
+  // — if Postgres is unavailable it falls through, and we still get the
+  // in-process gate. The inner one always runs.
   const runScheduledScan = async () => {
-    if (running) {
-      fastify.log.info('[Scheduler] Scan already running — skipping tick')
-      return
+    const outer = await withLeaderLock(fastify.pg?.pool, SCHEDULER_LOCK_KEYS.discoveryScan, async () => {
+      return scanLock.run(scan)
+    })
+    if (outer.skipped === 'leader-elsewhere') {
+      fastify.log.info('[Scheduler] another replica holds the leader lock — skipping tick')
     }
-    running = true
+    return outer
+  }
+  const scan = async () => {
     fastify.log.info('[Scheduler] Starting scheduled discovery scan')
     await updateSchedule({ last_run_status: 'running', last_run_at: new Date() })
 
@@ -288,9 +307,8 @@ export async function schedulerPlugin(fastify) {
     } catch (err) {
       fastify.log.error(`[Scheduler] Scan failed: ${err.message}`)
       await updateSchedule({ last_run_status: 'error', last_run_at: new Date() })
-    } finally {
-      running = false
     }
+    // Lock release happens automatically in scanLock.run's finally block.
   }
 
   // ── Start/restart the timer ──────────────────────────────────────────────

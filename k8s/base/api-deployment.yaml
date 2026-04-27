@@ -75,13 +75,20 @@ spec:
               mountPath: /run/secrets/appcloud_encryption_key
               subPath: appcloud_encryption_key
               readOnly: true
+          # /ready probes Postgres + Neo4j connectivity per request and
+          # returns 503 when either is unreachable. K8s removes the pod
+          # from service endpoints while degraded, then re-adds when the
+          # probe goes green again — no pod restart required.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 6
+          # /health stays green even when DBs are degraded so K8s doesn't
+          # kill (and recreate) a pod that just needs traffic re-routed.
+          # Restart the pod only on hard liveness failures (process hang).
           livenessProbe:
             httpGet:
               path: /health

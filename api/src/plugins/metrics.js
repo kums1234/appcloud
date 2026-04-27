@@ -47,26 +47,54 @@ export async function metricsPlugin(fastify) {
     registers:  [register],
   })
 
-  // Counter values are monotonic — we read the cumulative `dropped` from
-  // stats() on each scrape and reconcile by setting an internal offset.
-  // prom-client doesn't let us call .reset() then .inc() (that's racy
-  // under concurrent scrapes), so we track lastSeen and increment by
-  // delta on each scrape instead.
-  let lastSeenDropped = 0
+  // Poison-evictions: rows whose individual INSERT failed MAX_ROW_ATTEMPTS
+  // times in a row (typically FK or constraint violations). Distinct from
+  // `dropped` (queue overflow) — a steady non-zero rate here means a
+  // schema or referential-integrity bug that's costing audit rows even
+  // when the DB is healthy.
+  const auditBufferPoisoned = new client.Counter({
+    name:       'appcloud_audit_buffer_poisoned_total',
+    help:       'Cumulative audit rows evicted as poison pills after exceeding the per-row retry limit (typically constraint / FK violations).',
+    registers:  [register],
+  })
+
+  // Counter values are monotonic — we read the cumulative stats on each
+  // scrape and reconcile by setting an internal offset. prom-client
+  // doesn't let us call .reset() then .inc() (that's racy under
+  // concurrent scrapes), so we track lastSeen and increment by delta on
+  // each scrape instead.
+  let lastSeenDropped  = 0
+  let lastSeenPoisoned = 0
   const collectDropped = () => {
     const stats = fastify.pg?.auditBuffer?.stats?.()
-    if (!stats || typeof stats.dropped !== 'number') return
-    const delta = stats.dropped - lastSeenDropped
-    if (delta > 0) {
-      auditBufferDropped.inc(delta)
-      lastSeenDropped = stats.dropped
-    } else if (delta < 0) {
-      // Stats counter restarted (process restart with shared metric? Reset
-      // to current value and continue. Operators see a flat span in the
-      // counter, which is the correct semantic.)
-      lastSeenDropped = stats.dropped
+    if (!stats) return
+    if (typeof stats.dropped === 'number') {
+      const delta = stats.dropped - lastSeenDropped
+      if (delta > 0)      { auditBufferDropped.inc(delta);  lastSeenDropped  = stats.dropped }
+      else if (delta < 0) { lastSeenDropped  = stats.dropped }
+    }
+    if (typeof stats.poisoned === 'number') {
+      const delta = stats.poisoned - lastSeenPoisoned
+      if (delta > 0)      { auditBufferPoisoned.inc(delta); lastSeenPoisoned = stats.poisoned }
+      else if (delta < 0) { lastSeenPoisoned = stats.poisoned }
     }
   }
+
+  // Auth-disabled gauge — 1 when the auth plugin is in its open-auth
+  // fallback (no bootstrap env vars + empty DB cache), 0 otherwise. The
+  // intended alert: `appcloud_auth_disabled == 1` for more than a few
+  // minutes in a non-dev environment is a deploy bug.
+  new client.Gauge({
+    name:       'appcloud_auth_disabled',
+    help:       'Set to 1 when the auth plugin is running in open-auth fallback (every request becomes anonymous-admin); 0 otherwise.',
+    registers:  [register],
+    collect() {
+      // fastify.authDisabled is decorated by plugins/auth.js. If the
+      // auth plugin failed to load entirely, treat it as not-disabled
+      // (the API won't be serving traffic anyway).
+      this.set(fastify.authDisabled === true ? 1 : 0)
+    },
+  })
 
   fastify.decorate('metricsRegistry', register)
 

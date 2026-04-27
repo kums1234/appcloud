@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from '@jest/globals'
 import { createCipheriv, randomBytes, scryptSync } from 'crypto'
-import { encrypt, decrypt, encryptConfig, decryptConfig, DecryptionError } from '../encrypt.js'
+import { encrypt, decrypt, encryptConfig, decryptConfig, DecryptionError, encryptWithKey, decryptWithKey } from '../encrypt.js'
 
 beforeAll(() => {
   // Tests must be deterministic regardless of host env; override the key.
@@ -67,6 +67,34 @@ describe('encrypt/decrypt', () => {
     // Flip a byte in the ciphertext — auth tag verification must fail.
     const corrupted = `${salt}:${iv}:${tag}:${ct.slice(0, -2)}ff`
     expect(() => decrypt(corrupted)).toThrow(DecryptionError)
+  })
+
+  test('encryptWithKey + decryptWithKey round-trip under an explicit passphrase', () => {
+    // The rotation CLI uses these helpers to hold two master keys
+    // simultaneously (the OLD one for decrypting existing rows, the
+    // NEW one for re-encrypting them) without flipping env vars.
+    const OLD_KEY = 'old-passphrase-for-rotation-test'
+    const NEW_KEY = 'new-passphrase-for-rotation-test'
+    const plain = 'hunter2-rotated'
+    const cipherUnderOld = encryptWithKey(plain, OLD_KEY)
+    expect(decryptWithKey(cipherUnderOld, OLD_KEY)).toBe(plain)
+    // Decrypting under NEW must FAIL (it's a different key).
+    expect(() => decryptWithKey(cipherUnderOld, NEW_KEY))
+      .toThrow(DecryptionError)
+    // The rotation primitive: decrypt under OLD, re-encrypt under NEW,
+    // confirm only NEW reads it.
+    const cipherUnderNew = encryptWithKey(decryptWithKey(cipherUnderOld, OLD_KEY), NEW_KEY)
+    expect(decryptWithKey(cipherUnderNew, NEW_KEY)).toBe(plain)
+    expect(() => decryptWithKey(cipherUnderNew, OLD_KEY)).toThrow(DecryptionError)
+  })
+
+  test('encryptWithKey produces v3 ciphertext shape (4 hex parts)', () => {
+    // The wire format must match the env-key encrypt() so the rotation
+    // CLI's output is indistinguishable from a normal encrypt() call.
+    const c = encryptWithKey('payload', 'some-passphrase')
+    const parts = c.split(':')
+    expect(parts).toHaveLength(4)
+    for (const p of parts) expect(p).toMatch(/^[0-9a-f]+$/)
   })
 
   test('legacy v2 ciphertext (3-part, master-key direct) still decrypts', () => {
