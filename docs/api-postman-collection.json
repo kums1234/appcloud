@@ -575,7 +575,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": false,\n  \"key_1\": 8642\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": 6865\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -769,7 +769,7 @@
                 {
                   "disabled": false,
                   "key": "provider",
-                  "value": "gcp"
+                  "value": "aws"
                 },
                 {
                   "disabled": false,
@@ -928,7 +928,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"region\": \"string\",\n  \"public\": false\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"region\": \"string\",\n  \"public\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1311,7 +1311,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\"\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": true,\n  \"key_1\": 2471,\n  \"key_2\": 4478\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1503,7 +1503,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "gcp",
+                  "value": "aws",
                   "key": "provider",
                   "description": "(Required) "
                 }
@@ -1565,7 +1565,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 4375.299860257655\n  },\n  \"enabled\": true,\n  \"key_0\": false\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 8125,\n    \"key_1\": 688,\n    \"key_2\": \"string\",\n    \"key_3\": \"string\"\n  },\n  \"enabled\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1697,7 +1697,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"success\",\n  \"total\": 1730,\n  \"error\": \"string\"\n}",
+              "raw": "{\n  \"status\": \"success\",\n  \"total\": 8208,\n  \"error\": null,\n  \"key_0\": 8181,\n  \"key_1\": false,\n  \"key_2\": 1742\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1922,7 +1922,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 5061,\n    \"key_1\": 3859.8801498301327\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
+              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 572.4404170177877,\n    \"key_1\": 7823,\n    \"key_2\": 7236,\n    \"key_3\": 7510,\n    \"key_4\": false\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 1297\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1956,7 +1956,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
+                  "value": "4a806bd6-3b78-a02f-3df9-8a7bb63ffe7c",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -1997,7 +1997,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
+                  "value": "4a806bd6-3b78-a02f-3df9-8a7bb63ffe7c",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2017,7 +2017,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"key_0\": 4938\n  },\n  \"enabled\": false,\n  \"pollIntervalSeconds\": null\n}",
+              "raw": "{\n  \"config\": {\n    \"key_0\": \"string\"\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 4676\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2051,7 +2051,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
+                  "value": "4a806bd6-3b78-a02f-3df9-8a7bb63ffe7c",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2093,7 +2093,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
+                  "value": "4a806bd6-3b78-a02f-3df9-8a7bb63ffe7c",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2135,7 +2135,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
+                  "value": "4a806bd6-3b78-a02f-3df9-8a7bb63ffe7c",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2177,7 +2177,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
+                  "value": "4a806bd6-3b78-a02f-3df9-8a7bb63ffe7c",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2325,7 +2325,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": \"string\"\n  },\n  \"key_0\": 5544.325793161988,\n  \"key_1\": 3406.8888798356056\n}",
+              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": 711.8336763232946\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2372,7 +2372,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  }\n}",
+              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\",\n    \"key_0\": \"string\",\n    \"key_1\": \"string\",\n    \"key_2\": 9401\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2419,7 +2419,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 1422\n  }\n}",
+              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 5275.921975262463,\n    \"key_1\": \"string\",\n    \"key_2\": \"string\",\n    \"key_3\": false\n  },\n  \"key_0\": \"string\",\n  \"key_1\": 1443,\n  \"key_2\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2532,7 +2532,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": true\n}",
+              "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": 5653,\n  \"key_1\": 9507,\n  \"key_2\": 8770.430136937648\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2688,7 +2688,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": 5464.494936168194,\n      \"componentId\": \"string\"\n    },\n    {\n      \"infraId\": \"string\",\n      \"componentId\": \"string\"\n    }\n  ]\n}",
+              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": false,\n      \"componentId\": false\n    },\n    {\n      \"infraId\": \"string\",\n      \"componentId\": 1015\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2735,7 +2735,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"link_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 2,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 8883.637492544949\n        },\n        {\n          \"key_0\": 5495.409858413041,\n          \"key_1\": 4892,\n          \"key_2\": 5375.443673692644\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": false\n        },\n        {\n          \"key_0\": false\n        }\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 2,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 6785\n        },\n        {\n          \"key_0\": 3873\n        }\n      ]\n    },\n    {\n      \"action\": \"link_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": \"string\",\n          \"key_1\": \"string\"\n        },\n        {\n          \"key_0\": 9787.920769304037,\n          \"key_1\": 5153\n        }\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2811,7 +2811,7 @@
                 {
                   "disabled": false,
                   "key": "provider",
-                  "value": "gcp"
+                  "value": "aws"
                 },
                 {
                   "disabled": false,
@@ -2906,7 +2906,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"infraId\": \"9f75a829-04cf-070c-bb50-e49968f97efe\",\n  \"componentId\": \"f8ef0b3c-c699-4072-8175-9d8c0ef7c09c\"\n}",
+              "raw": "{\n  \"infraId\": \"9ce43c79-e26e-16a6-2444-13c811bc49d6\",\n  \"componentId\": \"a8c27391-4c4d-9745-e877-e2837bf8c705\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2995,7 +2995,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ids\": [\n    \"2391d17c-a62b-b95b-9f3a-0f97d0c9c4ed\",\n    \"1e88c04a-1328-8635-a6dd-60c8850aca36\"\n  ]\n}",
+              "raw": "{\n  \"ids\": [\n    \"01af2329-7947-1e09-84c3-1775970093f7\",\n    \"849a4581-8a46-43bc-28c0-8e4e4b114d29\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3217,12 +3217,12 @@
                 {
                   "disabled": false,
                   "key": "page",
-                  "value": "string"
+                  "value": "2116"
                 },
                 {
                   "disabled": false,
                   "key": "pageSize",
-                  "value": "string"
+                  "value": "2116"
                 },
                 {
                   "disabled": false,
@@ -3260,17 +3260,17 @@
                 {
                   "disabled": false,
                   "key": "scope",
-                  "value": "admin"
+                  "value": "read"
                 },
                 {
                   "disabled": false,
                   "key": "from",
-                  "value": "2005-09-12T06:32:37.196Z"
+                  "value": "2011-08-11T09:36:18.199Z"
                 },
                 {
                   "disabled": false,
                   "key": "to",
-                  "value": "2005-09-12T06:32:37.196Z"
+                  "value": "2011-08-11T09:36:18.199Z"
                 },
                 {
                   "disabled": false,
@@ -3404,12 +3404,12 @@
                 {
                   "disabled": false,
                   "key": "page",
-                  "value": "string"
+                  "value": "2116"
                 },
                 {
                   "disabled": false,
                   "key": "pageSize",
-                  "value": "string"
+                  "value": "2116"
                 },
                 {
                   "disabled": false,
@@ -3419,7 +3419,7 @@
                 {
                   "disabled": false,
                   "key": "scope",
-                  "value": "admin"
+                  "value": "read"
                 },
                 {
                   "disabled": false,
@@ -3432,7 +3432,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "gCmMzUmhaUmsC",
+                  "value": "+8S9ClYsFpEjlxiQFNLrnu-1ta17cWQxbn+1MoPICLD:tH6E5MVVfC6DE-VWS-1P5elh4",
                   "key": "name",
                   "description": "(Required) "
                 }
@@ -3942,6 +3942,227 @@
                 }
               }
             }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Create a tenant",
+          "request": {
+            "name": "Create a tenant",
+            "description": {
+              "content": "Inserts a new row in `control.tenants`. Phase 0 only creates the metadata — Phase 1 wires the per-tenant Postgres schema and Phase 2 the per-tenant Neo4j database.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"acme-corp\",\n  \"displayName\": \"Acme Corporation\",\n  \"metadata\": {\n    \"region\": \"us-east-1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List tenants",
+          "request": {
+            "name": "List tenants",
+            "description": {
+              "content": "Returns every tenant row, sorted by creation time (newest first). Filter by status with `?status=active|suspended|pending_delete`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "status",
+                  "value": "pending_delete"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get a tenant by id",
+          "request": {
+            "name": "Get a tenant by id",
+            "description": {},
+            "url": {
+              "path": [
+                "admin",
+                "tenants",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update tenant (display name / status / metadata)",
+          "request": {
+            "name": "Update tenant (display name / status / metadata)",
+            "description": {
+              "content": "Updates the row metadata. Slug is immutable. Status can move active ↔ suspended; pending_delete is set via DELETE and cannot be reversed here.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"string\",\n  \"status\": \"active\",\n  \"metadata\": {\n    \"key_0\": 324,\n    \"key_1\": \"string\",\n    \"key_2\": 8192.282018717378\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Soft-delete a tenant",
+          "request": {
+            "name": "Soft-delete a tenant",
+            "description": {
+              "content": "Sets status = pending_delete. Hard delete (drop schema, drop Neo4j database, delete rows) is a Phase 4 background job. Cannot delete the seeded `default` tenant — that row is the migration backstop for single-tenant deployments.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
           },
           "event": [],
           "protocolProfileBehavior": {

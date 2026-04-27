@@ -7,6 +7,7 @@ import sensible from '@fastify/sensible'
 import { neo4jPlugin } from './plugins/neo4j.js'
 import { postgresPlugin } from './plugins/postgres.js'
 import { authPlugin } from './plugins/auth.js'
+import { tenantContextPlugin } from './plugins/tenant-context.js'
 import { auditCleanupPlugin } from './plugins/audit-cleanup.js'
 import { connectorsPlugin } from './plugins/connectors.js'
 import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
@@ -198,6 +199,12 @@ await postgresPlugin(fastify)
 
 // Auth plugin — must come after DB plugins (uses User nodes) and before routes
 await authPlugin(fastify)
+
+// Tenant context — resolves req.tenant from req.principal on every
+// authenticated request. Must come after authPlugin (depends on
+// req.principal) and before route registration so the onRoute hook can
+// attach the resolveTenant preHandler to every non-public route.
+await tenantContextPlugin(fastify)
 
 // Audit retention — periodic DELETE of audit_log rows older than
 // APPCLOUD_AUDIT_RETENTION_DAYS (default 365). Direct call (not register())

@@ -89,6 +89,18 @@ describe('normaliseScopes', () => {
 })
 
 describe('hasScope (hierarchy)', () => {
+  test('super-admin grants everything including admin', () => {
+    const granted = ['super-admin']
+    expect(hasScope(granted, SCOPES.SUPER_ADMIN)).toBe(true)
+    expect(hasScope(granted, SCOPES.ADMIN)).toBe(true)
+    expect(hasScope(granted, SCOPES.WRITE)).toBe(true)
+    expect(hasScope(granted, SCOPES.READ)).toBe(true)
+  })
+
+  test('admin does not grant super-admin', () => {
+    expect(hasScope(['admin'], SCOPES.SUPER_ADMIN)).toBe(false)
+  })
+
   test('admin grants everything', () => {
     const granted = ['admin']
     expect(hasScope(granted, SCOPES.ADMIN)).toBe(true)

@@ -7,13 +7,15 @@ import { describe, test, expect, beforeEach, afterEach } from '@jest/globals'
 
 function snapshot() {
   return {
-    NODE_ENV:                          process.env.NODE_ENV,
-    APPCLOUD_API_KEY:                  process.env.APPCLOUD_API_KEY,
-    APPCLOUD_ADMIN_API_KEY:            process.env.APPCLOUD_ADMIN_API_KEY,
-    APPCLOUD_API_KEY_FILE:             process.env.APPCLOUD_API_KEY_FILE,
-    APPCLOUD_ADMIN_API_KEY_FILE:       process.env.APPCLOUD_ADMIN_API_KEY_FILE,
-    APPCLOUD_ALLOW_OPEN_AUTH:          process.env.APPCLOUD_ALLOW_OPEN_AUTH,
-    APPCLOUD_AUTH_DISABLED_WARN_MS:    process.env.APPCLOUD_AUTH_DISABLED_WARN_MS,
+    NODE_ENV:                            process.env.NODE_ENV,
+    APPCLOUD_API_KEY:                    process.env.APPCLOUD_API_KEY,
+    APPCLOUD_ADMIN_API_KEY:              process.env.APPCLOUD_ADMIN_API_KEY,
+    APPCLOUD_SUPER_ADMIN_API_KEY:        process.env.APPCLOUD_SUPER_ADMIN_API_KEY,
+    APPCLOUD_API_KEY_FILE:               process.env.APPCLOUD_API_KEY_FILE,
+    APPCLOUD_ADMIN_API_KEY_FILE:         process.env.APPCLOUD_ADMIN_API_KEY_FILE,
+    APPCLOUD_SUPER_ADMIN_API_KEY_FILE:   process.env.APPCLOUD_SUPER_ADMIN_API_KEY_FILE,
+    APPCLOUD_ALLOW_OPEN_AUTH:            process.env.APPCLOUD_ALLOW_OPEN_AUTH,
+    APPCLOUD_AUTH_DISABLED_WARN_MS:      process.env.APPCLOUD_AUTH_DISABLED_WARN_MS,
   }
 }
 function restore(s) {
@@ -50,8 +52,10 @@ describe('auth-disabled fallback', () => {
     snap = snapshot()
     delete process.env.APPCLOUD_API_KEY
     delete process.env.APPCLOUD_ADMIN_API_KEY
+    delete process.env.APPCLOUD_SUPER_ADMIN_API_KEY
     delete process.env.APPCLOUD_API_KEY_FILE
     delete process.env.APPCLOUD_ADMIN_API_KEY_FILE
+    delete process.env.APPCLOUD_SUPER_ADMIN_API_KEY_FILE
     delete process.env.APPCLOUD_ALLOW_OPEN_AUTH
     process.env.APPCLOUD_AUTH_DISABLED_WARN_MS = '0'        // disable the periodic timer in tests
   })

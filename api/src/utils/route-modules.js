@@ -28,6 +28,7 @@ import cmdbRoutes                     from '../routes/cmdb.js'
 import aiRoutes                       from '../routes/ai.js'
 import adminApiKeyRoutes              from '../routes/admin-api-keys.js'
 import adminAuditCleanupRoutes        from '../routes/admin-audit-cleanup.js'
+import adminTenantRoutes              from '../routes/admin-tenants.js'
 
 export const ROUTE_MODULES = [
   [applicationRoutes,            { prefix: '/applications' }],
@@ -51,6 +52,7 @@ export const ROUTE_MODULES = [
   [cmdbRoutes,                   { prefix: '/cmdb'         }],
   [adminApiKeyRoutes,            { prefix: '/admin'        }],
   [adminAuditCleanupRoutes,      { prefix: '/admin'        }],
+  [adminTenantRoutes,            { prefix: '/admin'        }],
   // aiRoutes last — server.js registers them after the aiPlugin decorate
   // step; the registration list keeps the same relative order so the
   // exported spec matches the live server byte-for-byte.

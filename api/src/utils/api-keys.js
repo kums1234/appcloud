@@ -23,12 +23,17 @@ const KEY_PREFIX = 'ak_'
 const RANDOM_BYTES = 32
 
 export const SCOPES = Object.freeze({
-  ADMIN: 'admin',
-  WRITE: 'write',
-  READ:  'read',
+  // super-admin is the cross-tenant scope: tenant CRUD, key issuance for
+  // any tenant, cross-tenant ops queries. Keys with this scope are NOT
+  // bound to a single tenant in the request flow — the tenantContext
+  // preHandler resolves them differently (see plugins/tenant-context.js).
+  SUPER_ADMIN: 'super-admin',
+  ADMIN:       'admin',
+  WRITE:       'write',
+  READ:        'read',
 })
 
-const SCOPE_RANK = { admin: 3, write: 2, read: 1 }
+const SCOPE_RANK = { 'super-admin': 4, admin: 3, write: 2, read: 1 }
 const VALID_SCOPES = new Set(Object.values(SCOPES))
 
 export function generateKey() {
