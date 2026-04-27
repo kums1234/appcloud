@@ -15,30 +15,67 @@ import Fastify from 'fastify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiSrc    = path.resolve(__dirname, '..', '..')
 
+// SQL the POST handler issues that doesn't need a queued response —
+// transaction control, DDL, and the schema_migrations bookkeeping
+// INSERT. The stub passes these through with `{ rows: [] }` and does
+// not consume from the test's queue, so tests can queue only the
+// "interesting" results (gen_random_uuid, INSERT RETURNING, lookups).
+const PASSTHROUGH_RE =
+  /^\s*(?:BEGIN|COMMIT|ROLLBACK|SET\s+LOCAL|CREATE\s+(?:SCHEMA|TABLE|INDEX))/i
+const SCHEMA_MIGRATIONS_INSERT_RE =
+  /^\s*INSERT\s+INTO\s+control\.schema_migrations/i
+
+// Queue entries can be plain rows arrays *or* `{ __throw: Error }` to
+// inject an error at a specific position in the sequence. This is how
+// tests reproduce a 23505 unique_violation on the INSERT RETURNING
+// step without affecting the BEGIN that comes before it.
+const errResult = (err) => ({ __throw: err })
+
 function makeStubPg() {
   const state = {
     queries: [],
-    // Keyed responses — the handler runs multiple queries (existence
-    // probe, then the mutating one); we step through this list in
-    // order. Single-query tests can use `nextResult` for clarity.
-    queue:        [],
+    queue:        [],          // shifted by non-passthrough queries
     nextResult:   [],
-    nextError:    null,
+    nextError:    null,        // legacy, applies to the very next pg.query
   }
+
+  const consume = () => {
+    const next = state.queue.length > 0 ? state.queue.shift() : state.nextResult
+    if (next && next.__throw) throw next.__throw
+    return next
+  }
+
+  const poolClientQuery = async (sql, params) => {
+    state.queries.push({ sql, params })
+    if (PASSTHROUGH_RE.test(sql) || SCHEMA_MIGRATIONS_INSERT_RE.test(sql)) {
+      return { rows: [] }
+    }
+    return { rows: consume() }
+  }
+
+  const pgQuery = async (sql, params) => {
+    state.queries.push({ sql, params })
+    if (state.nextError) {
+      const e = state.nextError
+      state.nextError = null
+      throw e
+    }
+    return consume()
+  }
+
   return {
     state,
     pg: {
-      pool:        {},
-      query:       async (sql, params) => {
-        state.queries.push({ sql, params })
-        if (state.nextError) {
-          const e = state.nextError
-          state.nextError = null
-          throw e
-        }
-        if (state.queue.length > 0) return state.queue.shift()
-        return state.nextResult
+      pool: {
+        // POST /admin/tenants checks out a client to bundle row-insert
+        // and schema provisioning into one transaction. The fake client
+        // shares state with pg.query so assertions work either way.
+        connect: async () => ({
+          query:   poolClientQuery,
+          release: () => {},
+        }),
       },
+      query:       pgQuery,
       audit:       async () => {},
       ping:        async () => true,
       auditBuffer: { pending: () => 0, stats: () => ({}) },
@@ -90,7 +127,9 @@ describe('POST /admin/tenants', () => {
   })
 
   test('returns 201 + the new row when slug, displayName valid', async () => {
-    // Two queries: gen_random_uuid() then INSERT.
+    // gen_random_uuid → INSERT row → information_schema (no row) → sha
+    // lookup (no row). The remaining DDL/SET/INSERT-bookkeeping calls
+    // are passthrough and don't consume queue entries.
     stub.state.queue = [
       [{ id: '11111111-1111-1111-1111-111111111111' }],
       [{
@@ -144,10 +183,78 @@ describe('POST /admin/tenants', () => {
     expect(r.statusCode).toBe(400)
   })
 
+  test('provisions the tenant schema on POST: CREATE SCHEMA + applies 001 + bookkeeping INSERT', async () => {
+    stub.state.queue = [
+      [{ id: '33333333-3333-3333-3333-333333333333' }],
+      [{
+        id: '33333333-3333-3333-3333-333333333333',
+        slug: 'beta-corp',
+        display_name: 'Beta Corp',
+        status: 'active',
+        schema_name: 'tenant_33333333333333333333333333333333',
+        neo4j_database: 'tenant_33333333333333333333333333333333',
+        created_at: new Date().toISOString(),
+        created_by: 'anonymous',
+        metadata: {},
+      }],
+      // information_schema.schemata lookup → schema does not exist yet
+      [],
+      // schema_migrations sha lookup for the one migration → no prior application
+      [],
+    ]
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/tenants',
+      payload: { slug: 'beta-corp', displayName: 'Beta Corp' },
+    })
+    expect(r.statusCode).toBe(201)
+    const sqls = stub.state.queries.map(q => q.sql)
+    // Bracketing transaction.
+    expect(sqls[0]).toMatch(/^BEGIN/)
+    expect(sqls.at(-1)).toMatch(/^COMMIT/)
+    // Schema-provisioning fingerprint.
+    expect(sqls.some(s => /CREATE SCHEMA "tenant_33333333333333333333333333333333"/.test(s))).toBe(true)
+    expect(sqls.some(s => /SET LOCAL search_path = "tenant_33333333333333333333333333333333"/.test(s))).toBe(true)
+    // The runner records its work in control.schema_migrations.
+    expect(sqls.some(s => /INSERT INTO control\.schema_migrations/.test(s))).toBe(true)
+  })
+
+  test('rolls back the row insert when schema provisioning fails', async () => {
+    stub.state.queue = [
+      [{ id: '44444444-4444-4444-4444-444444444444' }],
+      [{
+        id: '44444444-4444-4444-4444-444444444444',
+        slug: 'gamma',
+        display_name: 'Gamma',
+        status: 'active',
+        schema_name: 'tenant_44444444444444444444444444444444',
+        neo4j_database: 'tenant_44444444444444444444444444444444',
+        created_at: new Date().toISOString(),
+        created_by: 'anonymous',
+        metadata: {},
+      }],
+      // information_schema lookup throws — simulates a permission error
+      // while the runner is checking whether the schema exists.
+      errResult(new Error('permission denied for schema control')),
+    ]
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/tenants',
+      payload: { slug: 'gamma', displayName: 'Gamma' },
+    })
+    expect(r.statusCode).toBe(500)
+    const sqls = stub.state.queries.map(q => q.sql)
+    expect(sqls.some(s => /^ROLLBACK/.test(s))).toBe(true)
+    expect(sqls.some(s => /^COMMIT/.test(s))).toBe(false)
+  })
+
   test('translates Postgres unique_violation (23505) into 409 Conflict', async () => {
-    // First call (gen_random_uuid) succeeds; second call (INSERT) throws.
-    stub.state.queue = [[{ id: '22222222-2222-2222-2222-222222222222' }]]
-    stub.state.nextError = Object.assign(new Error('duplicate'), { code: '23505' })
+    // gen_random_uuid succeeds; INSERT RETURNING throws (slug collision).
+    // Passthrough SQL (BEGIN, etc.) doesn't consume from queue, so the
+    // first interesting query is gen_random_uuid and the second is the
+    // INSERT — exactly two queue entries.
+    stub.state.queue = [
+      [{ id: '22222222-2222-2222-2222-222222222222' }],
+      errResult(Object.assign(new Error('duplicate'), { code: '23505' })),
+    ]
     const r = await fastify.inject({
       method: 'POST', url: '/admin/tenants',
       payload: { slug: 'dup', displayName: 'Dup' },

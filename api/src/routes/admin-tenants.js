@@ -23,7 +23,15 @@
 // Hard delete (DROP DATABASE / DROP SCHEMA / DELETE rows) is a Phase 4
 // concern; this file ships soft-delete only.
 
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { StandardErrorResponses } from '../schemas/openapi.js'
+import { provisionTenantSchema } from '../utils/tenant-schema-runner.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Per-tenant migrations live next to the source. Phase 1a applies the
+// minimal `001-base-tables.sql`; Phase 1b will add more.
+const TENANT_MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations', 'tenant-schema')
 
 const SLUG_RE     = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 const RESERVED_SLUGS = new Set(['admin', 'system', 'api'])
@@ -98,7 +106,7 @@ export default async function adminTenantRoutes(fastify) {
     schema: {
       tags:        ['Admin'],
       summary:     'Create a tenant',
-      description: 'Inserts a new row in `control.tenants`. Phase 0 only creates the metadata — Phase 1 wires the per-tenant Postgres schema and Phase 2 the per-tenant Neo4j database.',
+      description: 'Inserts a row in `control.tenants` and provisions the matching Postgres schema (`tenant_<id>`) by applying every per-tenant migration in api/src/migrations/tenant-schema/. Both happen in a single transaction so failure to provision the schema rolls back the row insert. Phase 2 will add the per-tenant Neo4j database.',
       body:        CreateBodySchema,
       response: {
         201: TenantRowSchema,
@@ -116,17 +124,24 @@ export default async function adminTenantRoutes(fastify) {
       return reply.badRequest(`slug '${slug}' is reserved`)
     }
 
-    // Two-step insert: gen the UUID first (so we can derive schema_name and
-    // neo4j_database from it), then insert. Doing it in one INSERT with
-    // gen_random_uuid() in a CTE is possible but harder to read; the
-    // performance difference is irrelevant here.
-    let rows
+    // Provisioning is two coupled side-effects (the row insert and the
+    // schema creation+migration), so we co-locate them on a single
+    // checked-out connection. Postgres DDL is transactional, so a failure
+    // mid-migration rolls back the schema and leaves no half-created
+    // state. The tenants-row INSERT runs in the same transaction.
+    let row
+    const client = await fastify.pg.pool.connect()
     try {
-      const idRows = await fastify.pg.query(`SELECT gen_random_uuid() AS id`)
+      await client.query('BEGIN')
+
+      // Generate id first so schema_name + neo4j_database are derivable
+      // before the INSERT. (Could also do this with a CTE, but the
+      // intermediate id is needed by provisionTenantSchema below.)
+      const { rows: idRows } = await client.query(`SELECT gen_random_uuid() AS id`)
       const id = idRows[0].id
       const { schemaName, neo4jDatabase } = deriveTenantNames(id)
 
-      rows = await fastify.pg.query(`
+      const { rows: insertRows } = await client.query(`
         INSERT INTO control.tenants (id, slug, display_name, status, schema_name, neo4j_database, created_by, metadata)
         VALUES ($1, $2, $3, 'active', $4, $5, $6, $7::jsonb)
         RETURNING id, slug, display_name, status, schema_name, neo4j_database,
@@ -140,16 +155,37 @@ export default async function adminTenantRoutes(fastify) {
         req.principal?.name || 'unknown',
         JSON.stringify(metadata || {}),
       ])
+      row = insertRows[0]
+
+      // Provision the schema on the same client so CREATE SCHEMA + the
+      // initial migrations share the outer transaction with the row
+      // insert. A failure mid-migration rolls everything back (no
+      // orphan schema, no orphan tenant row).
+      await provisionTenantSchema({
+        client,
+        schemaName,
+        migrationsDir:  TENANT_MIGRATIONS_DIR,
+        log:            req.log,
+      })
+
+      await client.query('COMMIT')
     } catch (err) {
+      try { await client.query('ROLLBACK') } catch {}
       if (String(err.code) === '23505') {
         return reply.conflict(`tenant slug '${slug}' already exists`)
       }
-      throw err
+      req.log.error({ err }, '[admin-tenants] provisioning failed — tenant insert rolled back')
+      return reply.code(500).send({
+        error:   'Internal Server Error',
+        message: `tenant provisioning failed: ${err.message}`,
+      })
+    } finally {
+      client.release()
     }
 
     invalidateTenantCache()
     reply.code(201)
-    return rows[0]
+    return row
   })
 
   // ── GET /admin/tenants ───────────────────────────────────────────────────

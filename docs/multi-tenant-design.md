@@ -1,6 +1,6 @@
 # Multi-tenant design
 
-**Status:** Accepted — Option D (§3). Phase 0 implementation in progress.
+**Status:** Accepted — Option D (§3). Phase 0 shipped (commit `beb6f85`); Phase 1a shipped.
 **Branch:** `feature/multi-tenant-design` (forked from `release/0.1.0.0`).
 **Author:** drafted with Claude.
 
@@ -416,8 +416,11 @@ Both ([docs/openapi.yaml](docs/openapi.yaml), [docs/api-postman-collection.json]
 
 Once Option C (or alternative) is confirmed, suggested phasing:
 
-1. **Phase 0 — control plane.** `control` schema, `control.tenants`, `control.api_keys` with `tenant_id`, `tenantContext` preHandler (sets `search_path` per request), super-admin scope, `/admin/tenants*` routes. Existing tables stay in `public` for now; default tenant seeded; auth binds existing keys to default. No data movement yet.
-2. **Phase 1 — Postgres schema-per-tenant cutover.** Build the per-schema migration runner. Move existing data tables from `public` into `tenant_<default-id>` via `ALTER TABLE ... SET SCHEMA`. Application pool default `search_path` switches to `control`. Existing routes work unchanged because the preHandler now sets `search_path` to the tenant's schema.
+1. **Phase 0 — control plane.** `control` schema, `control.tenants`, `control.api_keys` with `tenant_id`, `tenantContext` preHandler (sets `search_path` per request), super-admin scope, `/admin/tenants*` routes. Existing tables stay in `public` for now; default tenant seeded; auth binds existing keys to default. No data movement yet. **— Shipped.**
+2. **Phase 1 — Postgres schema-per-tenant cutover.** Sub-phased to keep individual changes reviewable:
+   - **1a — schema provisioning.** Per-schema migration runner (`api/src/utils/tenant-schema-runner.js`), `control.schema_migrations` tracking table, tenant-schema migration template starting with a minimal `001-base-tables.sql` (integrations + cloud_accounts), provisioning hook in POST `/admin/tenants` that runs CREATE SCHEMA + applyMigrations inside the same transaction as the row insert (atomic on rollback). `tenantContext` 503s any request bound to a tenant whose `schema_name` is not `public` so the failure mode is visible until 1b lands. **— Shipped.**
+   - **1b — per-request search_path + default-tenant cutover.** Refactor `fastify.pg` to expose a tenant-scoped query path that opens a checked-out connection, issues `SET LOCAL search_path = <tenant_schema>, public`, and runs the request's queries on it. Switch route handlers to use that path. Move existing data tables from `public` into `tenant_<default-id>` via `ALTER TABLE … SET SCHEMA`; update the default tenant's `schema_name`. Application pool's default `search_path` becomes `control`. The 1a 503 guard is removed.
+   - **1c — template expansion.** Extend the per-tenant template to cover the full table set listed in §6 (sync_jobs, audit_log + partitions, terraform_imports, cmdb_assessment_*, discovery_schedule, ai_jobs, otel_*). Done as additional numbered migration files (`002-…`, `003-…`) so existing tenants pick them up at startup re-migration.
 3. **Phase 2 — Neo4j per-tenant DBs.** Per-tenant `CREATE DATABASE`, plugin-enforced `req.neo4j()`, one-shot data move for the default tenant. Linter rule + CI gate that no `driver.session(` lives outside the plugin.
 4. **Phase 3 — Scanner / scheduler routing.** Scheduler iterates tenants; each scanner accepts a session selector. Audit-log + metric labels gain `tenant_id`.
 5. **Phase 4 — Tenant lifecycle ops.** Suspend/delete flows, hard-delete runbook, per-tenant migration status endpoint.

@@ -28,19 +28,34 @@ const TENANT_DEFAULT = {
   created_by:     'bootstrap',
   metadata:       {},
 }
+// Acme uses schema='public' in the test fixtures so the principal-bound
+// resolution + super-admin override tests reach the handler. A dedicated
+// fixture (TENANT_NEW below) covers the Phase 1a 503 guard for tenants
+// whose schema differs from 'public'.
 const TENANT_ACME = {
   id:             '00000000-0000-0000-0000-000000000002',
   slug:           'acme-corp',
   display_name:   'Acme Corp',
   status:         'active',
-  schema_name:    'tenant_acme',
+  schema_name:    'public',
   neo4j_database: 'tenant_acme',
   created_at:     new Date().toISOString(),
   created_by:     'admin',
   metadata:       {},
 }
-const TENANT_SUSPENDED = { ...TENANT_ACME, id: '00000000-0000-0000-0000-000000000003', slug: 'paused', status: 'suspended' }
-const TENANT_DOOMED    = { ...TENANT_ACME, id: '00000000-0000-0000-0000-000000000004', slug: 'doomed', status: 'pending_delete' }
+const TENANT_NEW = {
+  id:             '00000000-0000-0000-0000-000000000005',
+  slug:           'new-tenant',
+  display_name:   'New tenant (Phase 1b pending)',
+  status:         'active',
+  schema_name:    'tenant_new',
+  neo4j_database: 'tenant_new',
+  created_at:     new Date().toISOString(),
+  created_by:     'admin',
+  metadata:       {},
+}
+const TENANT_SUSPENDED = { ...TENANT_ACME, id: '00000000-0000-0000-0000-000000000003', slug: 'paused', schema_name: 'tenant_paused', status: 'suspended' }
+const TENANT_DOOMED    = { ...TENANT_ACME, id: '00000000-0000-0000-0000-000000000004', slug: 'doomed', schema_name: 'tenant_doomed', status: 'pending_delete' }
 
 function makeStubPg(rows) {
   return {
@@ -71,7 +86,7 @@ async function build({ tenantRows, principal } = {}) {
   const sensible = (await import('@fastify/sensible')).default
   await fastify.register(sensible)
 
-  fastify.decorate('pg', makeStubPg(tenantRows || [TENANT_DEFAULT, TENANT_ACME, TENANT_SUSPENDED, TENANT_DOOMED]))
+  fastify.decorate('pg', makeStubPg(tenantRows || [TENANT_DEFAULT, TENANT_ACME, TENANT_NEW, TENANT_SUSPENDED, TENANT_DOOMED]))
 
   const { authPlugin } = await import(path.join(apiSrc, 'plugins/auth.js'))
   await authPlugin(fastify)
@@ -114,7 +129,9 @@ describe('tenantContextPlugin — principal-bound resolution', () => {
     expect(r.statusCode).toBe(200)
     const body = JSON.parse(r.body)
     expect(body.tenant.slug).toBe('acme-corp')
-    expect(body.tenant.schemaName).toBe('tenant_acme')
+    // schema_name is 'public' in the fixture (Phase 1a test setup);
+    // a real Phase 1+ tenant would have schema='tenant_<id>'.
+    expect(body.tenant.schemaName).toBe('public')
     expect(body.tenant.neo4jDatabase).toBe('tenant_acme')
   })
 
@@ -175,6 +192,45 @@ describe('tenantContextPlugin — super-admin override', () => {
     })
     expect(r.statusCode).toBe(404)
     expect(r.body).toMatch(/not found/)
+  })
+})
+
+describe('tenantContextPlugin — Phase 1a non-default-tenant guard', () => {
+  test('non-default tenant 503s with a Phase-1b explanation', async () => {
+    const fastify = await build({
+      principal: {
+        id: 'k', name: 'tenant-key', scopes: ['admin'], prefix: 'ak_aa',
+        // TENANT_NEW.schema_name === 'tenant_new', NOT 'public' — triggers
+        // the Phase 1a guard.
+        tenantId: TENANT_NEW.id,
+      },
+    })
+    try {
+      const r = await fastify.inject({ method: 'GET', url: '/_probe' })
+      expect(r.statusCode).toBe(503)
+      expect(r.body).toMatch(/data isolation is pending/)
+      expect(r.body).toMatch(/Phase 1b/)
+    } finally {
+      await fastify.close()
+    }
+  })
+
+  test('default tenant (schema=public) passes through to the handler', async () => {
+    const fastify = await build({
+      principal: {
+        id: 'k', name: 'tenant-key', scopes: ['admin'], prefix: 'ak_aa',
+        tenantId: TENANT_DEFAULT.id,
+      },
+    })
+    try {
+      const r = await fastify.inject({ method: 'GET', url: '/_probe' })
+      expect(r.statusCode).toBe(200)
+      const body = JSON.parse(r.body)
+      expect(body.tenant.slug).toBe('default')
+      expect(body.tenant.schemaName).toBe('public')
+    } finally {
+      await fastify.close()
+    }
   })
 })
 

@@ -184,6 +184,27 @@ export async function tenantContextPlugin(fastify) {
           message: `tenant '${tenant.slug}' is pending deletion`,
         })
       }
+      // Phase 1a guard: data routes only work for the default tenant
+      // (whose schema is still `public`). Non-default tenants exist as
+      // metadata + provisioned schemas, but the per-request search_path
+      // mechanism that makes their data reachable lands in Phase 1b.
+      // Until then, route requests to non-default tenants 503 with a
+      // clear message so the failure mode is visible rather than
+      // mixing tenants' data via the wrong search_path.
+      //
+      // Control-plane routes (/admin/tenants*) are super-admin scope
+      // and don't need a tenant resolved — they bypass this branch
+      // because the super-admin-with-no-header path returned earlier
+      // without setting tenant.
+      if (tenant.schemaName !== 'public') {
+        return reply.code(503).send({
+          error: 'Service Unavailable',
+          message:
+            `tenant '${tenant.slug}' data isolation is pending — Phase 1b will wire ` +
+            `the per-request search_path. The tenant exists and its schema is provisioned, ` +
+            `but data routes will not return its data until that work lands.`,
+        })
+      }
       req.tenant = tenant
     }
     // No tenant resolved (super-admin without header, no principal.tenantId):

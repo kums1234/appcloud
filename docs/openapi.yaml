@@ -4645,9 +4645,11 @@ paths:
       summary: Create a tenant
       tags:
         - Admin
-      description: Inserts a new row in `control.tenants`. Phase 0 only creates the
-        metadata — Phase 1 wires the per-tenant Postgres schema and Phase 2 the
-        per-tenant Neo4j database.
+      description: Inserts a row in `control.tenants` and provisions the matching
+        Postgres schema (`tenant_<id>`) by applying every per-tenant migration
+        in api/src/migrations/tenant-schema/. Both happen in a single
+        transaction so failure to provision the schema rolls back the row
+        insert. Phase 2 will add the per-tenant Neo4j database.
       requestBody:
         required: true
         content:
