@@ -146,7 +146,16 @@ export async function schedulerPlugin(fastify) {
       // AWS+Azure+GCP no longer serialize at 30s+20s+40s = 90s per
       // tick. The Promise.all aggregates each provider's local
       // grandTotal/errors back into the outer accumulators.
-      const aiBaseUrl = `http://localhost:${process.env.PORT || 3000}`
+      // Base URL for the in-process discovery routes. Default points
+      // at this same pod's loopback (PORT env). Override via
+      // APPCLOUD_INTERNAL_BASE_URL when:
+      //   - The API binds to a non-default port the scheduler can't
+      //     guess (uncommon — `PORT` should be set consistently).
+      //   - You want the scheduler to call a *different* replica's
+      //     handler (typically a bad idea — the leader-lock already
+      //     gates one tick per replica via Postgres advisory lock).
+      const aiBaseUrl = process.env.APPCLOUD_INTERNAL_BASE_URL
+        || `http://localhost:${process.env.PORT || 3000}`
       // Per-tick request id — the scheduler isn't a request handler so
       // there's no inbound `req.id`; generate one and attach it to
       // every internal fetch + log line so a single tick's work is
@@ -338,21 +347,34 @@ export async function schedulerPlugin(fastify) {
     await updateSchedule({ next_run_at: new Date(Date.now() + intervalMs) })
 
     timer = setInterval(async () => {
-      // Re-read schedule each tick so interval changes apply without restart
-      const current = await getSchedule()
-      if (!current?.enabled) {
-        fastify.log.info('[Scheduler] Disabled — stopping timer')
-        clearInterval(timer); timer = null
-        return
+      // Top-level try/catch so a thrown error from getSchedule, the
+      // recursive startTimer(), or runScheduledScan never bubbles up
+      // as an unhandled rejection — Node would log it but the next
+      // tick still fires, just with no structured context. With this
+      // in place the operator gets `[Scheduler] tick failed` plus the
+      // error code on every transient blip.
+      try {
+        // Re-read schedule each tick so interval changes apply without restart
+        const current = await getSchedule()
+        if (!current?.enabled) {
+          fastify.log.info('[Scheduler] Disabled — stopping timer')
+          clearInterval(timer); timer = null
+          return
+        }
+        // If interval changed, restart timer with new interval
+        const currentMs = current.interval_mins * 60 * 1000
+        if (Math.abs(currentMs - intervalMs) > 1000) {
+          fastify.log.info(`[Scheduler] Interval changed to ${current.interval_mins}m — restarting timer`)
+          await startTimer()
+          return
+        }
+        await runScheduledScan()
+      } catch (err) {
+        fastify.log.warn(
+          { err: err.message, code: err.code },
+          '[Scheduler] periodic tick failed — next tick will retry',
+        )
       }
-      // If interval changed, restart timer with new interval
-      const currentMs = current.interval_mins * 60 * 1000
-      if (Math.abs(currentMs - intervalMs) > 1000) {
-        fastify.log.info(`[Scheduler] Interval changed to ${current.interval_mins}m — restarting timer`)
-        startTimer()
-        return
-      }
-      await runScheduledScan()
     }, intervalMs)
   }
 

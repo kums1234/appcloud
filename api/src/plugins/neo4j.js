@@ -143,13 +143,21 @@ export async function neo4jPlugin(fastify) {
     'CREATE INDEX IF NOT EXISTS FOR (c:Component) ON (c.name)',
   ]
 
-  // Run index creation in parallel, best-effort (never block startup).
-  // Skipped when Neo4j is unreachable (stub mode) since `write()` would
-  // throw NEO4J_UNAVAILABLE for every index.
+  // Run index creation in waves of 4. The previous shape fired all
+  // ~21 statements in a single Promise.allSettled, which works but
+  // briefly creates a 21-deep connection burst against the driver's
+  // pool right at startup — every other operation queues behind it.
+  // Waves of 4 cap the burst at the typical pool's burst capacity
+  // and add ~milliseconds of total time, which is invisible.
+  // Best-effort: never blocks startup on a transient index failure.
+  const INDEX_BATCH_SIZE = 4
   if (connected) {
     try {
-      await Promise.allSettled(indexes.map(idx => write(idx)))
-      fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes)`)
+      for (let i = 0; i < indexes.length; i += INDEX_BATCH_SIZE) {
+        const wave = indexes.slice(i, i + INDEX_BATCH_SIZE)
+        await Promise.allSettled(wave.map(idx => write(idx)))
+      }
+      fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes, batched in waves of ${INDEX_BATCH_SIZE})`)
     } catch (err) {
       fastify.log.warn(`Neo4j index creation: ${err.message}`)
     }

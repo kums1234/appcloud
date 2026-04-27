@@ -386,13 +386,22 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
 
   test('expiresAt: future expiry works, past expiry rejects, NULL = never', async () => {
     // Create three keys spanning the expiry-state matrix.
+    //
+    // Future-expiry timestamp: pin to "now + 1 hour" rather than +60s.
+    // The +60s window was too tight against clock skew on slow CI
+    // runners — the cache TTL alone is 50ms and the test does several
+    // injections + DB roundtrips before reading the key back. An hour
+    // is well outside any realistic skew + the rest of the test runs
+    // synchronously enough that the key is still in its valid window
+    // when the assertions fire.
+    const ONE_HOUR_MS = 60 * 60 * 1000
     const futureCreate = await fastify.inject({
       method: 'POST', url: '/admin/api-keys',
       headers: { 'x-api-key': bootstrapAdminKey, 'content-type': 'application/json' },
       payload: JSON.stringify({
         name:      'expiry-future',
         scopes:    ['read'],
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),    // +60s
+        expiresAt: new Date(Date.now() + ONE_HOUR_MS).toISOString(),
       }),
     })
     expect(futureCreate.statusCode).toBe(201)

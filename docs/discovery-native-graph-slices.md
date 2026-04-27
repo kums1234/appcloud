@@ -48,42 +48,53 @@ plan rests on.
   `monitor-query` (VM Insights), `identity` (auth). Package-json
   pruning deferred to slice 5.
 
-## Slice 2 — GCP via Cloud Asset Inventory
+## Slice 2 — GCP via Cloud Asset Inventory · **DONE (primary + IAM-policy supplement)**
 
-- **Primary**: `cloudasset.assets.listAssets` — single paginated call
-  across the configured project(s). File:
+- **Primary** · *shipped*: `cloudasset.assets.listAssets` — single
+  paginated call across the configured project(s). File:
   `api/src/routes/discovery.gcp.js`. Drops `@google-cloud/compute`,
   `@google-cloud/container`, `@google-cloud/resource-manager`, and the
   `googleapis` sqladmin / run calls in `discovery.js`.
-- **Supplement (to be scoped during implementation)**:
-  `api/src/routes/discovery.gcp.supplement.js`. Candidate layers —
-  VPC flow logs (observed flows, analog of Azure VM Insights) and
-  IAM Policy Analyzer (if we need IAM-edge fidelity CAI's
-  `iamPolicy` view misses). Keep minimal until the coverage diff
-  surfaces a real gap.
+- **Supplement** · *partially shipped*:
+  `api/src/routes/discovery.gcp.supplement.js`.
+    - *shipped*: **gcp-iam-policy** (CAI `IAM_POLICY` content type) —
+      principal binding edges, public-via-IAM detection.
+    - *scoped, not shipped*: **VPC flow logs** (observed flows,
+      analog of Azure VM Insights). Tracked but not implemented;
+      adds runtime cost via Logging API quota and would need a
+      tenant-side enable step.
+    - *scoped, not shipped*: **IAM Policy Analyzer** for IAM-edge
+      fidelity beyond CAI's `iamPolicy` view. Keeping minimal until
+      the coverage diff surfaces a real gap.
 - **Coverage audit deliverable**: `docs/gcp-cloud-asset-coverage.md`
   — per-type SDK field → CAI availability → decision, same structure
   as Azure's.
 - **Prereqs**: caller service-account needs
-  `cloudasset.assets.listAssets` on the org/project.
+  `cloudasset.assets.listAssets` on the org/project (and
+  `cloudasset.assets.listIamPolicy` for the IAM supplement).
 - Edge-write policy: continue Option A dual-write.
 
-## Slice 3 — AWS via Config aggregator
+## Slice 3 — AWS via Config aggregator · **DONE (primary; supplements scoped)**
 
-- **Primary**: Config aggregator query across regions/accounts. File:
-  `api/src/routes/discovery.aws.js`. Drops all 7 `@aws-sdk/client-*`
-  discovery-path SDKs (ec2, rds, lambda, eks, ecs, elb-v2,
-  elasticache). Retains `@aws-sdk/client-s3` (used by
+- **Primary** · *shipped*: Config aggregator query across regions/accounts.
+  File: `api/src/routes/discovery.aws.js`. Drops all 7
+  `@aws-sdk/client-*` discovery-path SDKs (ec2, rds, lambda, eks, ecs,
+  elb-v2, elasticache). Retains `@aws-sdk/client-s3` (used by
   `iac-state-backend/backends/s3.js`, not discovery).
 - **Coverage caveat**: not every AWS resource type is Config-supported.
   The coverage doc (`docs/aws-config-aggregator-coverage.md`) must
   list the gap set and, for each missing type, a decision:
   enable "advanced resource types" in Config (if supported there), add
   a targeted SDK fallback, or confirm the type is unused.
-- **Supplement (to be scoped during implementation)**:
-  `api/src/routes/discovery.aws.supplement.js`. Likely layers — VPC
-  flow logs (observed flows), CloudWatch Metric Insights (if we want
-  live utilisation edges).
+- **Supplement** · *scoped, not shipped*:
+  `api/src/routes/discovery.aws.supplement.js`. Candidate layers —
+    - **VPC flow logs** (observed flows): runtime cost via
+      CloudWatch Logs Insights quota; needs a per-account enable step.
+    - **IAM Access Analyzer** (effective-permission edges beyond what
+      Config exposes): scoped, no implementation file yet.
+    - **CloudWatch Metric Insights** (live utilisation edges): scoped,
+      no implementation file yet.
+  Keep minimal until the coverage diff surfaces a real gap.
 - **Prereqs**: Config enabled per account + an aggregator. Documented
   in secrets_setup.md's new Prerequisites section (slice 4).
 - Edge-write policy: continue Option A dual-write.
