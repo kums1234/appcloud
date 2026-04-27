@@ -16,6 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { autoTagRoute } from '../src/utils/openapi-tags.js'
 import { registerAllRoutes } from '../src/utils/route-modules.js'
+import { metricsPlugin } from '../src/plugins/metrics.js'
 import { withDeterministicGlobals } from './_lib/with-deterministic-globals.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -66,6 +67,11 @@ await fastify.register(swaggerUI, { routePrefix: '/docs' })
 
 // Register every route module — same list (and order) the live server uses.
 await registerAllRoutes(fastify)
+
+// metricsPlugin registers /metrics. Server.js handles this as a direct
+// plugin call rather than a route module; mirror that here so the spec
+// lists the same surface the live server exposes.
+await metricsPlugin(fastify)
 
 // Health endpoints — match server.js
 fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },

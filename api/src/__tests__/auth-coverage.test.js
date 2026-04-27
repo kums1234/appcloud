@@ -27,6 +27,12 @@ const ALLOWED_PUBLIC_ROUTES = new Set([
   'HEAD /',
   'GET /health',
   'HEAD /health',
+  // /metrics — Prometheus exposition. Standard practice is unauthed
+  // scrape over the cluster network; access control belongs at the
+  // network-policy layer, not as an X-API-Key header on the scraper.
+  // See plugins/metrics.js header for the rationale.
+  'GET /metrics',
+  'HEAD /metrics',
 ])
 
 function hasAuthPreHandler(routeOptions, auth) {
@@ -36,15 +42,15 @@ function hasAuthPreHandler(routeOptions, auth) {
   return false
 }
 
-function hasAdminPreHandler(routeOptions, requireAdmin) {
+function hasAdminPreHandler(routeOptions, adminHandler) {
   const ph = routeOptions.preHandler
-  if (ph === requireAdmin) return true
-  if (Array.isArray(ph) && ph.includes(requireAdmin)) return true
+  if (ph === adminHandler) return true
+  if (Array.isArray(ph) && ph.includes(adminHandler)) return true
   return false
 }
 
 function isAdminRoute(routeOptions) {
-  return routeOptions.config?.requireAdmin === true
+  return routeOptions.config?.scope === 'admin'
 }
 
 function isPublicByConvention(routeOptions) {
@@ -92,7 +98,7 @@ async function buildAndCollect() {
       url:           routeOptions.url,
       hasAuth:       hasAuthPreHandler(routeOptions, fastify.authenticate),
       isAdmin:       isAdminRoute(routeOptions),
-      hasAdminGuard: hasAdminPreHandler(routeOptions, fastify.requireAdmin),
+      hasAdminGuard: hasAdminPreHandler(routeOptions, fastify.scopeHandlers?.admin),
       isPublic:      isPublicByConvention(routeOptions),
       attachedScope: scopeHandler?.[0] ?? null,
       resolvedScope: routeOptions.config?._resolvedScope ?? null,
@@ -124,6 +130,11 @@ async function buildAndCollect() {
     const m = await import(path.join(apiSrc, './routes/integrations.management.js'))
     if (m.connectorsRegistryRoutes) await fastify.register(m.connectorsRegistryRoutes, { prefix: '/connectors' })
   } catch {}
+
+  // metricsPlugin — registers GET /metrics. Treated as part of the
+  // route surface even though it's structured as a plugin in server.js.
+  const { metricsPlugin } = await import(path.join(apiSrc, 'plugins/metrics.js'))
+  await metricsPlugin(fastify)
 
   // /health and / — match server.js.
   fastify.get('/health', { schema: { security: [] } }, async () => ({ status: 'ok' }))
@@ -163,7 +174,7 @@ describe('Auth coverage — default-deny invariant', () => {
     expect({ unexpected, missing }).toEqual({ unexpected: [], missing: [] })
   })
 
-  test('admin-flagged routes have the requireAdmin preHandler attached', () => {
+  test('admin-scoped routes have the admin scope handler attached', () => {
     const adminRoutes = routes.filter(r => r.isAdmin)
     expect(adminRoutes.length).toBeGreaterThan(0) // sanity — at least /audit/*
     const violations = adminRoutes

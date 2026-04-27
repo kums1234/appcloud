@@ -376,6 +376,29 @@ scripts/audit-summary.sh --update-baseline    # lock in the current state after 
 scripts/audit-summary.sh --no-fail        # print + compare without exiting non-zero
 ```
 
+## Internal TLS posture
+
+**Default — plaintext, scoped to the cluster network.** Both database connections (Neo4j over `bolt://`, Postgres over plain TCP) currently run unencrypted on every shipped deployment. The trust boundary is the K8s cluster network: pod-to-pod traffic stays on the CNI overlay, the database services aren't exposed via Ingress, and the Neo4j / Postgres pods don't accept connections from outside their service ClusterIP. Tests use Testcontainers on localhost — also plaintext, by design.
+
+This stance is acceptable while the API and the databases share a cluster. It stops being acceptable the moment any of the following changes:
+
+- Postgres moves to a managed service (RDS, Cloud SQL, Azure Postgres) — those terminate at a public endpoint and require TLS.
+- Neo4j moves to AuraDB or any cross-VPC deployment — same reasoning.
+- A meshing / zero-trust requirement (mTLS between every pod) lands.
+
+**How to flip it on when needed.**
+
+| Knob | What it does |
+|---|---|
+| `APPCLOUD_NEO4J_URI=bolt+s://host:7687` (or `neo4j+s://`) | Driver-side TLS with full cert verification. Use `bolt+ssc://` only if the server uses a self-signed cert and you can't bundle the CA. |
+| `APPCLOUD_POSTGRES_SSL=true` | Enables `ssl` on the pg pool. With no further config, this disables cert verification (matches `sslmode=require`). |
+| `PG_CA_FILE=/path/to/ca.pem` | Combined with `APPCLOUD_POSTGRES_SSL=true`, switches to `rejectUnauthorized: true` against the supplied CA bundle. |
+| `APPCLOUD_REQUIRE_TLS=true` | Hard-fail: refuse to start unless TLS is configured for both Neo4j and Postgres. Independent of host shape — operators who set this flag mean it, even for in-cluster hostnames. |
+
+The plugins emit a `WARN` log on startup when the configured host looks remote (anything other than `localhost` / `127.0.0.1` / the in-cluster service names `neo4j` / `postgres`) and TLS isn't on. The warning is deliberately not fatal so existing in-cluster deployments don't refuse to start; treat it as a deploy-time signal that the target is outside the original trust boundary and the env vars above need attention.
+
+If you want the strict version — refuse to start when TLS isn't configured at all, regardless of how local-shaped the hostname looks — set `APPCLOUD_REQUIRE_TLS=true`. Local dev keeps the soft warning by default; flipping the strict knob is a deliberate prod-side decision.
+
 ## Integration with CI/CD
 
 The development setup mirrors production but with:

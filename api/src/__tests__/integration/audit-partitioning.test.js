@@ -24,6 +24,7 @@ import {
   ensureMonthlyPartition,
   listExpiredPartitions,
   dropPartition,
+  redistributeDefaultPartition,
 } from '../../utils/audit-partitioning.js'
 
 jest.setTimeout(600_000)
@@ -152,5 +153,83 @@ maybeDescribe('audit_log partitioning lifecycle (Testcontainers)', () => {
     // detecting state once more — the previous tests left audit_log
     // partitioned and the test assertion above already locks that.
     expect(await detectAuditLogState(runQuery)).toBe('partitioned')
+  })
+
+  // ── redistributeDefaultPartition ────────────────────────────────────────
+  // Locks the on-DB behaviour: rows that landed in audit_log_default for a
+  // month with no monthly partition get moved into a freshly-created one,
+  // and the default ends up empty for that month afterwards. The unit test
+  // covers the JS dispatch logic with stubs; this test covers the actual
+  // CTE / partition-routing / pg_class state changes against real Postgres.
+  test('redistributeDefaultPartition moves default-partition rows into new monthly partitions', async () => {
+    // Use months that none of the prior tests created — far enough in the
+    // past that there's zero overlap with the current month / 2024_03 / etc.
+    // Direct INSERT into audit_log_default works because no monthly
+    // partition covers these dates, so the row genuinely belongs there.
+    await pgClient.query(`
+      INSERT INTO audit_log_default
+        (actor, action, resource_type, resource_id, created_at) VALUES
+        ('test', 'redistribute-test', 'TestRow', 'r-2023-06-a', '2023-06-15T00:00:00Z'),
+        ('test', 'redistribute-test', 'TestRow', 'r-2023-06-b', '2023-06-20T00:00:00Z'),
+        ('test', 'redistribute-test', 'TestRow', 'r-2023-08-a', '2023-08-10T00:00:00Z')
+    `)
+
+    // Sanity: partitions for 2023-06 and 2023-08 don't exist yet.
+    const before = await runQuery(
+      `SELECT relname FROM pg_class
+        WHERE relname IN ('audit_log_2023_06', 'audit_log_2023_08')
+          AND relkind = 'r'`,
+    )
+    expect(before.length).toBe(0)
+
+    const r = await redistributeDefaultPartition(runQuery, log)
+    expect(r.moved).toBe(3)
+    expect(r.partitionsCreated.sort()).toEqual([
+      'audit_log_2023_06', 'audit_log_2023_08',
+    ])
+    expect(r.months).toEqual([
+      { partition: 'audit_log_2023_06', year: 2023, month: 6, moved: 2 },
+      { partition: 'audit_log_2023_08', year: 2023, month: 8, moved: 1 },
+    ])
+
+    // Rows now live in the named partitions.
+    const jun = await runQuery(
+      `SELECT resource_id FROM audit_log_2023_06
+        WHERE action = 'redistribute-test' ORDER BY resource_id`,
+    )
+    const aug = await runQuery(
+      `SELECT resource_id FROM audit_log_2023_08 WHERE action = 'redistribute-test'`,
+    )
+    expect(jun.map(r => r.resource_id)).toEqual(['r-2023-06-a', 'r-2023-06-b'])
+    expect(aug.map(r => r.resource_id)).toEqual(['r-2023-08-a'])
+
+    // Default no longer holds them.
+    const defaultLeft = await runQuery(
+      `SELECT resource_id FROM audit_log_default WHERE action = 'redistribute-test'`,
+    )
+    expect(defaultLeft.length).toBe(0)
+
+    // Re-run is idempotent — nothing left to move.
+    const r2 = await redistributeDefaultPartition(runQuery, log)
+    expect(r2).toEqual({ moved: 0, partitionsCreated: [], months: [] })
+  })
+
+  test('redistributeDefaultPartition leaves audit_log_default attached + functional', async () => {
+    // After the redistribute pass the default partition must still be
+    // attached as the catch-all — the algorithm DETACHes it during the
+    // move and re-ATTACHes in a `finally`. This test pokes the parent
+    // with a created_at that has no monthly partition (far future) and
+    // confirms it routes to default, proving the re-attach happened.
+    const farFuture = new Date(Date.UTC(2099, 5, 15))
+    await pgClient.query(`
+      INSERT INTO audit_log
+        (actor, action, resource_type, resource_id, created_at) VALUES
+        ('test', 'default-still-attached', 'TestRow', 'r-future', $1)
+    `, [farFuture.toISOString()])
+
+    const inDefault = await runQuery(
+      `SELECT resource_id FROM audit_log_default WHERE action = 'default-still-attached'`,
+    )
+    expect(inDefault.map(r => r.resource_id)).toEqual(['r-future'])
   })
 })

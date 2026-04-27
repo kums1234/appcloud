@@ -36,9 +36,9 @@ export function actorFromReq(req) {
 
 // Use this when a system-internal job / scheduler / async work fires an
 // audit row that has no user principal. Pass a descriptive name like
-// 'scheduler:cmdb-assessment' or 'terraform-import' so an auditor can
-// distinguish system action types without filtering out everything that
-// looks like 'system'.
+// `SYSTEM_ACTORS.schedulerDiscoveryScan` so an auditor can distinguish
+// system action types without filtering out everything that looks like
+// 'system'.
 //
 // actor_key_id and actor_scope are deliberately NULL: the row reflects a
 // system action, not a user one. A NULL key_id is therefore meaningful —
@@ -47,3 +47,24 @@ export function actorFromReq(req) {
 export function systemActor(name = 'system') {
   return { name, keyId: null, scope: null }
 }
+
+// Canonical list of system-actor names. Anywhere a scheduler / aggregator
+// / plugin fires a system audit row, the name lives here — not as a free-
+// form string at the call site. Two reasons:
+//   1. Stops drift: 'scheduler:discovery-scan' vs 'scheduler:scan' vs
+//      'discovery-scan' — those would be three different actors as far as
+//      the audit log is concerned, and nobody intends that.
+//   2. Gives the actor name a single place to evolve. A future "include
+//      pod hostname" or "include shard id" enrichment changes one map,
+//      not every call site.
+//
+// Naming convention:
+//   <surface>:<action>          e.g. 'scheduler:discovery-scan'
+//   <surface>                   when there's only one action (one-off
+//                               plugins like 'terraform-import')
+// Lowercase-hyphenated; ':' separates surface from action.
+export const SYSTEM_ACTORS = Object.freeze({
+  schedulerDiscoveryScan: 'scheduler:discovery-scan',
+  schedulerAutoCreate:    'scheduler:auto-create',
+  terraformImport:        'terraform-import',
+})

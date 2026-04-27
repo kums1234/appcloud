@@ -24,6 +24,29 @@ export async function neo4jPlugin(fastify) {
            || process.env.NEO4J_URI  // fallback for docker-compose compatibility
            || 'bolt://localhost:7687'
 
+  // TLS — `bolt+s://` (verified) and `bolt+ssc://` (self-signed-cert
+  // tolerated) flip on driver-side encryption. The driver picks up the
+  // scheme on its own, so all we do here is warn when prod-shaped
+  // hostnames stay on plaintext bolt://. See DEVELOPMENT.md "Internal TLS
+  // posture" — current default is plaintext intra-cluster on K8s.
+  const isPlainBolt = /^bolt:\/\//.test(uri) || /^neo4j:\/\//.test(uri)
+  const looksRemote = !/(localhost|127\.0\.0\.1|::1|\bneo4j\b)/i.test(uri)
+  if (isPlainBolt && /^(true|1|yes)$/i.test(process.env.APPCLOUD_REQUIRE_TLS || '')) {
+    // Hard-fail: APPCLOUD_REQUIRE_TLS=true means refuse to start without
+    // an encrypted connection, regardless of host shape.
+    throw new Error(
+      `[neo4j] APPCLOUD_REQUIRE_TLS=true but URI ${uri} is plaintext — ` +
+      `switch APPCLOUD_NEO4J_URI to bolt+s:// (or neo4j+s://, or bolt+ssc:// for self-signed certs) ` +
+      `or unset APPCLOUD_REQUIRE_TLS`,
+    )
+  }
+  if (isPlainBolt && looksRemote) {
+    fastify.log.warn(
+      `[neo4j] ${uri} is unencrypted — switch to bolt+s:// (or neo4j+s://) when ` +
+      `the target is outside the cluster trust boundary`,
+    )
+  }
+
   fastify.log.info(`Neo4j connecting to: ${uri}`)
 
   const driver = neo4j.driver(

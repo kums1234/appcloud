@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
-import { actorFromReq, systemActor } from '../audit.js'
+import { actorFromReq, systemActor, SYSTEM_ACTORS } from '../audit.js'
 
 describe('actorFromReq', () => {
   test('uses req.principal.name when present', () => {
@@ -74,5 +74,32 @@ describe('systemActor', () => {
     const out = systemActor('any-name-at-all')
     expect(out.keyId).toBeNull()
     expect(out.scope).toBeNull()
+  })
+})
+
+describe('SYSTEM_ACTORS naming convention', () => {
+  // These exact strings are written into the audit_log.actor column —
+  // changing one is a data-migration concern (existing rows reference
+  // the old name). Lock the wire format here so a casual rename in
+  // utils/audit.js fails this test loudly.
+  test('canonical names match the on-disk format', () => {
+    expect(SYSTEM_ACTORS).toEqual({
+      schedulerDiscoveryScan: 'scheduler:discovery-scan',
+      schedulerAutoCreate:    'scheduler:auto-create',
+      terraformImport:        'terraform-import',
+    })
+  })
+
+  test('every value is lowercase-hyphenated and uses ":" only as the surface separator', () => {
+    // The convention is documented in utils/audit.js. Enforce it as a
+    // test so a future addition can't slip in a typo or stray uppercase.
+    const VALID = /^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)?$/
+    for (const [key, value] of Object.entries(SYSTEM_ACTORS)) {
+      expect({ key, value }).toEqual({ key, value: expect.stringMatching(VALID) })
+    }
+  })
+
+  test('object is frozen so callers cannot mutate the canonical list at runtime', () => {
+    expect(Object.isFrozen(SYSTEM_ACTORS)).toBe(true)
   })
 })

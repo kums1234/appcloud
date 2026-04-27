@@ -6,6 +6,8 @@
 // The scheduler starts when the server starts and respects the enabled flag.
 // Interval changes take effect on the next tick without a server restart.
 
+import { systemActor, SYSTEM_ACTORS } from '../utils/audit.js'
+
 export async function schedulerPlugin(fastify) {
   let timer = null
   let running = false
@@ -253,7 +255,7 @@ export async function schedulerPlugin(fastify) {
                 `${applyData.applicationsCreated || 0} applications created`
               )
 
-              fastify.pg?.audit?.('system', 'auto-create', 'CloudAccount', 'all',
+              fastify.pg?.audit?.(systemActor(SYSTEM_ACTORS.schedulerAutoCreate), 'auto-create', 'CloudAccount', 'all',
                 'Auto-Create after Scheduled Scan', {
                   linked:               applyData.linked,
                   componentsCreated:    applyData.componentsCreated,
@@ -279,7 +281,7 @@ export async function schedulerPlugin(fastify) {
         next_run_at:           new Date(Date.now() + intervalMs),
       })
 
-      fastify.pg?.audit?.('system', 'scan', 'CloudAccount', 'all', 'Scheduled Scan',
+      fastify.pg?.audit?.(systemActor(SYSTEM_ACTORS.schedulerDiscoveryScan), 'scan', 'CloudAccount', 'all', 'Scheduled Scan',
         { grandTotal, errors, duration, providers: Object.keys(byProvider) })
         .catch(() => {})
 

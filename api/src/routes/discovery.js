@@ -937,7 +937,7 @@ export default async function discoveryRoutes(fastify) {
   // a regular API key in production. In dev (NODE_ENV !== 'production') the
   // env-flag gate is relaxed since debugging is the whole point there.
   fastify.get('/debug/:id', {
-    config: { requireAdmin: true },
+    config: { scope: 'admin' },
     schema: {
       summary:     'Per-resource debug dump (admin + APPCLOUD_DEBUG only)',
       description: 'Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call. **Admin-tier only**, and in production must also have `APPCLOUD_DEBUG=1` set.',

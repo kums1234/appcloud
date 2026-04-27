@@ -11,8 +11,8 @@
 //   - write → mutations on resources (apps, components, infra, scans, …)
 //   - read  → GET endpoints
 // Per-route requirement comes from `config.scope: 'admin' | 'write' | 'read'`,
-// or falls back to a method-based default in stage 3 (this stage just keeps
-// the existing `requireAdmin` decorator working as a thin wrapper).
+// or falls back to a method-based default (GET/HEAD → read, everything else
+// → write).
 //
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 // On startup we upsert two rows from env vars (when set):
@@ -28,10 +28,9 @@
 // AND the DB is down, requests 503.
 //
 // ── Default-deny ─────────────────────────────────────────────────────────────
-// Unchanged from prior slices: the onRoute hook attaches `authenticate` to
-// every route except those flagged `schema.security: []`. `requireAdmin` is
-// still attached when `config.requireAdmin: true` is set on a route — kept
-// as a backwards-compat alias for `config.scope: 'admin'` until stage 3.
+// The onRoute hook attaches `authenticate` to every route except those
+// flagged `schema.security: []`, plus the per-scope handler resolved from
+// `config.scope` (or the method-based default).
 
 import fs from 'fs'
 import { hashKey, prefixOf, hasScope, SCOPES } from '../utils/api-keys.js'
@@ -351,10 +350,8 @@ export async function authPlugin(fastify) {
     [SCOPES.WRITE]: requireScope(SCOPES.WRITE),
     [SCOPES.READ]:  requireScope(SCOPES.READ),
   }
-  const requireAdmin = scopeHandlers[SCOPES.ADMIN]   // backwards-compat alias
 
   fastify.decorate('authenticate', authenticate)
-  fastify.decorate('requireAdmin', requireAdmin)
   fastify.decorate('requireScope', requireScope)
   fastify.decorate('scopeHandlers', scopeHandlers)
   // Expose the cache so future stages (admin endpoints) can invalidate it
@@ -369,7 +366,7 @@ export async function authPlugin(fastify) {
   }
 
   // Resolve the required scope for a route: explicit config.scope wins,
-  // legacy config.requireAdmin: true maps to admin, otherwise method-default.
+  // otherwise method-default (GET/HEAD → read, everything else → write).
   function resolveScope(routeOptions) {
     const explicit = routeOptions.config?.scope
     if (explicit) {
@@ -378,7 +375,6 @@ export async function authPlugin(fastify) {
       }
       return explicit
     }
-    if (routeOptions.config?.requireAdmin) return SCOPES.ADMIN
     return defaultScopeForMethod(routeOptions.method)
   }
 

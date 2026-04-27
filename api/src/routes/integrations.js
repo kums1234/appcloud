@@ -6,7 +6,7 @@
 // one-shot multipart upload → parse → ingest.
 import { parseTerraformState } from '../utils/terraform-state-parser.js'
 import { ingestIacResources }  from '../utils/iac-ingest.js'
-import { systemActor }         from '../utils/audit.js'
+import { systemActor, SYSTEM_ACTORS } from '../utils/audit.js'
 
 // ── Route handler ────────────────────────────────────────────────────────────
 export default async function integrationRoutes(fastify) {
@@ -101,7 +101,7 @@ export default async function integrationRoutes(fastify) {
       // actor_key_id / actor_scope are deliberately NULL rather than
       // accidentally dropped from the bare-string code path.
       await fastify.pg.audit(
-        systemActor('terraform-import'),
+        systemActor(SYSTEM_ACTORS.terraformImport),
         'import', 'TerraformImport', jobId, filename,
         {
           created:    ingestResult.resourcesCreated,

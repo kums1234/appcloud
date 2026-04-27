@@ -35,6 +35,7 @@ import {
   listExpiredPartitions,
   dropPartition,
   ensureCurrentAndNextPartitions,
+  redistributeDefaultPartition,
 } from '../utils/audit-partitioning.js'
 
 const DAY_MS               = 24 * 60 * 60 * 1000
@@ -48,15 +49,33 @@ export async function auditCleanupPlugin(fastify) {
   const intervalMs    = parseInt(process.env.APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS || String(DEFAULT_INTERVAL_MS), 10)
   const batchSize     = parseInt(process.env.APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10)
 
+  // The redistribute helper runs against the partitioned shape regardless
+  // of retentionDays — pre-migration rows in the default partition are an
+  // operator-triggered concern, not a periodic one. Defined as a closure
+  // here so both the retention-disabled and retention-enabled branches
+  // expose it via the same decorator.
+  async function redistributeDefault() {
+    if (!fastify.pg?.pool) return { skipped: 'no-pg' }
+    const state = await detectAuditLogState(fastify.pg.query).catch(() => 'unknown')
+    if (state !== 'partitioned') return { skipped: `state=${state}` }
+    return redistributeDefaultPartition(fastify.pg.query, fastify.log)
+  }
+
   if (retentionDays <= 0) {
     fastify.log.info('[audit-cleanup] APPCLOUD_AUDIT_RETENTION_DAYS=0 — retention disabled, audit rows kept forever')
-    fastify.decorate('auditCleanup', { runNow: async () => ({ skipped: 'retention=0' }) })
+    fastify.decorate('auditCleanup', {
+      runNow:              async () => ({ skipped: 'retention=0' }),
+      redistributeDefault,
+    })
     return
   }
 
   if (!fastify.pg?.pool) {
     fastify.log.warn('[audit-cleanup] no Postgres pool — retention job inactive')
-    fastify.decorate('auditCleanup', { runNow: async () => ({ skipped: 'no-pg' }) })
+    fastify.decorate('auditCleanup', {
+      runNow:              async () => ({ skipped: 'no-pg' }),
+      redistributeDefault,
+    })
     return
   }
 
@@ -162,6 +181,7 @@ export async function auditCleanupPlugin(fastify) {
   // retention.
   fastify.decorate('auditCleanup', {
     runNow:        runCleanup,
+    redistributeDefault,
     retentionDays,
     intervalMs,
     batchSize,

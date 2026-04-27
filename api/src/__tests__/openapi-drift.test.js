@@ -61,6 +61,12 @@ async function buildSpec() {
 
   await registerAllRoutes(fastify)
 
+  // metricsPlugin registers /metrics — part of the live route surface
+  // but structured as a plugin in server.js, so the export script and
+  // this drift test need to invoke it explicitly to keep parity.
+  const { metricsPlugin } = await import('../plugins/metrics.js')
+  await metricsPlugin(fastify)
+
   fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },
     async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
   fastify.get('/', { schema: { tags: ['Health'], summary: 'API banner', security: [] } },

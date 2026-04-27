@@ -13,6 +13,7 @@ import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
 import { cmdbAssessmentSchedulerPlugin } from './plugins/cmdb-assessment-scheduler.js'
 import { aiPlugin } from './plugins/ai.js'
+import { metricsPlugin } from './plugins/metrics.js'
 import { autoTagRoute } from './utils/openapi-tags.js'
 import { registerAllRoutes } from './utils/route-modules.js'
 
@@ -181,6 +182,12 @@ await cmdbAssessmentSchedulerPlugin(fastify)
 // the root instance and is visible to /ai routes. register(aiPlugin)
 // would encapsulate and hide the decorator. Must run before aiRoutes.
 await aiPlugin(fastify)
+
+// Prometheus metrics. Registers /metrics (public — see plugins/metrics.js
+// header for the auth stance) and the audit-buffer gauges. Direct call
+// rather than register() so the decorator (fastify.metricsRegistry) is
+// visible at the root, mirroring the other infrastructure plugins.
+await metricsPlugin(fastify)
 
 // Protected routes — mutations require a valid X-API-Key header when
 // APPCLOUD_API_KEY is set. The fastify.authenticate decorator is a no-op
