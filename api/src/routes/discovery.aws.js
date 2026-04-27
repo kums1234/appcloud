@@ -309,6 +309,39 @@ async function writeStructuralEdge(write, { from, to, via, source, evidence }) {
   }
 }
 
+// Batched edge writer — one round-trip writes every link extracted
+// from a single resource (e.g. an EC2 instance with 5 SGs + 3 ENIs + 4
+// disks goes from 12 sequential queries to 1). Identical semantics to
+// writeStructuralEdge per row; differs only in how many round-trips
+// the driver does. confidence is pre-resolved per-via on the JS side
+// so we don't have to push the table into Cypher.
+async function writeStructuralEdgesBatch(write, links) {
+  if (!links?.length) return 0
+  // Drop self-loops + null endpoints so the MATCH below doesn't fail.
+  const filtered = links
+    .filter(l => l.from && l.to && l.from !== l.to)
+    .map(l => ({ ...l, confidence: VIA_TO_CONFIDENCE[l.via] ?? 60 }))
+  if (!filtered.length) return 0
+  try {
+    await write(`
+      UNWIND $links AS link
+      MATCH (a:Infra {id: link.from}), (b:Infra {id: link.to})
+      MERGE (a)-[r:CONNECTS_TO {via: link.via}]->(b)
+      ON CREATE SET r.discovered_at = datetime(),
+                    r.source        = link.source,
+                    r.confidence    = link.confidence,
+                    r.evidence      = link.evidence
+      ON MATCH  SET r.last_seen     = datetime(),
+                    r.source        = link.source,
+                    r.confidence    = link.confidence,
+                    r.evidence      = link.evidence
+    `, { links: filtered })
+    return filtered.length
+  } catch {
+    return 0
+  }
+}
+
 // EC2 instance profile ARN → IAM role ARN (used by emitStructuralEdges)
 function instanceProfileToRoleArn(profileArn) {
   if (!profileArn || typeof profileArn !== 'string') return ''
@@ -328,90 +361,102 @@ async function emitStructuralEdges({ row, resourceType, resolve, write, stats })
   const cfg = row.configuration || {}
   const source = 'aws-config-aggregator'
 
-  const link = async (via, toRef, evidenceDetail) => {
+  // Collect every link emitted from this row's config; resolve cloud
+  // refs to internal node ids, drop unresolvables. Then write the
+  // whole batch in ONE Cypher round-trip via UNWIND. Previously each
+  // link awaited its own MERGE, so a fully-wired EC2 instance (~12
+  // edges across SGs / ENIs / disks) cost 12 sequential round-trips
+  // per resource — at 100k AWS resources that's 1M+ trips.
+  const links = []
+  const link = (via, toRef, evidenceDetail) => {
     const toNid = resolve(toRef)
     if (!toNid) return
     const evidence = `Config: ${row.resourceType} ${via}${evidenceDetail ? ` ${evidenceDetail}` : ''}`
-    const n = await writeStructuralEdge(write, { from: fromNid, to: toNid, via, source, evidence })
-    if (n) stats.edges++
+    links.push({ from: fromNid, to: toNid, via, source, evidence })
   }
 
   switch (resourceType) {
     case 'ec2_instance': {
-      if (cfg.subnetId) await link('subnet', cfg.subnetId)
-      if (cfg.vpcId)    await link('vpc',    cfg.vpcId)
+      if (cfg.subnetId) link('subnet', cfg.subnetId)
+      if (cfg.vpcId)    link('vpc',    cfg.vpcId)
       for (const sg of cfg.securityGroups || []) {
-        if (sg.groupId) await link('security-group', sg.groupId)
+        if (sg.groupId) link('security-group', sg.groupId)
       }
       for (const eni of cfg.networkInterfaces || []) {
-        if (eni.networkInterfaceId) await link('eni', eni.networkInterfaceId)
+        if (eni.networkInterfaceId) link('eni', eni.networkInterfaceId)
       }
       for (const bdm of cfg.blockDeviceMappings || []) {
-        if (bdm.ebs?.volumeId) await link('disk', bdm.ebs.volumeId)
+        if (bdm.ebs?.volumeId) link('disk', bdm.ebs.volumeId)
       }
       const roleArn = instanceProfileToRoleArn(cfg.iamInstanceProfile?.arn)
-      if (roleArn) await link('iam-role', roleArn)
+      if (roleArn) link('iam-role', roleArn)
       break
     }
     case 'network_interface': {
-      if (cfg.subnetId) await link('subnet', cfg.subnetId)
-      if (cfg.vpcId)    await link('vpc',    cfg.vpcId)
+      if (cfg.subnetId) link('subnet', cfg.subnetId)
+      if (cfg.vpcId)    link('vpc',    cfg.vpcId)
       for (const g of cfg.groups || []) {
-        if (g.groupId) await link('security-group', g.groupId)
+        if (g.groupId) link('security-group', g.groupId)
       }
       break
     }
     case 'subnet': {
-      if (cfg.vpcId) await link('vpc', cfg.vpcId)
+      if (cfg.vpcId) link('vpc', cfg.vpcId)
       break
     }
     case 'security_group': {
-      if (cfg.vpcId) await link('vpc', cfg.vpcId)
+      if (cfg.vpcId) link('vpc', cfg.vpcId)
       break
     }
     case 'rds_instance': {
-      if (cfg.dBSubnetGroup?.vpcId) await link('vpc', cfg.dBSubnetGroup.vpcId)
+      if (cfg.dBSubnetGroup?.vpcId) link('vpc', cfg.dBSubnetGroup.vpcId)
       for (const sn of cfg.dBSubnetGroup?.subnets || []) {
-        if (sn.subnetIdentifier) await link('subnet', sn.subnetIdentifier)
+        if (sn.subnetIdentifier) link('subnet', sn.subnetIdentifier)
       }
       break
     }
     case 'function': {
-      if (cfg.role) await link('iam-role', cfg.role)
-      for (const sn of cfg.vpcConfig?.subnetIds || []) await link('subnet', sn)
-      for (const sg of cfg.vpcConfig?.securityGroupIds || []) await link('security-group', sg)
+      if (cfg.role) link('iam-role', cfg.role)
+      for (const sn of cfg.vpcConfig?.subnetIds || []) link('subnet', sn)
+      for (const sg of cfg.vpcConfig?.securityGroupIds || []) link('security-group', sg)
       break
     }
     case 'eks_cluster': {
       const v = cfg.resourcesVpcConfig || {}
-      if (v.vpcId) await link('vpc', v.vpcId)
-      for (const sn of v.subnetIds || []) await link('subnet', sn)
-      if (v.clusterSecurityGroupId) await link('security-group', v.clusterSecurityGroupId)
+      if (v.vpcId) link('vpc', v.vpcId)
+      for (const sn of v.subnetIds || []) link('subnet', sn)
+      if (v.clusterSecurityGroupId) link('security-group', v.clusterSecurityGroupId)
       break
     }
     case 'load_balancer': {
-      if (cfg.vpcId) await link('vpc', cfg.vpcId)
+      if (cfg.vpcId) link('vpc', cfg.vpcId)
       for (const az of cfg.availabilityZones || []) {
-        if (az.subnetId) await link('subnet', az.subnetId)
+        if (az.subnetId) link('subnet', az.subnetId)
       }
       for (const sg of cfg.securityGroups || []) {
-        if (typeof sg === 'string') await link('security-group', sg)
-        else if (sg?.groupId)        await link('security-group', sg.groupId)
+        if (typeof sg === 'string') link('security-group', sg)
+        else if (sg?.groupId)        link('security-group', sg.groupId)
       }
       break
     }
     case 'nat_gateway': {
-      if (cfg.subnetId) await link('subnet', cfg.subnetId)
-      if (cfg.vpcId)    await link('vpc',    cfg.vpcId)
+      if (cfg.subnetId) link('subnet', cfg.subnetId)
+      if (cfg.vpcId)    link('vpc',    cfg.vpcId)
       break
     }
     case 'internet_gateway': {
       for (const att of cfg.attachments || []) {
-        if (att.vpcId) await link('vpc', att.vpcId)
+        if (att.vpcId) link('vpc', att.vpcId)
       }
       break
     }
     // Other types currently emit no structural edges.
+  }
+
+  // One round-trip writes every collected link.
+  if (links.length > 0) {
+    const written = await writeStructuralEdgesBatch(write, links)
+    stats.edges += written
   }
 }
 

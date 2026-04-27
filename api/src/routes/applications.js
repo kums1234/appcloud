@@ -79,11 +79,16 @@ export default async function applicationRoutes(fastify) {
       OPTIONAL MATCH (c)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       RETURN a, collect(DISTINCT c) AS components, collect(DISTINCT i) AS infra
     `, { id: appId })
+    // Defensive: a graph in an inconsistent state could return a row
+    // whose `a` is null (e.g. application MERGE-deleted between our
+    // resolveApplicationId call and this query). Filter out null
+    // collected components/infra so .map(props) never sees a null.
     const r = records[0]
+    if (!r || !r.get('a')) return reply.notFound('Application not found')
     return {
       ...props(r.get('a')),
-      components: r.get('components').map(props),
-      infra:      r.get('infra').map(props),
+      components: (r.get('components') || []).filter(Boolean).map(props),
+      infra:      (r.get('infra')      || []).filter(Boolean).map(props),
     }
   })
 
@@ -104,7 +109,7 @@ export default async function applicationRoutes(fastify) {
         availability: $availability, confidentiality: $confidentiality,
         domain: $domain
       }) RETURN a
-    `, { name, tier: parseInt(tier), owner, environment,
+    `, { name, tier, owner, environment,
          availability: availability || '99.9',
          confidentiality: confidentiality || 'internal',
          domain: domain || '' })
@@ -139,7 +144,7 @@ export default async function applicationRoutes(fastify) {
           a.confidentiality  = coalesce($confidentiality, a.confidentiality),
           a.domain           = coalesce($domain, a.domain)
       RETURN a
-    `, { id: appId, name, tier: tier ? parseInt(tier) : null,
+    `, { id: appId, name, tier: tier ?? null,
          owner, environment, availability, confidentiality, domain })
     if (!records.length) return reply.notFound('Application not found')
     const result = props(records[0].get('a'))

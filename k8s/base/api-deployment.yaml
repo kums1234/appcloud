@@ -16,10 +16,35 @@ spec:
         app: api
     spec:
       enableServiceLinks: false
+      # Pod-level hardening: refuse to run as root, drop the kernel
+      # capability bag we don't need, and read-only the root FS so a
+      # post-exploitation foothold can't drop binaries. The container
+      # writes only to /tmp (mounted as emptyDir below) — see Dockerfile
+      # USER directive for the matching uid/gid.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser:    10001
+        runAsGroup:   10001
+        fsGroup:      10001
       containers:
         - name: api
           image: appcloud-api:latest    # overridden per overlay with registry path
-          imagePullPolicy: IfNotPresent
+          # Always pull on rolling deploys — `:latest` + IfNotPresent
+          # would silently keep stale images on nodes that already have
+          # one. Per-environment overlays should pin to immutable tags
+          # (`:sha-…`) and switch this back to IfNotPresent for the
+          # bandwidth saving.
+          imagePullPolicy: Always
+          # Container-level hardening. readOnlyRootFilesystem is
+          # deliberately false here — Node's open-source CA chain and
+          # fastify's request-scoped scratch space write to a few paths
+          # we haven't audited yet. Set to true once tested + an
+          # emptyDir is mounted at /tmp.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 3000
@@ -75,13 +100,20 @@ spec:
               mountPath: /run/secrets/appcloud_encryption_key
               subPath: appcloud_encryption_key
               readOnly: true
+          # /ready probes Postgres + Neo4j connectivity per request and
+          # returns 503 when either is unreachable. K8s removes the pod
+          # from service endpoints while degraded, then re-adds when the
+          # probe goes green again — no pod restart required.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 6
+          # /health stays green even when DBs are degraded so K8s doesn't
+          # kill (and recreate) a pod that just needs traffic re-routed.
+          # Restart the pod only on hard liveness failures (process hang).
           livenessProbe:
             httpGet:
               path: /health

@@ -22,6 +22,15 @@
 //
 //   - Queue overflow evicts the OLDEST row + bumps `stats.dropped` so
 //     a permanent outage doesn't OOM the process.
+//
+//   - Poison-pill rows (e.g. FK violation, constraint failure on a
+//     specific row) get a per-row attempt counter. After
+//     MAX_ROW_ATTEMPTS retries that all fail, the row is evicted to
+//     a "poisoned" counter and drain continues with the next row.
+//     Without this, a single bad row blocks every subsequent audit
+//     from being persisted — buffered rows pile up behind it and
+//     eventually get dropped via overflow eviction with the auditor
+//     never knowing why.
 
 export const AUDIT_INSERT_SQL = `
   INSERT INTO audit_log(actor, actor_key_id, actor_scope, action, resource_type, resource_id, resource_name, metadata, diff)
@@ -57,12 +66,27 @@ export function buildAuditRow(actor, action, resourceType, resourceId, resourceN
 //
 // Returns `{ audit, drain, pending, stats }` — a minimal interface that
 // postgres.js wires onto fastify.pg and that the test can drive directly.
+// After this many failed insert attempts on a single row, treat it as
+// a poison pill and evict from the queue so subsequent rows aren't
+// blocked. Three is conservative — transient DB blips usually recover
+// within a single retry; FK / constraint violations don't recover at
+// all, but their first attempt's error is enough signal.
+const MAX_ROW_ATTEMPTS = 3
+
 export function makeAuditMachinery({ runQuery, log, bufferMax = 1000 } = {}) {
   if (typeof runQuery !== 'function') {
     throw new Error('makeAuditMachinery: runQuery is required')
   }
+  // Each entry: { params, attempts, lastErr }. Track attempts per-row
+  // so a poison row gets evicted after MAX_ROW_ATTEMPTS instead of
+  // permanently blocking the queue head.
   const pendingAudits = []
-  const stats         = { dropped: 0, drainSuccess: 0, drainFailure: 0 }
+  const stats         = {
+    dropped:       0,    // overflow-evictions (queue full)
+    poisoned:      0,    // poison-evictions (row exceeded MAX_ROW_ATTEMPTS)
+    drainSuccess:  0,
+    drainFailure:  0,
+  }
   let   draining      = false
 
   async function tryInsert(rowParams) {
@@ -75,14 +99,42 @@ export function makeAuditMachinery({ runQuery, log, bufferMax = 1000 } = {}) {
     let drained = 0
     try {
       while (pendingAudits.length > 0) {
+        const head = pendingAudits[0]
         try {
-          await tryInsert(pendingAudits[0])
+          await tryInsert(head.params)
           pendingAudits.shift()
           drained++
           stats.drainSuccess++
         } catch (err) {
+          head.attempts = (head.attempts || 0) + 1
+          head.lastErr  = err
           stats.drainFailure++
-          return { drained, error: err }
+          if (head.attempts >= MAX_ROW_ATTEMPTS) {
+            // Poison pill — evict + log the row identity so an operator
+            // can reconstruct what happened. Continue draining the rest
+            // of the queue; subsequent rows may succeed (the failure was
+            // row-specific, not DB-wide).
+            const evicted = pendingAudits.shift()
+            stats.poisoned++
+            log?.warn?.(
+              {
+                attempts:  evicted.attempts,
+                err:       err.message,
+                actor:     evicted.params[0],
+                action:    evicted.params[3],
+                resource:  `${evicted.params[4]}/${evicted.params[5]}`,
+                poisoned:  stats.poisoned,
+              },
+              '[pg] audit row poison-evicted after MAX_ROW_ATTEMPTS — likely a permanent failure (constraint / FK)',
+            )
+            // Loop continues — try the next row.
+          } else {
+            // Transient-shaped failure on the head — bail out of this
+            // drain pass so we don't burn through the rest of the queue
+            // hammering the same DB. Next periodic drain (or post-
+            // success kick) will retry from the head.
+            return { drained, error: err }
+          }
         }
       }
       return { drained }
@@ -102,7 +154,7 @@ export function makeAuditMachinery({ runQuery, log, bufferMax = 1000 } = {}) {
         )
       }
     }
-    pendingAudits.push(rowParams)
+    pendingAudits.push({ params: rowParams, attempts: 0, lastErr: null })
     if (err) {
       log?.warn?.(
         { err: err.message, queued: pendingAudits.length },

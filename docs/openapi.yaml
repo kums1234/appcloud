@@ -1125,8 +1125,11 @@ paths:
       summary: List Infra
       tags:
         - Infra
-      description: Returns every Infra node, ordered by provider then name. Filterable
-        by `provider` (aws/azure/gcp) and `public` (true/false).
+      description: Returns Infra nodes ordered by provider then name. Filter by
+        `provider` (aws/azure/gcp) and/or `public` (true/false). Paginated —
+        default page size 500, max 5000. At realistic data volumes (10k+
+        resources) pulling everything in one response is multi-second +
+        memory-spike on the client; use `?offset=` to page through.
       parameters:
         - schema:
             type: string
@@ -1144,6 +1147,21 @@ paths:
               - "false"
           in: query
           name: public
+          required: false
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+          in: query
+          name: limit
+          required: false
+        - schema:
+            type: integer
+            minimum: 0
+            default: 0
+          in: query
+          name: offset
           required: false
       responses:
         "200":
@@ -1863,9 +1881,18 @@ paths:
       summary: List topology snapshots
       tags:
         - Graph
-      description: Returns every saved snapshot, newest first. Snapshots are
-        point-in-time captures of node counts; useful for diffing before/after a
-        deploy.
+      description: Returns saved snapshots, newest first. Capped at `limit` (default
+        100, max 1000) — long-running deployments can accumulate thousands; the
+        cap keeps response payloads bounded.
+      parameters:
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          in: query
+          name: limit
+          required: false
       responses:
         "200":
           description: Default Response
@@ -3898,6 +3925,7 @@ paths:
           required: false
         - schema:
             type: string
+            maxLength: 200
           in: query
           name: q
           required: false
@@ -4426,6 +4454,192 @@ paths:
                   message:
                     type: string
                     example: infraId required
+  /admin/audit-cleanup/buffer-stats:
+    get:
+      summary: Audit retry-buffer state (pending + lifetime counters)
+      tags:
+        - Audit
+      description: Snapshot of the audit() retry buffer — the in-memory queue that
+        holds audit rows during a Postgres outage. Use this when debugging "why
+        are some audit rows missing?" or when alerts fire on the matching
+        Prometheus gauges. Admin-tier; no rate limit on this route.
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending:
+                    type: integer
+                    description: Audit rows currently sitting in the retry buffer (Postgres
+                      unreachable or slow). High and rising = Postgres
+                      backpressure; high and flat = Postgres unavailable.
+                  stats:
+                    type: object
+                    required:
+                      - accepted
+                      - flushed
+                      - dropped
+                      - errors
+                    properties:
+                      accepted:
+                        type: integer
+                        description: Lifetime audit() calls that the machinery accepted (regardless of
+                          whether they made it to Postgres).
+                      flushed:
+                        type: integer
+                        description: Lifetime rows successfully INSERTed.
+                      dropped:
+                        type: integer
+                        description: Lifetime rows dropped because the retry buffer was at capacity when
+                          audit() was called. Non-zero is a signal to bump
+                          APPCLOUD_AUDIT_BUFFER_MAX or fix the underlying
+                          Postgres outage.
+                      errors:
+                        type: integer
+                        description: Lifetime INSERT failures (already retried via the buffer; this is
+                          the failure count, not the user-visible drop count).
+                    additionalProperties: false
+                  skipped:
+                    type: string
+                    description: Set when no buffer is wired up — `no-pg` indicates the Postgres
+                      plugin degraded to its stub.
+                additionalProperties: false
+  /admin/audit-cleanup/run-now:
+    post:
+      summary: Trigger an audit-log retention pass right now
+      tags:
+        - Audit
+      description: "Equivalent to the periodic retention tick — drops expired
+        partitions and ensures the current+next-month partitions exist.
+        Idempotent: a second call within seconds will report `dropped: []`.
+        Admin-tier only."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum:
+                      - partitioned
+                      - regular
+                  cutoff:
+                    type: string
+                  retentionDays:
+                    type: integer
+                  dropped:
+                    type: array
+                    items:
+                      type: string
+                  totalDeleted:
+                    type: integer
+                  error:
+                    type: string
+                  durationMs:
+                    type: integer
+                  skipped:
+                    type: string
+  /admin/audit-cleanup/default-partition-state:
+    get:
+      summary: Audit-log default partition attachment state
+      tags:
+        - Audit
+      description: "Reports whether audit_log_default is currently attached to the
+        partition tree. A `detached: true` response is a paging condition —
+        INSERTs whose month has no monthly partition will silently fail. Recover
+        with: `ALTER TABLE audit_log ATTACH PARTITION audit_log_default
+        DEFAULT`."
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detached:
+                    type: boolean
+                  recoverySql:
+                    type: string
+                    description: "SQL to run if `detached: true` — paste in psql or via your DB
+                      admin UI."
+  /admin/audit-cleanup/redistribute-default:
+    post:
+      summary: Redistribute audit_log_default rows into monthly partitions
+      tags:
+        - Audit
+      description: Scans the default partition and moves rows into the partition
+        matching their `created_at` month, creating new monthly partitions as
+        needed. Use this once after the partitioning migration has parked old
+        rows in the default, or any time pre-migration / unrouted rows
+        accumulate. Admin-tier only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  moved:
+                    type: integer
+                    description: Total number of rows moved out of audit_log_default into monthly
+                      partitions.
+                  partitionsCreated:
+                    type: array
+                    items:
+                      type: string
+                    description: Names of partitions created by this run (audit_log_YYYY_MM).
+                      Already-existing partitions are reused without
+                      re-creating.
+                  months:
+                    type: array
+                    description: Per-month breakdown so an operator can see which months held the
+                      largest backlog.
+                    items:
+                      type: object
+                      required:
+                        - partition
+                        - year
+                        - month
+                        - moved
+                      properties:
+                        partition:
+                          type: string
+                          example: audit_log_2025_11
+                        year:
+                          type: integer
+                        month:
+                          type: integer
+                          minimum: 1
+                          maximum: 12
+                        moved:
+                          type: integer
+                  skipped:
+                    type: string
+                    description: Set when no work was done — `no-pg` (DB unavailable) or `state=<x>`
+                      (audit_log not yet partitioned).
+                additionalProperties: false
   /ai/status:
     get:
       summary: AI provider availability snapshot
@@ -4716,9 +4930,37 @@ paths:
                   message:
                     type: string
                     example: infraId required
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      tags:
+        - Health
+      description: Plain-text Prometheus exposition for the API process. Open by
+        convention — Prometheus scrapes pods over the cluster network where
+        network policy provides isolation, not API keys. Audit-buffer saturation
+        gauge `appcloud_audit_buffer_pending` and
+        `appcloud_audit_buffer_dropped_total` are the high-leverage alert
+        targets.
+      security: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            text/plain:
+              schema:
+                type: string
   /health:
     get:
       summary: Liveness probe
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: Default Response
+  /ready:
+    get:
+      summary: Readiness probe
       tags:
         - Health
       security: []

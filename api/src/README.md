@@ -31,19 +31,112 @@ routes are open — matching the plugin's graceful-degradation model.
 
 ## Environment Variables
 
+The full list of environment variables read by the API. Defaults are
+the values used when the variable is unset; `—` means there is no
+default and the feature stays off until the variable is supplied.
+
+### Connections
+
 | Variable | Default | Description |
 |---|---|---|
-| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt URI |
-| `POSTGRES_HOST` | `localhost` | Postgres host |
-| `POSTGRES_DB` | `appcloud` | Postgres database |
-| `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Bind host |
-| `APPCLOUD_API_KEY_FILE` / `APPCLOUD_API_KEY` | — | Shared key for `X-API-Key` auth |
-| `APPCLOUD_ENCRYPTION_KEY_FILE` / `APPCLOUD_ENCRYPTION_KEY` | — | AES-256-GCM key for stored connector secrets |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Optional local LLM endpoint |
-| `OTEL_AGG_INTERVAL_MS` | `60000` | OTel aggregator tick |
-| `CMDB_ASSESSMENT_INTERVAL_MS` | `60000` | CMDB assessment scheduler tick |
-| `CMDB_ASSESSMENT_BACKSTOP_MS` | `1800000` | Max time between runs even if not dirty |
+| `APPCLOUD_NEO4J_URI` / `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI. Use `bolt+s://` for TLS, `bolt+ssc://` for self-signed certs. |
+| `NEO4J_USER` / `DB_USERNAME_FILE` | `neo4j` | Neo4j username (filename overrides direct env). |
+| `NEO4J_PASSWORD` / `DB_PASSWORD_FILE` | — | Neo4j password. |
+| `POSTGRES_HOST` | `localhost` | Postgres host. Empty disables Postgres entirely. |
+| `POSTGRES_PORT` | `5432` | Postgres port. |
+| `POSTGRES_DB` | `appcloud` | Postgres database name. |
+| `POSTGRES_USER` / `PG_USERNAME_FILE` | `postgres` | Postgres user. |
+| `POSTGRES_PASSWORD` / `PG_PASSWORD_FILE` | — | Postgres password. |
+| `APPCLOUD_PG_POOL_MAX` | `10` | Postgres pool max connections. Bump under bursty audit + query load. |
+| `APPCLOUD_POSTGRES_SSL` | `false` | Set to `true` to enable TLS to Postgres. |
+| `PG_CA_FILE` | — | PEM bundle for verified-CA Postgres TLS. |
+| `APPCLOUD_REQUIRE_TLS` | `false` | Set to `true` to refuse to start without TLS to both DBs. |
+| `PORT` | `3000` | Server port. |
+| `HOST` | `0.0.0.0` | Bind host. |
+
+### Auth + secrets
+
+| Variable | Default | Description |
+|---|---|---|
+| `APPCLOUD_API_KEY_FILE` / `APPCLOUD_API_KEY` | — | Bootstrap write-scope API key. |
+| `APPCLOUD_ADMIN_API_KEY_FILE` / `APPCLOUD_ADMIN_API_KEY` | — | Bootstrap admin-scope API key. |
+| `APPCLOUD_ALLOW_OPEN_AUTH` | `false` | In `NODE_ENV=production`, this MUST be `true` for the API to start without bootstrap keys (open-auth fallback). |
+| `APPCLOUD_AUTH_CACHE_TTL_MS` | `60000` | API-key cache TTL — how often the auth plugin re-reads the api_keys table. |
+| `APPCLOUD_AUTH_WARN_WINDOW_MS` | `60000` | Per-`(principal, X-Actor)` rate-limit window for the X-Actor warning. |
+| `APPCLOUD_AUTH_DISABLED_WARN_MS` | `60000` | When auth is disabled, re-emit the warning every N ms. `0` to disable. |
+| `APPCLOUD_ENCRYPTION_KEY_FILE` / `APPCLOUD_ENCRYPTION_KEY` | — | AES-256-GCM master for connector secrets at rest. Required at startup. |
+| `APPCLOUD_KDF_SALT` | (built-in) | Override for the master-key scrypt salt. Don't change without re-keying every encrypted row. |
+
+### Rate limit
+
+| Variable | Default | Description |
+|---|---|---|
+| `APPCLOUD_RATE_LIMIT_MAX` | `300` | Per-key request budget per `APPCLOUD_RATE_LIMIT_WINDOW` for authenticated requests. |
+| `APPCLOUD_RATE_LIMIT_UNAUTH_MAX` | `60` | Per-IP request budget for unauthenticated requests. Tighter to blunt key-rotation bypass attacks. |
+| `APPCLOUD_RATE_LIMIT_WINDOW` | `1 minute` | The window passed to `@fastify/rate-limit`. |
+| `APPCLOUD_ALLOWED_ORIGINS` | localhost dev set | Comma-separated CORS allowlist. |
+
+### Audit log
+
+| Variable | Default | Description |
+|---|---|---|
+| `APPCLOUD_AUDIT_RETENTION_DAYS` | `365` | Drop audit partitions older than N days. `0` disables retention entirely. |
+| `APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS` | `86400000` | Cleanup tick interval (default 24h). |
+| `APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE` | `10000` | Pre-partitioning fallback DELETE batch size. |
+| `APPCLOUD_AUDIT_BUFFER_MAX` | `1000` | Retry-buffer capacity; overflow evicts oldest + bumps the dropped counter. |
+| `APPCLOUD_AUDIT_BUFFER_DRAIN_MS` | `30000` | Periodic drain interval for the buffer. |
+
+### Discovery + OTel + AI
+
+| Variable | Default | Description |
+|---|---|---|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Local LLM endpoint. K8s service name `ollama` is rewritten to localhost outside the cluster. |
+| `OLLAMA_MODEL` | `llama3` | Default Ollama model. |
+| `APPCLOUD_OLLAMA_CHECK_TTL_MS` | `30000` | How long the API caches a positive Ollama-availability check before re-probing. |
+| `AI_CLOUD_PROVIDER` | — | One of `anthropic` / `openai` / `azure` / `gemini`. Empty disables cloud AI. |
+| `AI_CLOUD_MODEL` | provider default | Override the default model for the chosen provider. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `AZURE_OPENAI_API_KEY` / `GEMINI_API_KEY` | — | API key for the matching provider. |
+| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT` | — | Required when `AI_CLOUD_PROVIDER=azure`. |
+| `OTEL_AGG_INTERVAL_MS` | `60000` | OTel aggregator tick interval. |
+| `CMDB_ASSESSMENT_INTERVAL_MS` | `60000` | CMDB assessment scheduler tick. |
+| `CMDB_ASSESSMENT_BACKSTOP_MS` | `1800000` | Backstop interval — run even when not dirty. |
+
+### Observability + dev
+
+| Variable | Default | Description |
+|---|---|---|
+| `APPCLOUD_READY_TIMEOUT_MS` | `2000` | Per-DB probe timeout for `GET /ready`. |
+| `APPCLOUD_DEBUG` | `false` | Required in production for `/discovery/debug/:id` to be reachable. |
+| `NODE_ENV` | `development` | Use `production` to gate the auth-disabled refuse-to-start behaviour. |
+
+---
+
+## API versioning
+
+The OpenAPI spec carries a SemVer version at `info.version` (currently `1.1.0`).
+Until v1.0 is cut, the contract is:
+
+- **Patch bumps** (`1.1.0` → `1.1.1`) for additive non-breaking changes:
+  new optional fields on responses, new optional query parameters, new
+  routes, error-message wording. Old clients keep working.
+- **Minor bumps** (`1.1.0` → `1.2.0`) for additive surface that crosses
+  a meaningful capability boundary (a whole new resource family, a new
+  required header on a future request, expanded scope semantics).
+- **Major bumps** (`1.x` → `2.0.0`) for breaking changes: removing /
+  renaming a route, changing a response shape's existing fields, dropping
+  a query parameter, tightening a previously-loose schema in a way that
+  rejects payloads that used to validate. Reserved until v1.0 is cut and
+  the contract has external consumers; pre-v1.0 we may still iterate
+  shape without the bump.
+
+Deprecation: when a route is on the way out, it ships with the
+existing path + a `Deprecation: true` and `Sunset: <RFC 7231 date>`
+response header for at least one minor cycle before the removal. The
+sunset path is `<minor cycle> + 90 days` minimum.
+
+The OpenAPI drift test in `__tests__/openapi-drift.test.js` blocks
+silent contract drift — `docs/openapi.json` must match what the live
+route registrations would produce. CI fails the PR otherwise.
 
 ---
 
@@ -230,11 +323,18 @@ record operator identity on audited writes.
 See `CLAUDE.md` at the repo root for the full set of rules that apply to
 every write to the graph. The load-bearing ones:
 
-- Every write uses `MERGE`, never `CREATE`. Scanners re-run on a schedule
-  and the graph must converge, not accumulate duplicates.
-- Edges carry traceability properties: `source`, `confidence`, `createdAt`,
-  `lastSeenAt`, `evidence`.
-- Two primary edge types: `:CONNECTS_TO` (inferred) and `:DEPLOYED_ON`
-  (structural hosting).
+- Every scanner / supplement / autolink write uses `MERGE`, never `CREATE`.
+  Scanners re-run on a schedule and the graph must converge, not accumulate
+  duplicates. (User-driven `POST` endpoints with server-generated UUIDs
+  use `CREATE` because each call is a fresh entity by definition.)
+- Edges carry traceability properties: `source`, `via`, `confidence`,
+  `discovered_at`, `last_seen`, `evidence`. The static-analysis test in
+  `__tests__/connects-to-invariant.test.js` enforces this contract
+  across every Cypher writer at PR time.
+- **One** edge label: `:CONNECTS_TO`. The legacy `:DEPLOYED_ON` and
+  `:CONNECTED_TO` labels were consolidated; everything between any pair
+  of nodes (Infra↔Infra, Component↔Infra, Component↔Component, etc.)
+  uses `:CONNECTS_TO` with provenance carried in `source` and `via`
+  properties. See CLAUDE.md "Graph conventions" for the full vocabulary.
 - Azure resources are identified by full ARM resource id, parsed once at
   ingestion into first-class properties.

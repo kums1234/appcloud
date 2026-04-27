@@ -16,6 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { autoTagRoute } from '../src/utils/openapi-tags.js'
 import { registerAllRoutes } from '../src/utils/route-modules.js'
+import { metricsPlugin } from '../src/plugins/metrics.js'
 import { withDeterministicGlobals } from './_lib/with-deterministic-globals.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -31,8 +32,8 @@ const fastify = Fastify({
 // route registration doesn't blow up on missing fastify.authenticate /
 // fastify.pg / fastify.neo4j / fastify.ai / fastify.connectors.
 fastify.decorate('authenticate',     async () => {})
-fastify.decorate('pg',               { pool: null, query: async () => [], audit: async () => {} })
-fastify.decorate('neo4j',            { write: async () => [], query: async () => [] })
+fastify.decorate('pg',               { pool: null, query: async () => [], audit: async () => {}, ping: async () => true })
+fastify.decorate('neo4j',            { write: async () => [], query: async () => [], ping: async () => true })
 fastify.decorate('ai',               { localAvailable: false, cloudAvailable: false })
 fastify.decorate('connectors',       { list: () => [], get: () => null })
 fastify.decorate('cmdbAssessment',   { markDirty: () => {}, run: async () => ({}) })
@@ -67,9 +68,16 @@ await fastify.register(swaggerUI, { routePrefix: '/docs' })
 // Register every route module — same list (and order) the live server uses.
 await registerAllRoutes(fastify)
 
+// metricsPlugin registers /metrics. Server.js handles this as a direct
+// plugin call rather than a route module; mirror that here so the spec
+// lists the same surface the live server exposes.
+await metricsPlugin(fastify)
+
 // Health endpoints — match server.js
 fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },
   async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+fastify.get('/ready', { schema: { tags: ['Health'], summary: 'Readiness probe', security: [] } },
+  async () => ({ status: 'ready', postgres: 'ok', neo4j: 'ok' }))
 fastify.get('/', { schema: { tags: ['Health'], summary: 'API banner', security: [] } },
   async () => ({ name: 'AppCloud API', version: '1.1.0' }))
 

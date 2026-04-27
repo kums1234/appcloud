@@ -1,5 +1,10 @@
+import neo4j from 'neo4j-driver'
 import { props, serialize } from '../utils/serialize.js'
 import { actorFromReq } from '../utils/audit.js'
+
+// Neo4j requires `LIMIT $x` parameters to be Integer (not Number).
+// Convert here so route-level params can stay plain JS ints.
+const neo4jInt = (n) => neo4j.int(n)
 import {
   GraphTopologyResponseSchema,
   GraphImpactResponseSchema,
@@ -209,11 +214,21 @@ export default async function graphRoutes(fastify) {
   fastify.get('/snapshots', {
     schema: {
       summary:     'List topology snapshots',
-      description: 'Returns every saved snapshot, newest first. Snapshots are point-in-time captures of node counts; useful for diffing before/after a deploy.',
+      description: 'Returns saved snapshots, newest first. Capped at `limit` (default 100, max 1000) — long-running deployments can accumulate thousands; the cap keeps response payloads bounded.',
+      querystring: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', minimum: 1, maximum: 1000, default: 100 },
+        },
+      },
       response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
     },
   }, async (req, reply) => {
-    const records = await query(`MATCH (s:Snapshot) RETURN s ORDER BY s.createdAt DESC`)
+    const limit = req.query?.limit ?? 100
+    const records = await query(
+      `MATCH (s:Snapshot) RETURN s ORDER BY s.createdAt DESC LIMIT $limit`,
+      { limit: neo4jInt(limit) },
+    )
     return records.map(r => props(r.get('s')))
   })
 

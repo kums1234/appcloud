@@ -336,7 +336,12 @@ describe('emitStructuralEdges', () => {
     return { write, stats, resolve }
   }
 
-  test('VM → NIC emits one :CONNECTS_TO edge (one MERGE)', async () => {
+  // emitStructuralEdges now batches per-resource links via UNWIND.
+  // The mock's params shape is { links: [{ via, ...}, ...] }; flatten
+  // back to per-edge for assertion readability.
+  const firstBatchLinks = (write) => write.mock.calls[0]?.[1]?.links ?? []
+
+  test('VM → NIC emits one :CONNECTS_TO edge (one batched UNWIND)', async () => {
     const { write, stats, resolve } = makeHarness({
       '/sub/vm1': 'node-vm',
       '/sub/nic1': 'node-nic',
@@ -352,8 +357,10 @@ describe('emitStructuralEdges', () => {
       resolve, write, stats,
     })
     expect(stats.edges).toBe(1)
-    expect(write).toHaveBeenCalledTimes(1)
-    expect(write.mock.calls[0][1].via).toBe('nic')
+    expect(write).toHaveBeenCalledTimes(1)        // one batched UNWIND, not one-per-edge
+    const links = firstBatchLinks(write)
+    expect(links).toHaveLength(1)
+    expect(links[0].via).toBe('nic')
   })
 
   test('App Service → App Service Plan fires with confidence 85', async () => {
@@ -370,7 +377,8 @@ describe('emitStructuralEdges', () => {
       resolve, write, stats,
     })
     expect(stats.edges).toBe(1)
-    expect(write.mock.calls[0][1]).toMatchObject({
+    const links = firstBatchLinks(write)
+    expect(links[0]).toMatchObject({
       via:        'app-service-plan',
       confidence: 85,
     })

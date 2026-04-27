@@ -35,6 +35,8 @@ import {
   listExpiredPartitions,
   dropPartition,
   ensureCurrentAndNextPartitions,
+  redistributeDefaultPartition,
+  isDefaultPartitionDetached,
 } from '../utils/audit-partitioning.js'
 
 const DAY_MS               = 24 * 60 * 60 * 1000
@@ -48,15 +50,48 @@ export async function auditCleanupPlugin(fastify) {
   const intervalMs    = parseInt(process.env.APPCLOUD_AUDIT_CLEANUP_INTERVAL_MS || String(DEFAULT_INTERVAL_MS), 10)
   const batchSize     = parseInt(process.env.APPCLOUD_AUDIT_CLEANUP_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10)
 
+  // The redistribute helper runs against the partitioned shape regardless
+  // of retentionDays — pre-migration rows in the default partition are an
+  // operator-triggered concern, not a periodic one. Defined as a closure
+  // here so both the retention-disabled and retention-enabled branches
+  // expose it via the same decorator.
+  async function redistributeDefault() {
+    if (!fastify.pg?.pool) return { skipped: 'no-pg' }
+    const state = await detectAuditLogState(fastify.pg.query).catch(() => 'unknown')
+    if (state !== 'partitioned') return { skipped: `state=${state}` }
+    return redistributeDefaultPartition(fastify.pg.query, fastify.log)
+  }
+
+  // Read-only state probe — expose detached-default state via a method
+  // so the metrics plugin (Prometheus gauge) and the admin endpoint
+  // can both call into the same path. Returns false when there's no
+  // pg or the table is absent (the no-trouble cases).
+  async function defaultPartitionDetached() {
+    if (!fastify.pg?.pool) return false
+    try {
+      return await isDefaultPartitionDetached(fastify.pg.query)
+    } catch {
+      return false
+    }
+  }
+
   if (retentionDays <= 0) {
     fastify.log.info('[audit-cleanup] APPCLOUD_AUDIT_RETENTION_DAYS=0 — retention disabled, audit rows kept forever')
-    fastify.decorate('auditCleanup', { runNow: async () => ({ skipped: 'retention=0' }) })
+    fastify.decorate('auditCleanup', {
+      runNow:              async () => ({ skipped: 'retention=0' }),
+      redistributeDefault,
+      defaultPartitionDetached,
+    })
     return
   }
 
   if (!fastify.pg?.pool) {
     fastify.log.warn('[audit-cleanup] no Postgres pool — retention job inactive')
-    fastify.decorate('auditCleanup', { runNow: async () => ({ skipped: 'no-pg' }) })
+    fastify.decorate('auditCleanup', {
+      runNow:              async () => ({ skipped: 'no-pg' }),
+      redistributeDefault,
+      defaultPartitionDetached,
+    })
     return
   }
 
@@ -70,7 +105,10 @@ export async function auditCleanupPlugin(fastify) {
     let state
     try { state = await detectAuditLogState(fastify.pg.query) }
     catch (err) {
-      fastify.log.error({ err: err.message }, '[audit-cleanup] state detection failed')
+      fastify.log.error(
+        { err: err.message, code: err.code, retentionDays },
+        '[audit-cleanup] state detection failed',
+      )
       return { error: err.message, durationMs: Date.now() - startedAt }
     }
 
@@ -96,12 +134,17 @@ export async function auditCleanupPlugin(fastify) {
           await dropPartition(fastify.pg.query, fastify.log, p.name)
           dropped.push(p.name)
         } catch (err) {
-          fastify.log.error({ partition: p.name, err: err.message },
-            '[audit-cleanup] failed to drop partition (continuing)')
+          fastify.log.error(
+            { partition: p.name, err: err.message, code: err.code, droppedSoFar: dropped.length },
+            '[audit-cleanup] failed to drop partition (continuing)',
+          )
         }
       }
     } catch (err) {
-      fastify.log.error({ err: err.message }, '[audit-cleanup] partitioned cleanup failed')
+      fastify.log.error(
+        { err: err.message, code: err.code, dropped, retentionDays },
+        '[audit-cleanup] partitioned cleanup failed',
+      )
       return { error: err.message, mode: 'partitioned', dropped, durationMs: Date.now() - startedAt }
     }
     const result = {
@@ -137,7 +180,10 @@ export async function auditCleanupPlugin(fastify) {
         `, [cutoff, batchSize])
         deleted = rows.length
       } catch (err) {
-        fastify.log.error({ err: err.message }, '[audit-cleanup] DELETE failed')
+        fastify.log.error(
+          { err: err.message, code: err.code, batchSize, totalDeletedSoFar: totalDeleted, retentionDays },
+          '[audit-cleanup] DELETE failed',
+        )
         return { error: err.message, mode: 'regular', totalDeleted, durationMs: Date.now() - startedAt }
       }
       totalDeleted += deleted
@@ -162,6 +208,8 @@ export async function auditCleanupPlugin(fastify) {
   // retention.
   fastify.decorate('auditCleanup', {
     runNow:        runCleanup,
+    redistributeDefault,
+    defaultPartitionDetached,
     retentionDays,
     intervalMs,
     batchSize,

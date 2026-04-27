@@ -94,6 +94,16 @@ function getMasterKey() {
   return cachedMaster
 }
 
+// Derive a master key from an explicit raw passphrase. Used by the
+// rotation CLI to hold two master keys at once (the old one for
+// decrypting existing rows, the new one for re-encrypting them) without
+// having to swap env vars and bust the module-global cache mid-run.
+// NOT cached — the CLI runs once and exits, so the scrypt cost is only
+// paid twice (once per key).
+function deriveMasterKeyFromRaw(rawKey) {
+  return scryptSync(rawKey, readMasterSalt(), KEY_LEN, SCRYPT_PARAMS)
+}
+
 // HKDF: extract-and-expand. Fast (microseconds) — safe because the master
 // is already a high-entropy 256-bit value; HKDF is just a domain separator.
 function deriveRowKey(rowSalt) {
@@ -117,11 +127,13 @@ export function warnIfLegacyKeyEnvSet(log) {
   }
 }
 
-export function encrypt(plaintext) {
+// Internal: encrypt using a pre-derived master key (the env-derived one
+// or one supplied by the rotation CLI).
+function encryptWithMaster(plaintext, master) {
   if (!plaintext) return plaintext
   const salt   = randomBytes(SALT_LEN)
   const iv     = randomBytes(IV_LEN)
-  const key    = deriveRowKey(salt)
+  const key    = Buffer.from(hkdfSync('sha256', master, salt, HKDF_INFO, KEY_LEN))
   const cipher = createCipheriv(ALGO, key, iv)
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const tag = cipher.getAuthTag()
@@ -131,6 +143,18 @@ export function encrypt(plaintext) {
     tag.toString('hex'),
     encrypted.toString('hex'),
   ].join(':')
+}
+
+export function encrypt(plaintext) {
+  return encryptWithMaster(plaintext, getMasterKey())
+}
+
+// Encrypt with an explicit raw passphrase rather than the env-derived
+// master. Used by the rotation CLI; production callers should use
+// encrypt(). The raw passphrase is scrypt'd inline — slow (~50ms), but
+// the CLI runs offline so this isn't a hot-path concern.
+export function encryptWithKey(plaintext, rawKey) {
+  return encryptWithMaster(plaintext, deriveMasterKeyFromRaw(rawKey))
 }
 
 // Sentinel thrown when ciphertext is shaped correctly but auth-tag verify
@@ -144,7 +168,7 @@ export class DecryptionError extends Error {
   }
 }
 
-export function decrypt(encoded) {
+function decryptWithMaster(encoded, master) {
   if (!encoded) return encoded
   // Pass-through for non-encrypted shapes — legacy plaintext rows + simple
   // strings that never went through encrypt().
@@ -159,11 +183,11 @@ export function decrypt(encoded) {
       [saltHex, ivHex, tagHex, ctHex] = parts
       const rowSalt = Buffer.from(saltHex, 'hex')
       if (rowSalt.length !== SALT_LEN) return encoded   // shape doesn't match
-      key = deriveRowKey(rowSalt)
+      key = Buffer.from(hkdfSync('sha256', master, rowSalt, HKDF_INFO, KEY_LEN))
     } else if (parts.length === 3) {
       // v2 — master-key direct (slice 2 transient format).
       [ivHex, tagHex, ctHex] = parts
-      key = getMasterKey()
+      key = master
     } else {
       return encoded
     }
@@ -179,6 +203,17 @@ export function decrypt(encoded) {
       err,
     )
   }
+}
+
+export function decrypt(encoded) {
+  return decryptWithMaster(encoded, getMasterKey())
+}
+
+// Decrypt using an explicit raw passphrase. Used by the rotation CLI to
+// read rows encrypted under the OLD key while the running process has
+// the NEW key in env. See `api/scripts/rotate-encryption-key.js`.
+export function decryptWithKey(encoded, rawKey) {
+  return decryptWithMaster(encoded, deriveMasterKeyFromRaw(rawKey))
 }
 
 // Fields whose values are encrypted at rest in the `config` JSONB column of

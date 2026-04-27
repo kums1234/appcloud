@@ -50,7 +50,7 @@ Some writers carry additional properties:
 - Bootstrap RG-propagation edges add `rgRatio`.
 - ServiceNow CMDB edges add `relType` (human label) and `relTypeRaw` (raw cmdb_rel_ci.type) and `snUpdatedOn`.
 
-Indexes on `:CONNECTS_TO(source, via)`, `(via)`, and `(source)` are created by `api/src/migrations/003-connects-to-indexes.cypher`. Filter queries should use either or both properties.
+Indexes on `:CONNECTS_TO(source, via)`, `(via)`, and `(source)` are created by the Neo4j plugin's startup-time `CREATE INDEX IF NOT EXISTS` block (api/src/plugins/neo4j.js). Filter queries should use either or both properties.
 
 Never create an edge without `source`, `via`, `confidence`, `evidence`. An un-traceable edge is worse than no edge because it cannot be audited, re-scored, or invalidated.
 
@@ -152,13 +152,16 @@ Postgres is **not** a duplicate of the graph. Resource relationships live in Neo
 
 Cypher migrations live in `api/src/migrations/` as numbered `.cypher` files. They're currently applied manually via `kubectl exec` + `cypher-shell`. There is no runner — track which files have been applied against a given environment yourself.
 
-Existing migrations:
+Existing files:
 
-- `001-schema-evolution.cypher` — backfilled `firstseen` / `lastupdated`, typed node labels, promoted raw fields.
-- `002-edge-consolidation.cypher` — copied legacy `:DEPLOYED_ON` / `:CONNECTED_TO` / typed-rel edges into the unified `:CONNECTS_TO`, then deleted them. **Phase A (copy) must run before deploying any code that reads through `:CONNECTS_TO {via:'component-mapping'}`** — otherwise the slice-5 `cleanupStaleNodes` will treat bootstrap-only-mapped nodes as orphaned and DETACH-delete them.
-- `003-connects-to-indexes.cypher` — composite + single-key indexes on the unified `:CONNECTS_TO` edge.
+- `001-schema-evolution.cypher` — backfilled `firstseen` / `lastupdated`, typed node labels, promoted raw fields. Applied manually against legacy databases; new installs never need it.
 
-Migration runner is deferred until customer onboarding nears (memory `feedback_pre_customer_priorities.md`). Until then, manual application is acceptable; document the order in any PR that adds a migration.
+The earlier `002-edge-consolidation` (legacy `:DEPLOYED_ON` / `:CONNECTED_TO` → unified `:CONNECTS_TO`) and `003-connects-to-indexes` were never committed as separate `.cypher` files. The current state:
+
+- **Edge consolidation** is no longer migration-time work — every writer in the codebase emits `:CONNECTS_TO` directly, and the legacy edge labels haven't been written for several releases. A legacy database that still carries them needs the consolidation step applied by hand from the commit history of slice 002 (search the git log for `edge-consolidation`).
+- **`:CONNECTS_TO` indexes** are created by the Neo4j plugin's startup-time `CREATE INDEX IF NOT EXISTS` block (api/src/plugins/neo4j.js). Idempotent; runs every boot.
+
+Migration runner is deferred until customer onboarding nears (memory `feedback_pre_customer_priorities.md`). Until then, manual application is acceptable; document the order in any PR that adds a migration. If a new migration lands as a `.cypher` file, list it in this section.
 
 ---
 

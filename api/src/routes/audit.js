@@ -4,7 +4,7 @@
 // GET /audit/resource/:type/:id — full history for one resource
 // GET /audit/actor/:name      — all actions by one actor
 //
-// All routes here are flagged `config.requireAdmin: true` — the audit log
+// All routes here are flagged `config.scope: 'admin'` — the audit log
 // reveals operational patterns (who-did-what-when), so it shouldn't be
 // readable with a regular API key. Admin tier comes from
 // APPCLOUD_ADMIN_API_KEY{,_FILE}; when unset the routes return 503.
@@ -46,7 +46,7 @@ export default async function auditRoutes(fastify) {
 
   // ── GET /audit — paginated, filterable log ──────────────────────────────────
   fastify.get('/', {
-    config: { requireAdmin: true },
+    config: { scope: 'admin' },
     schema: {
       summary:     'Paginated audit log',
       description: 'Every mutation API call writes a row here. `actor` is exact-match by default — pass `?like=true` to opt into the legacy substring/ILIKE behaviour (separate keys with similar names like `ci-deploy-staging` / `ci-deploy-prod` previously collapsed into one query, which is now opt-in). Other filters: `action`, `resourceType`, `resourceId`, `keyId` (exact UUID), `scope` (admin|write|read), `from`/`to` (ISO date), `q` (substring on `resource_name` OR `actor`). Returns `{ rows, total, page, pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a row can be traced back to the specific API key that performed the action.',
@@ -62,7 +62,10 @@ export default async function auditRoutes(fastify) {
         scope:        { type: 'string', enum: ['admin', 'write', 'read'] },
         from:         { type: 'string', format: 'date-time' },
         to:           { type: 'string', format: 'date-time' },
-        q:            { type: 'string' },
+        // Capped at 200 chars so an admin (or compromised admin key)
+        // can't pass a pathological pattern that costs Postgres minutes
+        // of CPU under ILIKE on the full audit_log table.
+        q:            { type: 'string', maxLength: 200 },
       } },
       response: { 200: { type: 'object', additionalProperties: true } },
     },
@@ -145,7 +148,7 @@ export default async function auditRoutes(fastify) {
 
   // ── GET /audit/stats — aggregated counts ──────────────────────────────────
   fastify.get('/stats', {
-    config: { requireAdmin: true },
+    config: { scope: 'admin' },
     schema: {
       summary:     'Audit-log analytics for the last N days',
       description: 'Returns counts grouped by action / resource_type / actor plus a daily-activity series for sparklines. Default window is 30 days; pass `?days=N` to widen.',
@@ -233,7 +236,7 @@ export default async function auditRoutes(fastify) {
 
   // ── GET /audit/resource/:type/:id — full history for one resource ──────────
   fastify.get('/resource/:type/:id', {
-    config: { requireAdmin: true },
+    config: { scope: 'admin' },
     schema: {
       summary:     'Full audit history for a specific resource',
       description: 'Up to the last 500 events for one (resource_type, resource_id) pair, newest first. `resource_type` is one of `Application`, `Component`, `Infra`, `CloudAccount`, etc.',
@@ -262,7 +265,7 @@ export default async function auditRoutes(fastify) {
   const ACTOR_NAME_RE = /^[A-Za-z0-9._@:+-]{1,128}$/
 
   fastify.get('/actor/:name', {
-    config: { requireAdmin: true },
+    config: { scope: 'admin' },
     schema: {
       summary:     'All audit events by a specific actor (paginated)',
       description: 'Exact match on the `actor` column by default. Pass `?like=true` for case-insensitive substring (legacy behaviour, collapses across similarly-named keys). Optional `?keyId=<uuid>` narrows to a specific stored API key (exact match on actor_key_id) — preferable to substring-name matching once you know the key id. Optional `?scope=admin|write|read` narrows to one privilege tier.',

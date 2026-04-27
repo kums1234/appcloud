@@ -113,3 +113,88 @@ docker compose up -d
 2. If changing the Neo4j password on an existing volume, first update it via
    the Neo4j browser at http://localhost:7474, then update the secret file
 3. Restart the stack: `docker compose restart`
+
+## Rotating the encryption key
+
+The `APPCLOUD_ENCRYPTION_KEY` master key derives row-level keys for every
+encrypted field in `cloud_accounts.config` and `integrations.config`
+(API tokens, cloud secret-keys, service-account JSON, etc.). The key is
+cached in-process via `scrypt`, and every ciphertext stores its own random
+salt. **A leaked master key decrypts every row** — there is no per-row
+isolation against an attacker who has the master.
+
+Rotate the master key when:
+- The current value has been exposed (logs, screenshot, mistakenly committed).
+- Annual / quarterly hygiene rotation per your compliance regime.
+- An operator with key access leaves the team.
+
+### Procedure
+
+1. **Generate the new key.**
+   ```bash
+   openssl rand -hex 32 > /tmp/new-encryption-key
+   ```
+
+2. **Stop API replicas** (or scale the deployment to 0) so no live process
+   is reading or writing rows during the rotation. The CLI assumes the
+   tables are quiescent — concurrent writes from a still-running API
+   would land under whichever key the API process holds, which races
+   the rotation.
+   ```bash
+   kubectl scale deployment/api --replicas=0
+   ```
+
+3. **Run the rotation CLI** with both keys in env. The CLI reads each
+   row's `config` JSONB, decrypts every secret field under the OLD key,
+   re-encrypts under the NEW key, and writes back inside a per-row
+   transaction. Per-row failures are logged and counted; the CLI exits
+   non-zero if any row failed.
+   ```bash
+   cd api
+   APPCLOUD_ENCRYPTION_KEY_OLD="$(cat ../secrets/appcloud_encryption_key.txt)" \
+   APPCLOUD_ENCRYPTION_KEY="$(cat /tmp/new-encryption-key)" \
+   POSTGRES_HOST=postgres \
+   POSTGRES_USER=appcloud \
+   POSTGRES_PASSWORD="$(cat ../secrets/pg_password.txt)" \
+   POSTGRES_DB=appcloud \
+   node scripts/rotate-encryption-key.js
+   ```
+   Watch for the final `[rotate] TOTALS:` line. Investigate any non-zero
+   `failed` count before continuing — those rows are still readable
+   under the OLD key, so you can roll forward by fixing whatever broke
+   (typically a corrupt ciphertext from a manual edit) and re-running.
+
+4. **Update the secret to the NEW key.**
+   ```bash
+   mv /tmp/new-encryption-key secrets/appcloud_encryption_key.txt
+   chmod 600 secrets/appcloud_encryption_key.txt
+   ```
+   For K8s, update the `appcloud-encryption-key` Secret resource.
+
+5. **Scale the API back up.** Verify by hitting `GET /integrations`
+   (admin) and confirming `__decryptErrors` is absent on every row.
+   ```bash
+   kubectl scale deployment/api --replicas=2
+   curl -H "X-API-Key: $ADMIN_KEY" http://api/integrations | jq '.[].config.__decryptErrors'
+   ```
+
+6. **Securely destroy the OLD key.** No row should still be encrypted
+   under it after step 3 succeeded; once verified, the OLD key has no
+   further use and should be removed from any password manager / vault
+   where it was stored.
+
+### What this does NOT cover (today)
+
+- **Per-tenant master keys.** Single-tenancy assumption — every row
+  shares one master key. Multi-tenant work (separate database per
+  tenant) will replace this with per-tenant keys; rotation will then be
+  a per-tenant concern.
+- **HSM / KMS-backed master.** The master is currently passed via env
+  var, which means it ends up in `/proc/N/environ` and any process-
+  inspection-based exfiltration. Wrapping with a KMS-managed KEK
+  (envelope encryption) is the next step beyond rotation; tracked under
+  `docs/code-audit-2026-04.md` P0.7.
+- **Online rotation.** The CLI requires a maintenance window (API
+  replicas stopped). An online-rotation pattern would need ciphertexts
+  to carry a key-version tag so old + new keys can coexist; that's a
+  larger refactor and out of scope for this slice.

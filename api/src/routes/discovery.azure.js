@@ -284,6 +284,35 @@ async function writeStructuralEdge(write, { from, to, via, source, evidence }) {
   }
 }
 
+// Batched edge writer — see discovery.aws.js for the rationale. One
+// UNWIND per resource collapses what was previously N sequential MERGE
+// queries (one per link) into a single round-trip.
+async function writeStructuralEdgesBatch(write, links) {
+  if (!links?.length) return 0
+  const filtered = links
+    .filter(l => l.from && l.to && l.from !== l.to)
+    .map(l => ({ ...l, confidence: VIA_TO_CONFIDENCE[l.via] ?? 60 }))
+  if (!filtered.length) return 0
+  try {
+    await write(`
+      UNWIND $links AS link
+      MATCH (a:Infra {id: link.from}), (b:Infra {id: link.to})
+      MERGE (a)-[r:CONNECTS_TO {via: link.via}]->(b)
+      ON CREATE SET r.discovered_at = datetime(),
+                    r.source        = link.source,
+                    r.confidence    = link.confidence,
+                    r.evidence      = link.evidence
+      ON MATCH  SET r.last_seen     = datetime(),
+                    r.source        = link.source,
+                    r.confidence    = link.confidence,
+                    r.evidence      = link.evidence
+    `, { links: filtered })
+    return filtered.length
+  } catch {
+    return 0
+  }
+}
+
 // ─── Structural edge extraction (replaces enrich Layer A) ─────────────────────
 
 async function emitStructuralEdges({ res, resolve, write, stats }) {
@@ -293,31 +322,41 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
   const type = (res.type || '').toLowerCase()
   const source = 'azure-resource-graph'
 
-  const link = async (via, toArmId, evidenceDetail) => {
+  // Collect every link from this resource into one batch — see
+  // discovery.aws.js's emitStructuralEdges header for the rationale
+  // (N+1 → 1 round-trip per resource).
+  const links = []
+  const link = (via, toArmId, evidenceDetail) => {
     const toNid = resolve(toArmId)
     if (!toNid) return
     const evidence = `ARG: ${type} ${via}${evidenceDetail ? ` ${evidenceDetail}` : ''}`
-    const n = await writeStructuralEdge(write, { from: fromNid, to: toNid, via, source, evidence })
-    if (n) stats.edges++
+    links.push({ from: fromNid, to: toNid, via, source, evidence })
+  }
+  // For the subnet→vnet / subnet→nsg / subnet→route-table edges below
+  // the `from` is a subnet (not the parent resource), so they need a
+  // direct push rather than going through `link()`.
+  const linkRaw = (from, to, via, evidence) => {
+    if (!from || !to) return
+    links.push({ from, to, via, source, evidence })
   }
 
   // VM → NIC, VM → managed disk
   if (type === 'microsoft.compute/virtualmachines') {
-    for (const nic of p.networkProfile?.networkInterfaces || []) await link('nic', nic.id)
+    for (const nic of p.networkProfile?.networkInterfaces || []) link('nic', nic.id)
     for (const disk of p.storageProfile?.dataDisks || []) {
-      if (disk.managedDisk?.id) await link('disk', disk.managedDisk.id)
+      if (disk.managedDisk?.id) link('disk', disk.managedDisk.id)
     }
   }
 
   // NIC → Subnet, NIC → Public IP, NIC → NSG
   if (type === 'microsoft.network/networkinterfaces') {
     for (const cfg of p.ipConfigurations || []) {
-      await link('subnet', cfg.properties?.subnet?.id)
+      link('subnet', cfg.properties?.subnet?.id)
       if (cfg.properties?.publicIPAddress?.id) {
-        await link('public-ip', cfg.properties.publicIPAddress.id)
+        link('public-ip', cfg.properties.publicIPAddress.id)
       }
     }
-    if (p.networkSecurityGroup?.id) await link('nsg', p.networkSecurityGroup.id)
+    if (p.networkSecurityGroup?.id) link('nsg', p.networkSecurityGroup.id)
   }
 
   // Subnet → VNet (reverse: emit from subnet), Subnet → NSG, Subnet → Route Table
@@ -326,44 +365,31 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
       const subNid = resolve(subnet.id)
       if (!subNid) continue
       const evidenceDetail = subnet.name ? `(subnet=${subnet.name})` : ''
-      await writeStructuralEdge(write, {
-        from: subNid, to: fromNid, via: 'vnet', source,
-        evidence: `ARG: subnet→vnet ${evidenceDetail}`.trim(),
-      }).then(n => { if (n) stats.edges++ })
+      linkRaw(subNid, fromNid, 'vnet', `ARG: subnet→vnet ${evidenceDetail}`.trim())
       if (subnet.properties?.networkSecurityGroup?.id) {
         const nsgNid = resolve(subnet.properties.networkSecurityGroup.id)
-        if (nsgNid) {
-          await writeStructuralEdge(write, {
-            from: subNid, to: nsgNid, via: 'nsg', source,
-            evidence: `ARG: subnet→nsg ${evidenceDetail}`.trim(),
-          }).then(n => { if (n) stats.edges++ })
-        }
+        if (nsgNid) linkRaw(subNid, nsgNid, 'nsg', `ARG: subnet→nsg ${evidenceDetail}`.trim())
       }
       if (subnet.properties?.routeTable?.id) {
         const rtNid = resolve(subnet.properties.routeTable.id)
-        if (rtNid) {
-          await writeStructuralEdge(write, {
-            from: subNid, to: rtNid, via: 'route-table', source,
-            evidence: `ARG: subnet→route-table ${evidenceDetail}`.trim(),
-          }).then(n => { if (n) stats.edges++ })
-        }
+        if (rtNid) linkRaw(subNid, rtNid, 'route-table', `ARG: subnet→route-table ${evidenceDetail}`.trim())
       }
     }
   }
 
   // App Service → App Service Plan, → VNet integration subnet, → App Insights
   if (type === 'microsoft.web/sites') {
-    if (p.serverFarmId)             await link('app-service-plan',   p.serverFarmId)
-    if (p.virtualNetworkSubnetId)   await link('vnet-integration',   p.virtualNetworkSubnetId)
+    if (p.serverFarmId)             link('app-service-plan',   p.serverFarmId)
+    if (p.virtualNetworkSubnetId)   link('vnet-integration',   p.virtualNetworkSubnetId)
     if (p.appInsightsInstrumentationKey) {
-      await link('app-insights', p.appInsightsInstrumentationKey)
+      link('app-insights', p.appInsightsInstrumentationKey)
     }
   }
 
   // AKS → node subnet
   if (type === 'microsoft.containerservice/managedclusters') {
     const nodeSubnet = p.agentPoolProfiles?.[0]?.vnetSubnetID
-    if (nodeSubnet) await link('aks-node-subnet', nodeSubnet)
+    if (nodeSubnet) link('aks-node-subnet', nodeSubnet)
   }
 
   // SQL database → parent SQL server (derived from ARM id)
@@ -371,13 +397,13 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
     const parts = (res.id || '').split('/')
     // .../servers/<server-name>/databases/<db-name> → strip last two segments
     if (parts.length > 2) {
-      await link('sql-server', parts.slice(0, -2).join('/'))
+      link('sql-server', parts.slice(0, -2).join('/'))
     }
   }
 
   // Redis → Subnet (VNet injection)
   if (type === 'microsoft.cache/redis') {
-    if (p.subnetId) await link('redis-vnet-injection', p.subnetId)
+    if (p.subnetId) link('redis-vnet-injection', p.subnetId)
   }
 
   // Service Bus / Event Hub → private endpoint
@@ -387,7 +413,7 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
   ) {
     for (const pe of p.privateEndpointConnections || []) {
       if (pe.properties?.privateEndpoint?.id) {
-        await link('private-endpoint', pe.properties.privateEndpoint.id)
+        link('private-endpoint', pe.properties.privateEndpoint.id)
       }
     }
   }
@@ -395,14 +421,14 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
   // App Insights → monitored application (points to the app/function it monitors)
   if (type === 'microsoft.insights/components') {
     if (p.Application_Type && p.ApplicationId) {
-      await link('monitors', p.ApplicationId)
+      link('monitors', p.ApplicationId)
     }
   }
 
   // Key Vault → VNet rule subnets
   if (type === 'microsoft.keyvault/vaults') {
     for (const rule of p.networkAcls?.virtualNetworkRules || []) {
-      if (rule.id) await link('keyvault-vnet-rule', rule.id)
+      if (rule.id) link('keyvault-vnet-rule', rule.id)
     }
   }
 
@@ -412,7 +438,7 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
       for (const cfg of pool.properties?.backendIPConfigurations || []) {
         // cfg.id is a NIC ip-config id — parent NIC = strip last 2 segments
         const nicId = cfg.id?.split('/').slice(0, -2).join('/')
-        if (nicId) await link('lb-backend-nic', nicId)
+        if (nicId) link('lb-backend-nic', nicId)
       }
     }
   }
@@ -420,7 +446,13 @@ async function emitStructuralEdges({ res, resolve, write, stats }) {
   // Application Gateway → GW subnet
   if (type === 'microsoft.network/applicationgateways') {
     const subId = p.gatewayIPConfigurations?.[0]?.properties?.subnet?.id
-    if (subId) await link('agw-subnet', subId)
+    if (subId) link('agw-subnet', subId)
+  }
+
+  // One round-trip writes every collected link.
+  if (links.length > 0) {
+    const written = await writeStructuralEdgesBatch(write, links)
+    stats.edges += written
   }
 }
 

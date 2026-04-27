@@ -3,6 +3,7 @@ import {
   ensureMonthlyPartition,
   ensureCurrentAndNextPartitions,
   listExpiredPartitions,
+  redistributeDefaultPartition,
 } from '../audit-partitioning.js'
 
 // Pure-JS unit tests on the bits that don't need a real DB. The
@@ -68,6 +69,20 @@ describe('partition naming + bounds', () => {
       .rejects.toThrow(/refusing to use unsafe partition name/)
   })
 
+  test('month bounds for December produce January-of-next-year as upper bound', async () => {
+    // Subtle: monthBounds() builds `to` as Date.UTC(year, month, 1).
+    // JS Date is 0-indexed, so month=12 wraps to month=0 of year+1
+    // (i.e. Jan-1 next year). Lock that contract — a refactor that
+    // accidentally subtracted 1 from `month` would silently produce a
+    // partition spanning Dec→Dec instead of Dec→Jan-next-year.
+    const fake = fakeQuery()
+    fake.setExists(false)
+    await ensureMonthlyPartition(fake.query, null, 2026, 12)
+    const createCall = fake.calls.find(c => c.sql.includes('PARTITION OF audit_log'))
+    expect(createCall.sql).toContain("FROM ('2026-12-01T00:00:00.000Z')")
+    expect(createCall.sql).toContain("TO ('2027-01-01T00:00:00.000Z')")
+  })
+
   test('December rolls over to next-year January for the "next month"', async () => {
     const fake = fakeQuery()
     fake.setExists(false)
@@ -97,5 +112,118 @@ describe('partition naming + bounds', () => {
     ]
     const expired = await listExpiredPartitions(query, new Date('2026-04-01T00:00:00Z'))
     expect(expired.map(p => p.name)).toEqual(['audit_log_2025_02'])
+  })
+})
+
+describe('redistributeDefaultPartition', () => {
+  // The stub recognises the call patterns redistribute uses: existence
+  // probe (pg_class), DISTINCT month query, ensureMonthlyPartition's
+  // probe + CREATE, and the final move statement. Each query type
+  // returns a configurable result so we can assert on call ordering and
+  // SQL shape without spinning a real DB.
+  function makeStub({ defaultExists = true, monthsInDefault = [], existingPartitions = new Set() } = {}) {
+    const calls = []
+    const movedPerMonth = new Map()             // 'YYYY-MM' → row count moved (test setup)
+    const query = async (sql, params = []) => {
+      calls.push({ sql, params })
+      // pg_class existence probe (default partition + per-month partition)
+      if (sql.includes('FROM pg_class') && sql.includes('WHERE relname')) {
+        const name = params[0]
+        if (name === 'audit_log_default') return defaultExists ? [{ '?column?': 1 }] : []
+        return existingPartitions.has(name) ? [{ '?column?': 1 }] : []
+      }
+      // DISTINCT YEAR/MONTH from default
+      if (sql.includes('SELECT DISTINCT') && sql.includes('audit_log_default')) {
+        return monthsInDefault
+      }
+      // The redistribute INSERT … RETURNING id — return one fake row per
+      // moved entry so .length matches the configured count.
+      if (sql.includes('INSERT INTO audit_log') && sql.includes('RETURNING id')) {
+        const m = sql.match(/'(\d{4}-\d{2})-01T00:00:00\.000Z'/)
+        const key = m?.[1] ?? params?.[0]?.slice(0, 7) ?? ''
+        const count = movedPerMonth.get(key) ?? 0
+        return Array.from({ length: count }, (_, i) => ({ id: `id-${key}-${i}` }))
+      }
+      return []
+    }
+    return { query, calls, setMoved(year, month, n) {
+      movedPerMonth.set(`${year}-${String(month).padStart(2, '0')}`, n)
+    } }
+  }
+
+  test('returns zero counts and creates nothing when default partition is empty', async () => {
+    const stub = makeStub({ monthsInDefault: [] })
+    const r = await redistributeDefaultPartition(stub.query, null)
+    expect(r).toEqual({ moved: 0, partitionsCreated: [], months: [] })
+  })
+
+  test('skips cleanly + warns when default partition is absent', async () => {
+    const warnings = []
+    const log = { warn: (msg) => warnings.push(msg) }
+    const stub = makeStub({ defaultExists: false })
+    const r = await redistributeDefaultPartition(stub.query, log)
+    expect(r).toEqual({ moved: 0, partitionsCreated: [], months: [] })
+    expect(warnings.some(w => /skipping redistribute/.test(w))).toBe(true)
+    // No INSERT must have been issued — important: an absent default
+    // partition is the post-DETACH state, not a corruption signal.
+    expect(stub.calls.some(c => c.sql.includes('INSERT INTO audit_log'))).toBe(false)
+  })
+
+  test('creates the target partition before moving rows for that month', async () => {
+    const stub = makeStub({
+      monthsInDefault: [{ y: 2025, m: 12 }],
+    })
+    stub.setMoved(2025, 12, 7)
+    const r = await redistributeDefaultPartition(stub.query, null)
+    expect(r.moved).toBe(7)
+    expect(r.partitionsCreated).toEqual(['audit_log_2025_12'])
+    expect(r.months).toEqual([
+      { partition: 'audit_log_2025_12', year: 2025, month: 12, moved: 7 },
+    ])
+    // Order matters: CREATE PARTITION before INSERT INTO audit_log.
+    const createIdx = stub.calls.findIndex(c => c.sql.includes('PARTITION OF audit_log') && c.sql.includes('audit_log_2025_12'))
+    const insertIdx = stub.calls.findIndex(c => c.sql.includes('INSERT INTO audit_log'))
+    expect(createIdx).toBeGreaterThan(-1)
+    expect(insertIdx).toBeGreaterThan(createIdx)
+  })
+
+  test('reuses an existing partition (no CREATE) and still moves rows', async () => {
+    const stub = makeStub({
+      monthsInDefault:    [{ y: 2026, m: 1 }],
+      existingPartitions: new Set(['audit_log_2026_01']),
+    })
+    stub.setMoved(2026, 1, 3)
+    const r = await redistributeDefaultPartition(stub.query, null)
+    expect(r.partitionsCreated).toEqual([])
+    expect(r.moved).toBe(3)
+    // No CREATE TABLE for an existing partition.
+    expect(stub.calls.some(c =>
+      c.sql.includes('PARTITION OF audit_log') && c.sql.includes('audit_log_2026_01'),
+    )).toBe(false)
+  })
+
+  test('aggregates per-month counts across multiple months in chronological order', async () => {
+    const stub = makeStub({
+      monthsInDefault: [
+        { y: 2024, m: 11 },
+        { y: 2024, m: 12 },
+        { y: 2025, m: 3 },
+      ],
+    })
+    stub.setMoved(2024, 11, 4)
+    stub.setMoved(2024, 12, 9)
+    stub.setMoved(2025, 3, 2)
+    const r = await redistributeDefaultPartition(stub.query, null)
+    expect(r.moved).toBe(15)
+    expect(r.months.map(x => x.partition)).toEqual([
+      'audit_log_2024_11',
+      'audit_log_2024_12',
+      'audit_log_2025_03',
+    ])
+    expect(r.partitionsCreated).toEqual([
+      'audit_log_2024_11',
+      'audit_log_2024_12',
+      'audit_log_2025_03',
+    ])
   })
 })

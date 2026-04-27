@@ -27,6 +27,17 @@ const ALLOWED_PUBLIC_ROUTES = new Set([
   'HEAD /',
   'GET /health',
   'HEAD /health',
+  // /ready — K8s readinessProbe target. Returns 503 when either DB is
+  // unreachable. Standard probe convention is unauthed; the response
+  // contains no sensitive information beyond DB connectivity status.
+  'GET /ready',
+  'HEAD /ready',
+  // /metrics — Prometheus exposition. Standard practice is unauthed
+  // scrape over the cluster network; access control belongs at the
+  // network-policy layer, not as an X-API-Key header on the scraper.
+  // See plugins/metrics.js header for the rationale.
+  'GET /metrics',
+  'HEAD /metrics',
 ])
 
 function hasAuthPreHandler(routeOptions, auth) {
@@ -36,15 +47,15 @@ function hasAuthPreHandler(routeOptions, auth) {
   return false
 }
 
-function hasAdminPreHandler(routeOptions, requireAdmin) {
+function hasAdminPreHandler(routeOptions, adminHandler) {
   const ph = routeOptions.preHandler
-  if (ph === requireAdmin) return true
-  if (Array.isArray(ph) && ph.includes(requireAdmin)) return true
+  if (ph === adminHandler) return true
+  if (Array.isArray(ph) && ph.includes(adminHandler)) return true
   return false
 }
 
 function isAdminRoute(routeOptions) {
-  return routeOptions.config?.requireAdmin === true
+  return routeOptions.config?.scope === 'admin'
 }
 
 function isPublicByConvention(routeOptions) {
@@ -70,8 +81,8 @@ async function buildAndCollect() {
 
   // Same decorator stubs the export script + drift test use, so route
   // registration succeeds without real DB connections.
-  fastify.decorate('pg',             { pool: null, query: async () => [], audit: async () => {} })
-  fastify.decorate('neo4j',          { write: async () => [], query: async () => [] })
+  fastify.decorate('pg',             { pool: null, query: async () => [], audit: async () => {}, ping: async () => true })
+  fastify.decorate('neo4j',          { write: async () => [], query: async () => [], ping: async () => true })
   fastify.decorate('ai',             { localAvailable: false, cloudAvailable: false })
   fastify.decorate('connectors',     { list: () => [], get: () => null })
   fastify.decorate('cmdbAssessment', { markDirty: () => {}, run: async () => ({}) })
@@ -92,7 +103,7 @@ async function buildAndCollect() {
       url:           routeOptions.url,
       hasAuth:       hasAuthPreHandler(routeOptions, fastify.authenticate),
       isAdmin:       isAdminRoute(routeOptions),
-      hasAdminGuard: hasAdminPreHandler(routeOptions, fastify.requireAdmin),
+      hasAdminGuard: hasAdminPreHandler(routeOptions, fastify.scopeHandlers?.admin),
       isPublic:      isPublicByConvention(routeOptions),
       attachedScope: scopeHandler?.[0] ?? null,
       resolvedScope: routeOptions.config?._resolvedScope ?? null,
@@ -125,8 +136,14 @@ async function buildAndCollect() {
     if (m.connectorsRegistryRoutes) await fastify.register(m.connectorsRegistryRoutes, { prefix: '/connectors' })
   } catch {}
 
-  // /health and / — match server.js.
+  // metricsPlugin — registers GET /metrics. Treated as part of the
+  // route surface even though it's structured as a plugin in server.js.
+  const { metricsPlugin } = await import(path.join(apiSrc, 'plugins/metrics.js'))
+  await metricsPlugin(fastify)
+
+  // /health, /ready, and / — match server.js.
   fastify.get('/health', { schema: { security: [] } }, async () => ({ status: 'ok' }))
+  fastify.get('/ready',  { schema: { security: [] } }, async () => ({ status: 'ready' }))
   fastify.get('/',       { schema: { security: [] } }, async () => ({ name: 'AppCloud API' }))
 
   await fastify.ready()
@@ -163,7 +180,7 @@ describe('Auth coverage — default-deny invariant', () => {
     expect({ unexpected, missing }).toEqual({ unexpected: [], missing: [] })
   })
 
-  test('admin-flagged routes have the requireAdmin preHandler attached', () => {
+  test('admin-scoped routes have the admin scope handler attached', () => {
     const adminRoutes = routes.filter(r => r.isAdmin)
     expect(adminRoutes.length).toBeGreaterThan(0) // sanity — at least /audit/*
     const violations = adminRoutes

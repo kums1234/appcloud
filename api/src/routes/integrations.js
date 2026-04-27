@@ -6,7 +6,7 @@
 // one-shot multipart upload → parse → ingest.
 import { parseTerraformState } from '../utils/terraform-state-parser.js'
 import { ingestIacResources }  from '../utils/iac-ingest.js'
-import { systemActor }         from '../utils/audit.js'
+import { systemActor, SYSTEM_ACTORS } from '../utils/audit.js'
 
 // ── Route handler ────────────────────────────────────────────────────────────
 export default async function integrationRoutes(fastify) {
@@ -31,7 +31,16 @@ export default async function integrationRoutes(fastify) {
     try {
       const data = await req.file()
       if (!data) return reply.badRequest('No file uploaded — send as multipart field "statefile"')
-      filename = data.filename || 'terraform.tfstate'
+      // Sanitize: strip path components + cap length. The filename
+      // ends up in the audit trail and the terraform_imports table;
+      // an attacker uploading `../../etc/passwd.tfstate` should not
+      // get that string preserved verbatim in either log or DB.
+      const rawFilename = data.filename || 'terraform.tfstate'
+      filename = rawFilename
+        .replace(/^.*[\\/]/, '')        // drop directories — keep basename only
+        .replace(/[^A-Za-z0-9._-]/g, '_') // collapse unsafe chars
+        .slice(0, 200)                  // bound length
+        || 'terraform.tfstate'
       const chunks = []
       for await (const chunk of data.file) chunks.push(chunk)
       const raw = Buffer.concat(chunks)
@@ -101,7 +110,7 @@ export default async function integrationRoutes(fastify) {
       // actor_key_id / actor_scope are deliberately NULL rather than
       // accidentally dropped from the bare-string code path.
       await fastify.pg.audit(
-        systemActor('terraform-import'),
+        systemActor(SYSTEM_ACTORS.terraformImport),
         'import', 'TerraformImport', jobId, filename,
         {
           created:    ingestResult.resourcesCreated,

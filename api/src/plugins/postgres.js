@@ -10,7 +10,18 @@ function readSecret(fileEnvVar, plainEnvVar, fallback = '') {
   return process.env[plainEnvVar] || fallback
 }
 
-const stub = { pool: null, query: async () => [], audit: async () => {} }
+// Stub returned when Postgres isn't reachable. ping() always rejects so
+// /ready picks up the degraded state.
+const PG_UNAVAILABLE = () => Object.assign(
+  new Error('postgres unavailable'),
+  { code: 'POSTGRES_UNAVAILABLE', statusCode: 503 },
+)
+const stub = {
+  pool:  null,
+  query: async () => [],
+  audit: async () => {},
+  ping:  async () => { throw PG_UNAVAILABLE() },
+}
 
 const AUDIT_BUFFER_MAX      = parseInt(process.env.APPCLOUD_AUDIT_BUFFER_MAX      || '1000',  10)
 const AUDIT_BUFFER_DRAIN_MS = parseInt(process.env.APPCLOUD_AUDIT_BUFFER_DRAIN_MS || '30000', 10)
@@ -36,7 +47,55 @@ export async function postgresPlugin(fastify) {
   const password = readSecret('PG_PASSWORD_FILE', 'POSTGRES_PASSWORD', '')
   const database = process.env.POSTGRES_DB || 'appcloud'
   const port     = parseInt(process.env.POSTGRES_PORT || '5432')
-  const pool     = new pg.Pool({ host, port, database, user, password, max: 10,
+
+  // TLS — opt-in via APPCLOUD_POSTGRES_SSL=true. Defaults to plaintext
+  // because every internal deployment so far has been intra-cluster (K8s
+  // Service-to-Service over the cluster CNI) where the network boundary
+  // is the trust boundary. See DEVELOPMENT.md "Internal TLS posture" for
+  // the rationale and how to flip it on for managed-Postgres setups
+  // (RDS, Cloud SQL, etc.) that require encrypted client connections.
+  //
+  // PG_CA_FILE points at a PEM bundle when the server uses a custom CA;
+  // omit it to disable verification (rejectUnauthorized=false), which
+  // matches the legacy `?sslmode=require` behaviour.
+  const sslEnabled    = /^(true|1|yes)$/i.test(process.env.APPCLOUD_POSTGRES_SSL || '')
+  const tlsRequired   = /^(true|1|yes)$/i.test(process.env.APPCLOUD_REQUIRE_TLS || '')
+  let ssl = false
+  if (sslEnabled) {
+    const caPath = process.env.PG_CA_FILE
+    if (caPath) {
+      try {
+        ssl = { ca: fs.readFileSync(caPath, 'utf8'), rejectUnauthorized: true }
+      } catch (err) {
+        fastify.log.warn(`[pg] PG_CA_FILE=${caPath} unreadable (${err.message}) — falling back to ssl: rejectUnauthorized=false`)
+        ssl = { rejectUnauthorized: false }
+      }
+    } else {
+      ssl = { rejectUnauthorized: false }
+    }
+  } else if (tlsRequired) {
+    // Hard-fail: APPCLOUD_REQUIRE_TLS=true means refuse to start without
+    // an encrypted connection, regardless of host shape. Operators who
+    // set this flag mean it — don't second-guess them on in-cluster
+    // hostnames.
+    throw new Error(
+      `[pg] APPCLOUD_REQUIRE_TLS=true but APPCLOUD_POSTGRES_SSL is not enabled — ` +
+      `set APPCLOUD_POSTGRES_SSL=true (and PG_CA_FILE for verification) or unset APPCLOUD_REQUIRE_TLS`,
+    )
+  } else if (host && !/^(localhost|127\.0\.0\.1|::1|postgres)$/i.test(host)) {
+    fastify.log.warn(
+      `[pg] connecting to ${host}:${port} without TLS — set APPCLOUD_POSTGRES_SSL=true ` +
+      `(and PG_CA_FILE for verification) when reaching managed Postgres or any host outside the cluster`,
+    )
+  }
+
+  // Pool size — bumpable via APPCLOUD_PG_POOL_MAX. 10 was the previous
+  // hardcoded default; higher values reduce queueing under bursty
+  // load (audit writes + user queries + scheduler ticks compete) at
+  // the cost of more idle connections. Tune against expected p95
+  // concurrency, not peak.
+  const poolMax = parseInt(process.env.APPCLOUD_PG_POOL_MAX || '10', 10)
+  const pool = new pg.Pool({ host, port, database, user, password, ssl, max: poolMax,
     connectionTimeoutMillis: 3000 })
 
   try {
@@ -95,15 +154,27 @@ export async function postgresPlugin(fastify) {
 
   // Periodic drain — rescues rows that piled up while Postgres was
   // unavailable. Cleared in onClose. unref() so the timer alone doesn't
-  // keep the process alive.
+  // keep the process alive. Errors are logged at WARN with structured
+  // fields so a sustained outage shows up in incident triage instead
+  // of being a silent gauge climb.
   const drainTimer = setInterval(() => {
-    auditMachinery.drain().catch(() => {})
+    auditMachinery.drain().catch(err =>
+      fastify.log.warn(
+        { err: err.message, code: err.code, pending: auditMachinery.pending() },
+        '[pg] audit-buffer drain failed — rows still queued for next tick',
+      ),
+    )
   }, AUDIT_BUFFER_DRAIN_MS)
   drainTimer.unref?.()
 
   fastify.decorate('pg', {
     pool,
     query: async (sql, params = []) => (await pool.query(sql, params)).rows,
+    // ping() — used by /ready to probe connectivity per request. Tight
+    // SELECT 1 so a degraded pool / slow connection surfaces fast and
+    // the readinessProbe can mark the pod unready before the request
+    // backlog grows.
+    ping: async () => { await pool.query('SELECT 1'); return true },
     // audit() — see utils/audit-buffer.js for full semantics. Briefly:
     //   - hot path: direct INSERT
     //   - on failure or backlog: queue + periodic retry

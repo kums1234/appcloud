@@ -6,9 +6,22 @@
 // The scheduler starts when the server starts and respects the enabled flag.
 // Interval changes take effect on the next tick without a server restart.
 
+import { systemActor, SYSTEM_ACTORS }     from '../utils/audit.js'
+import { makeOnceLock }                    from '../utils/once-lock.js'
+import { withLeaderLock, SCHEDULER_LOCK_KEYS } from '../utils/leader-lock.js'
+
 export async function schedulerPlugin(fastify) {
   let timer = null
-  let running = false
+  // Replaces the old `let running = false` flag — that pattern raced
+  // across the await between `if (running) return` and `running = true`,
+  // letting two concurrent ticks both enter the scan. The promise-based
+  // lock holds atomically across awaits — covers the in-process case.
+  // For multi-pod (K8s replicas > 1), withLeaderLock adds a Postgres
+  // advisory-lock outer gate so only one replica's tick wins per
+  // interval. Both layers run together: the in-process lock prevents
+  // overlapping ticks within a single replica; the Postgres lock
+  // prevents concurrent ticks across replicas.
+  const scanLock = makeOnceLock()
 
   const INIT_SQL = `
     CREATE TABLE IF NOT EXISTS discovery_schedule (
@@ -61,12 +74,20 @@ export async function schedulerPlugin(fastify) {
   }
 
   // ── Run a full scan across all configured accounts ───────────────────────
+  // The two-layer lock: outer Postgres advisory lock (inter-pod), inner
+  // in-process promise lock (intra-pod). The outer one is opportunistic
+  // — if Postgres is unavailable it falls through, and we still get the
+  // in-process gate. The inner one always runs.
   const runScheduledScan = async () => {
-    if (running) {
-      fastify.log.info('[Scheduler] Scan already running — skipping tick')
-      return
+    const outer = await withLeaderLock(fastify.pg?.pool, SCHEDULER_LOCK_KEYS.discoveryScan, async () => {
+      return scanLock.run(scan)
+    })
+    if (outer.skipped === 'leader-elsewhere') {
+      fastify.log.info('[Scheduler] another replica holds the leader lock — skipping tick')
     }
-    running = true
+    return outer
+  }
+  const scan = async () => {
     fastify.log.info('[Scheduler] Starting scheduled discovery scan')
     await updateSchedule({ last_run_status: 'running', last_run_at: new Date() })
 
@@ -119,85 +140,106 @@ export async function schedulerPlugin(fastify) {
         byProvider[row.provider].push({ ...row, config: decryptConfig(row.config || {}) })
       }
 
-      // ── AWS ──────────────────────────────────────────────────────────────
-      if (byProvider.aws?.length) {
-        const { scanAWSAccounts } = await import('../routes/discovery.js').catch(() => ({}))
-        for (const account of byProvider.aws) {
-          try {
-            const cfg = account.config
-            const creds = cfg.accessKeyId
-              ? { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey || cfg.secretKey }
-              : null
-            const regions = cfg.regions
-              ? cfg.regions.split(',').map(r => r.trim())
-              : ['us-east-1']
-
-            // Use the internal scan function directly (bypass HTTP layer)
-            const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/aws`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ accountId: account.id, regions, ...(creds ? { credentials: creds } : {}) })
-            })
-            const data = await res.json()
-            grandTotal += data.total || 0
-            fastify.log.info(`[Scheduler] AWS ${account.name}: ${data.total || 0} resources`)
-          } catch (e) {
-            errors.push(`AWS/${account.name}: ${e.message}`)
-          }
-        }
+      // Per-provider scanner function. Each handles one account at a
+      // time (the cloud APIs themselves rate-limit cross-account
+      // concurrency anyway), but the THREE providers run in parallel —
+      // AWS+Azure+GCP no longer serialize at 30s+20s+40s = 90s per
+      // tick. The Promise.all aggregates each provider's local
+      // grandTotal/errors back into the outer accumulators.
+      // Base URL for the in-process discovery routes. Default points
+      // at this same pod's loopback (PORT env). Override via
+      // APPCLOUD_INTERNAL_BASE_URL when:
+      //   - The API binds to a non-default port the scheduler can't
+      //     guess (uncommon — `PORT` should be set consistently).
+      //   - You want the scheduler to call a *different* replica's
+      //     handler (typically a bad idea — the leader-lock already
+      //     gates one tick per replica via Postgres advisory lock).
+      const aiBaseUrl = process.env.APPCLOUD_INTERNAL_BASE_URL
+        || `http://localhost:${process.env.PORT || 3000}`
+      // Per-tick request id — the scheduler isn't a request handler so
+      // there's no inbound `req.id`; generate one and attach it to
+      // every internal fetch + log line so a single tick's work is
+      // grep-able across the discovery scan + audit + downstream
+      // structured logs. Server.js's `requestIdHeader: 'x-request-id'`
+      // picks this up on the receiving handler.
+      const tickId = `sched_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      fastify.log.info({ tickId }, '[Scheduler] beginning tick')
+      // Wall-clock cap on each provider's scan via AbortSignal. Without
+      // a timeout, a hung scanner blocks the entire scheduler tick (and
+      // every subsequent tick, since runScheduledScan is gated on the
+      // promise lock). 10 minutes is generous for a real cloud scan
+      // and decisive enough that an operator notices.
+      const SCHED_FETCH_TIMEOUT_MS = parseInt(process.env.APPCLOUD_SCHED_FETCH_TIMEOUT_MS || '600000', 10)
+      const fetchWithTimeout = (url, init) => fetch(url, {
+        ...init,
+        headers: { ...(init?.headers || {}), 'x-request-id': tickId },
+        signal:  AbortSignal.timeout(SCHED_FETCH_TIMEOUT_MS),
+      })
+      async function scanAws(account) {
+        const cfg = account.config
+        const creds = cfg.accessKeyId
+          ? { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey || cfg.secretKey }
+          : null
+        const regions = cfg.regions
+          ? cfg.regions.split(',').map(r => r.trim())
+          : ['us-east-1']
+        const res = await fetchWithTimeout(`${aiBaseUrl}/discovery/scan/aws`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: account.id, regions, ...(creds ? { credentials: creds } : {}) }),
+        })
+        return res.json()
+      }
+      async function scanAzure(account) {
+        const cfg = account.config
+        const creds = cfg.clientId && cfg.clientSecret
+          ? { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret }
+          : null
+        const res = await fetchWithTimeout(`${aiBaseUrl}/discovery/scan/azure`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: account.id, subscriptionId: cfg.subscriptionId, ...(creds ? { credentials: creds } : {}) }),
+        })
+        return res.json()
+      }
+      async function scanGcp(account) {
+        const cfg = account.config
+        let gcpCreds = null
+        if (cfg.serviceAccount) { try { gcpCreds = JSON.parse(cfg.serviceAccount) } catch {} }
+        const res = await fetchWithTimeout(`${aiBaseUrl}/discovery/scan/gcp`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: account.id, projectId: cfg.projectId, ...(gcpCreds ? { credentials: gcpCreds } : {}) }),
+        })
+        return res.json()
       }
 
-      // ── Azure ─────────────────────────────────────────────────────────────
-      if (byProvider.azure?.length) {
-        for (const account of byProvider.azure) {
-          try {
-            const cfg = account.config
-            const creds = cfg.clientId && cfg.clientSecret
-              ? { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret }
-              : null
-            const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/azure`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                accountId: account.id,
-                subscriptionId: cfg.subscriptionId,
-                ...(creds ? { credentials: creds } : {})
-              })
-            })
-            const data = await res.json()
-            grandTotal += data.total || 0
-            fastify.log.info(`[Scheduler] Azure ${account.name}: ${data.total || 0} resources`)
-          } catch (e) {
-            errors.push(`Azure/${account.name}: ${e.message}`)
-          }
-        }
-      }
+      const PROVIDERS = [
+        { name: 'aws',   accounts: byProvider.aws   ?? [], fn: scanAws   },
+        { name: 'azure', accounts: byProvider.azure ?? [], fn: scanAzure },
+        { name: 'gcp',   accounts: byProvider.gcp   ?? [], fn: scanGcp   },
+      ]
 
-      // ── GCP ───────────────────────────────────────────────────────────────
-      if (byProvider.gcp?.length) {
-        for (const account of byProvider.gcp) {
-          try {
-            const cfg = account.config
-            let gcpCreds = null
-            if (cfg.serviceAccount) {
-              try { gcpCreds = JSON.parse(cfg.serviceAccount) } catch {}
+      const perProviderResults = await Promise.all(
+        PROVIDERS.filter(p => p.accounts.length > 0).map(async (p) => {
+          let provTotal = 0
+          const provErrors = []
+          for (const account of p.accounts) {
+            try {
+              const data = await p.fn(account)
+              provTotal += data.total || 0
+              fastify.log.info(`[Scheduler] ${p.name.toUpperCase()} ${account.name}: ${data.total || 0} resources`)
+            } catch (e) {
+              provErrors.push(`${p.name.toUpperCase()}/${account.name}: ${e.message}`)
+              fastify.log.error(
+                { provider: p.name, accountId: account.id, accountName: account.name, err: e.message, code: e.code },
+                `[Scheduler] ${p.name.toUpperCase()} scan failed`,
+              )
             }
-            const res = await fetch(`http://localhost:${process.env.PORT || 3000}/discovery/scan/gcp`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                accountId: account.id,
-                projectId: cfg.projectId,
-                ...(gcpCreds ? { credentials: gcpCreds } : {})
-              })
-            })
-            const data = await res.json()
-            grandTotal += data.total || 0
-            fastify.log.info(`[Scheduler] GCP ${account.name}: ${data.total || 0} resources`)
-          } catch (e) {
-            errors.push(`GCP/${account.name}: ${e.message}`)
           }
-        }
+          return { provTotal, provErrors }
+        }),
+      )
+      for (const r of perProviderResults) {
+        grandTotal += r.provTotal
+        errors.push(...r.provErrors)
       }
 
       const duration = Date.now() - startedAt
@@ -253,7 +295,7 @@ export async function schedulerPlugin(fastify) {
                 `${applyData.applicationsCreated || 0} applications created`
               )
 
-              fastify.pg?.audit?.('system', 'auto-create', 'CloudAccount', 'all',
+              fastify.pg?.audit?.(systemActor(SYSTEM_ACTORS.schedulerAutoCreate), 'auto-create', 'CloudAccount', 'all',
                 'Auto-Create after Scheduled Scan', {
                   linked:               applyData.linked,
                   componentsCreated:    applyData.componentsCreated,
@@ -279,16 +321,15 @@ export async function schedulerPlugin(fastify) {
         next_run_at:           new Date(Date.now() + intervalMs),
       })
 
-      fastify.pg?.audit?.('system', 'scan', 'CloudAccount', 'all', 'Scheduled Scan',
+      fastify.pg?.audit?.(systemActor(SYSTEM_ACTORS.schedulerDiscoveryScan), 'scan', 'CloudAccount', 'all', 'Scheduled Scan',
         { grandTotal, errors, duration, providers: Object.keys(byProvider) })
         .catch(() => {})
 
     } catch (err) {
       fastify.log.error(`[Scheduler] Scan failed: ${err.message}`)
       await updateSchedule({ last_run_status: 'error', last_run_at: new Date() })
-    } finally {
-      running = false
     }
+    // Lock release happens automatically in scanLock.run's finally block.
   }
 
   // ── Start/restart the timer ──────────────────────────────────────────────
@@ -306,21 +347,34 @@ export async function schedulerPlugin(fastify) {
     await updateSchedule({ next_run_at: new Date(Date.now() + intervalMs) })
 
     timer = setInterval(async () => {
-      // Re-read schedule each tick so interval changes apply without restart
-      const current = await getSchedule()
-      if (!current?.enabled) {
-        fastify.log.info('[Scheduler] Disabled — stopping timer')
-        clearInterval(timer); timer = null
-        return
+      // Top-level try/catch so a thrown error from getSchedule, the
+      // recursive startTimer(), or runScheduledScan never bubbles up
+      // as an unhandled rejection — Node would log it but the next
+      // tick still fires, just with no structured context. With this
+      // in place the operator gets `[Scheduler] tick failed` plus the
+      // error code on every transient blip.
+      try {
+        // Re-read schedule each tick so interval changes apply without restart
+        const current = await getSchedule()
+        if (!current?.enabled) {
+          fastify.log.info('[Scheduler] Disabled — stopping timer')
+          clearInterval(timer); timer = null
+          return
+        }
+        // If interval changed, restart timer with new interval
+        const currentMs = current.interval_mins * 60 * 1000
+        if (Math.abs(currentMs - intervalMs) > 1000) {
+          fastify.log.info(`[Scheduler] Interval changed to ${current.interval_mins}m — restarting timer`)
+          await startTimer()
+          return
+        }
+        await runScheduledScan()
+      } catch (err) {
+        fastify.log.warn(
+          { err: err.message, code: err.code },
+          '[Scheduler] periodic tick failed — next tick will retry',
+        )
       }
-      // If interval changed, restart timer with new interval
-      const currentMs = current.interval_mins * 60 * 1000
-      if (Math.abs(currentMs - intervalMs) > 1000) {
-        fastify.log.info(`[Scheduler] Interval changed to ${current.interval_mins}m — restarting timer`)
-        startTimer()
-        return
-      }
-      await runScheduledScan()
     }, intervalMs)
   }
 

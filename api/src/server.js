@@ -13,15 +13,30 @@ import { otelAggregatorPlugin } from './plugins/otel-aggregator.js'
 import { schedulerPlugin } from './plugins/scheduler.js'
 import { cmdbAssessmentSchedulerPlugin } from './plugins/cmdb-assessment-scheduler.js'
 import { aiPlugin } from './plugins/ai.js'
+import { metricsPlugin } from './plugins/metrics.js'
 import { autoTagRoute } from './utils/openapi-tags.js'
 import { registerAllRoutes } from './utils/route-modules.js'
 
 const fastify = Fastify({
   logger: true,
+  // Request-ID propagation. Fastify mints a `req.id` per request and
+  // includes it on every `req.log` entry. We also accept an inbound
+  // `X-Request-Id` so a UI / load balancer can stitch traces across
+  // service boundaries. The same id is echoed on the response and
+  // forwarded by scheduler.js's internal fetches via the same header.
+  requestIdHeader:    'x-request-id',
+  requestIdLogLabel:  'reqId',
+  genReqId:           (req) => req.headers['x-request-id'] || `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
   // OpenAPI 3.0's `example` / `examples` / `xml` keywords aren't part of
   // the JSON Schema spec Ajv ships with — relax strict mode so we can
   // annotate routes with them. We still validate every body / param.
   ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
+})
+
+// Echo the resolved request id on every response so a UI client can
+// quote it back in a bug report.
+fastify.addHook('onSend', async (req, reply) => {
+  reply.header('x-request-id', req.id)
 })
 
 // Core plugins (these use @fastify/cors and @fastify/sensible which handle
@@ -32,9 +47,20 @@ const fastify = Fastify({
 // (e.g. via XSS in the UI or a leaked key in localStorage). The allowlist
 // is configured via APPCLOUD_ALLOWED_ORIGINS (comma-separated). Falls back
 // to the typical local-dev set so `npm run dev` doesn't need extra config.
+// Production deploys MUST set APPCLOUD_ALLOWED_ORIGINS explicitly —
+// the local-dev allowlist (Vite, port 8080, `appcloud.local`) is a
+// misconfiguration if it ships to prod. Refusing to fall back when
+// NODE_ENV=production stops a deploy that lost its CORS config from
+// silently allowing the dev origins.
+const FALLBACK_DEV_ORIGINS = 'http://localhost:3000,http://localhost:5173,http://localhost:8080,http://appcloud.local'
+if (process.env.NODE_ENV === 'production' && !process.env.APPCLOUD_ALLOWED_ORIGINS) {
+  throw new Error(
+    '[server] NODE_ENV=production without APPCLOUD_ALLOWED_ORIGINS — refusing to start with the local-dev CORS allowlist. ' +
+    'Set APPCLOUD_ALLOWED_ORIGINS to a comma-separated list of your real UI origins.',
+  )
+}
 const ALLOWED_ORIGINS = (
-  process.env.APPCLOUD_ALLOWED_ORIGINS
-  || 'http://localhost:3000,http://localhost:5173,http://localhost:8080,http://appcloud.local'
+  process.env.APPCLOUD_ALLOWED_ORIGINS || FALLBACK_DEV_ORIGINS
 ).split(',').map(s => s.trim()).filter(Boolean)
 await fastify.register(cors, {
   origin: (origin, cb) => {
@@ -58,16 +84,34 @@ await fastify.register(helmet, {
   hsts: { maxAge: 31536000, includeSubDomains: true },
 })
 
-// Rate limiting — global 300 req/min per API key (or per IP if unauthed) is
-// generous for legitimate dashboards and tight enough that a leaked key can't
-// rack up millions of requests/hour. AI + discovery routes opt-in to stricter
-// limits via `config.rateLimit` on their schema (see ai.js, discovery.js):
-// LLM-touching endpoints cost real dollars, so default to 5/min there.
+// Rate limiting — two-tier so an unauthenticated attacker can't rotate
+// X-API-Key values to bypass the cap.
+//
+//   Authenticated request: bucket = `key:<x-api-key>`. The header is
+//   present and the request will eventually succeed or fail auth, but
+//   either way the per-key bucket caps spend per credential.
+//
+//   Unauthenticated request: bucket = `ip:<remote>`. The header is
+//   absent or empty; we ignore whatever it might say (attackers
+//   sending random keys all get the same `ip:…` bucket). The cap is
+//   tighter than the authenticated one — pre-auth surface should not
+//   absorb sustained traffic.
+//
+// AI + discovery routes opt into stricter per-route limits via
+// `config.rateLimit` on their schema (see ai.js, discovery.js).
+const RATE_LIMIT_AUTH_MAX   = parseInt(process.env.APPCLOUD_RATE_LIMIT_MAX        || '300', 10)
+const RATE_LIMIT_UNAUTH_MAX = parseInt(process.env.APPCLOUD_RATE_LIMIT_UNAUTH_MAX || '60',  10)
 await fastify.register(rateLimit, {
   global: true,
-  max: parseInt(process.env.APPCLOUD_RATE_LIMIT_MAX || '300', 10),
+  max: (req) => {
+    return (req.headers['x-api-key'] || '').trim() ? RATE_LIMIT_AUTH_MAX : RATE_LIMIT_UNAUTH_MAX
+  },
   timeWindow: process.env.APPCLOUD_RATE_LIMIT_WINDOW || '1 minute',
-  keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
+  keyGenerator: (req) => {
+    const key = (req.headers['x-api-key'] || '').trim()
+    if (key) return `key:${key}`
+    return `ip:${req.ip}`
+  },
   // Don't throttle the liveness probe — k8s polls it constantly.
   skipOnError: false,
   allowList: ['127.0.0.1'],
@@ -182,6 +226,12 @@ await cmdbAssessmentSchedulerPlugin(fastify)
 // would encapsulate and hide the decorator. Must run before aiRoutes.
 await aiPlugin(fastify)
 
+// Prometheus metrics. Registers /metrics (public — see plugins/metrics.js
+// header for the auth stance) and the audit-buffer gauges. Direct call
+// rather than register() so the decorator (fastify.metricsRegistry) is
+// visible at the root, mirroring the other infrastructure plugins.
+await metricsPlugin(fastify)
+
 // Protected routes — mutations require a valid X-API-Key header when
 // APPCLOUD_API_KEY is set. The fastify.authenticate decorator is a no-op
 // when auth is disabled so the same preHandler works in both modes. The
@@ -194,7 +244,7 @@ fastify.get('/health', {
   schema: {
     tags:        ['Health'],
     summary:     'Liveness probe',
-    description: 'Open — no auth required. Returns 200 with `status: "ok"` and the server clock.',
+    description: 'Open — no auth required. Returns 200 with `status: "ok"` and the server clock. Use this for the K8s livenessProbe — it stays green even when DBs are degraded so pods aren\'t killed unnecessarily. Use /ready for the readinessProbe (which actually probes DB connectivity).',
     security:    [],
     response: {
       200: {
@@ -207,6 +257,58 @@ fastify.get('/health', {
     },
   },
 }, async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+
+// /ready — K8s readinessProbe target. Returns 200 only when both Postgres
+// AND Neo4j are reachable. A degraded DB (Neo4j stub mode after a failed
+// connect, or Postgres pool can't ping) returns 503 so K8s routes traffic
+// away from this pod. Distinct from /health so a transient DB blip
+// doesn't cause the pod to be killed (livenessProbe → restart) when
+// removing it from service (readinessProbe → no traffic) is enough.
+fastify.get('/ready', {
+  schema: {
+    tags:        ['Health'],
+    summary:     'Readiness probe (DB connectivity)',
+    description: 'Returns 200 + per-DB status when both Postgres and Neo4j are reachable. Returns 503 with the same shape (status `unavailable` for the failing DB) when either is unreachable — point K8s readinessProbe here so traffic routes away from degraded pods. Public — no auth required.',
+    security:    [],
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          status:   { type: 'string', example: 'ready' },
+          postgres: { type: 'string', example: 'ok' },
+          neo4j:    { type: 'string', example: 'ok' },
+        },
+      },
+      503: {
+        type: 'object',
+        properties: {
+          status:   { type: 'string', example: 'unavailable' },
+          postgres: { type: 'string' },
+          neo4j:    { type: 'string' },
+          error:    { type: 'string' },
+        },
+      },
+    },
+  },
+}, async (req, reply) => {
+  // Probe both in parallel — ~2× faster than serial when one is slow.
+  // Per-probe timeout via Promise.race so a hung backend doesn't blow
+  // past the readinessProbe deadline.
+  const PROBE_TIMEOUT_MS = parseInt(process.env.APPCLOUD_READY_TIMEOUT_MS || '2000', 10)
+  const probe = (fn) => Promise.race([
+    fn().then(() => 'ok').catch(err => err.message || 'failed'),
+    new Promise(r => setTimeout(() => r(`timeout after ${PROBE_TIMEOUT_MS}ms`), PROBE_TIMEOUT_MS)),
+  ])
+  const [pgStatus, neoStatus] = await Promise.all([
+    probe(() => fastify.pg.ping()),
+    probe(() => fastify.neo4j.ping()),
+  ])
+  if (pgStatus === 'ok' && neoStatus === 'ok') {
+    return { status: 'ready', postgres: 'ok', neo4j: 'ok' }
+  }
+  reply.code(503)
+  return { status: 'unavailable', postgres: pgStatus, neo4j: neoStatus }
+})
 
 fastify.get('/', {
   schema: {

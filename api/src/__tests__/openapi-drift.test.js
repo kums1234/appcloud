@@ -34,8 +34,8 @@ async function buildSpec() {
   // Stubs mirroring scripts/export-openapi.js so route registrations
   // succeed without real DB connections.
   fastify.decorate('authenticate',   async () => {})
-  fastify.decorate('pg',             { pool: null, query: async () => [], audit: async () => {} })
-  fastify.decorate('neo4j',          { write: async () => [], query: async () => [] })
+  fastify.decorate('pg',             { pool: null, query: async () => [], audit: async () => {}, ping: async () => true })
+  fastify.decorate('neo4j',          { write: async () => [], query: async () => [], ping: async () => true })
   fastify.decorate('ai',             { localAvailable: false, cloudAvailable: false })
   fastify.decorate('connectors',     { list: () => [], get: () => null })
   fastify.decorate('cmdbAssessment', { markDirty: () => {}, run: async () => ({}) })
@@ -61,8 +61,16 @@ async function buildSpec() {
 
   await registerAllRoutes(fastify)
 
+  // metricsPlugin registers /metrics — part of the live route surface
+  // but structured as a plugin in server.js, so the export script and
+  // this drift test need to invoke it explicitly to keep parity.
+  const { metricsPlugin } = await import('../plugins/metrics.js')
+  await metricsPlugin(fastify)
+
   fastify.get('/health', { schema: { tags: ['Health'], summary: 'Liveness probe', security: [] } },
     async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+  fastify.get('/ready', { schema: { tags: ['Health'], summary: 'Readiness probe', security: [] } },
+    async () => ({ status: 'ready', postgres: 'ok', neo4j: 'ok' }))
   fastify.get('/', { schema: { tags: ['Health'], summary: 'API banner', security: [] } },
     async () => ({ name: 'AppCloud API', version: '1.1.0' }))
 

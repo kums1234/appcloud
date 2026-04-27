@@ -11,8 +11,8 @@
 //   - write → mutations on resources (apps, components, infra, scans, …)
 //   - read  → GET endpoints
 // Per-route requirement comes from `config.scope: 'admin' | 'write' | 'read'`,
-// or falls back to a method-based default in stage 3 (this stage just keeps
-// the existing `requireAdmin` decorator working as a thin wrapper).
+// or falls back to a method-based default (GET/HEAD → read, everything else
+// → write).
 //
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 // On startup we upsert two rows from env vars (when set):
@@ -28,14 +28,23 @@
 // AND the DB is down, requests 503.
 //
 // ── Default-deny ─────────────────────────────────────────────────────────────
-// Unchanged from prior slices: the onRoute hook attaches `authenticate` to
-// every route except those flagged `schema.security: []`. `requireAdmin` is
-// still attached when `config.requireAdmin: true` is set on a route — kept
-// as a backwards-compat alias for `config.scope: 'admin'` until stage 3.
+// The onRoute hook attaches `authenticate` to every route except those
+// flagged `schema.security: []`, plus the per-scope handler resolved from
+// `config.scope` (or the method-based default).
 
 import fs from 'fs'
+import { timingSafeEqual } from 'crypto'
 import { hashKey, prefixOf, hasScope, SCOPES } from '../utils/api-keys.js'
 import { warnIfLegacyKeyEnvSet } from '../utils/encrypt.js'
+
+// Constant-time hex-string comparison. Both inputs are SHA-256 hex
+// (64 chars) so length is fixed; the timingSafeEqual call works on
+// equal-length Buffers.
+function safeHashEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (a.length !== b.length) return false
+  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))
+}
 
 const MIN_KEY_LEN  = 32
 const CACHE_TTL_MS = parseInt(process.env.APPCLOUD_AUTH_CACHE_TTL_MS || '60000', 10)
@@ -141,6 +150,12 @@ async function loadKeysFromDb(pg) {
       scopes:    r.scopes,
       prefix:    r.key_prefix,
       expiresAt: r.expires_at,
+      // Stash the hash so authenticate() can do an explicit
+      // constant-time recheck after the Map.get hit. Map lookup itself
+      // is constant-time on the hash key, but the recheck is belt-and-
+      // braces against any future re-implementation that introduces
+      // timing variance.
+      keyHash:   r.key_hash,
     })
   }
   return map
@@ -269,8 +284,38 @@ export async function authPlugin(fastify) {
   // 4. Decorate fastify with the auth + scope-check primitives.
   const authDisabled = !bootstrapPlain && !bootstrapAdminPlain && cache.map.size === 0
   if (authDisabled) {
+    // Production-side hard gate: in NODE_ENV=production, refuse to start
+    // unless the operator has explicitly opted into open-auth via
+    // APPCLOUD_ALLOW_OPEN_AUTH=true. The trap we're closing: a deploy
+    // that loses its bootstrap secret (deleted ConfigMap, expired
+    // Secret, race during secret-mount) silently falls back to
+    // anonymous-admin, and the audit log records every request as
+    // 'anonymous' until someone notices.
+    if (process.env.NODE_ENV === 'production'
+        && !/^(true|1|yes)$/i.test(process.env.APPCLOUD_ALLOW_OPEN_AUTH || '')) {
+      throw new Error(
+        '[auth] refusing to start in NODE_ENV=production with no API keys — ' +
+        'set APPCLOUD_API_KEY (or APPCLOUD_ADMIN_API_KEY) to bootstrap a key, ' +
+        'or set APPCLOUD_ALLOW_OPEN_AUTH=true to acknowledge the open-auth risk.',
+      )
+    }
     fastify.log.warn('[auth] no bootstrap env keys + no DB keys — authentication disabled, all routes open')
+    // Periodic re-warn so the warning doesn't scroll out of operator
+    // view after boot. Every 60s (configurable) — long enough that a
+    // local-dev session isn't drowned in noise, short enough that a
+    // misconfigured deploy shows up in any reasonable log retention.
+    const reWarnIntervalMs = parseInt(process.env.APPCLOUD_AUTH_DISABLED_WARN_MS || '60000', 10)
+    if (reWarnIntervalMs > 0) {
+      const timer = setInterval(() => {
+        fastify.log.warn('[auth] STILL RUNNING WITH AUTH DISABLED — every request reaches handlers as anonymous-admin')
+      }, reWarnIntervalMs)
+      timer.unref?.()
+      fastify.addHook('onClose', async () => clearInterval(timer))
+    }
   }
+  // Expose the auth-state flag so the metrics plugin can publish it as
+  // a gauge — operators can alert on `appcloud_auth_disabled == 1`.
+  fastify.decorate('authDisabled', authDisabled)
 
   const authenticate = async (req, reply) => {
     if (authDisabled) {
@@ -293,6 +338,15 @@ export async function authPlugin(fastify) {
     // bytes (if any) matched a stored key.
     const candidateHash = hashKey(provided)
     const principal     = cache.map.get(candidateHash)
+    // Constant-time recheck against the stored hash. Defense in depth
+    // — Map.get itself is already constant-time on the hash key, but a
+    // future re-implementation (e.g. a custom Map with prefix-shortcut
+    // matching) wouldn't be, and the explicit timingSafeEqual makes
+    // the security intent visible.
+    if (principal && !safeHashEqual(candidateHash, principal.keyHash)) {
+      reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
+      return
+    }
     if (!principal) {
       // Cache empty + DB last-fetch failed → 503, not 401, so an operator
       // sees the real cause instead of chasing a "bad key" red herring.
@@ -351,10 +405,8 @@ export async function authPlugin(fastify) {
     [SCOPES.WRITE]: requireScope(SCOPES.WRITE),
     [SCOPES.READ]:  requireScope(SCOPES.READ),
   }
-  const requireAdmin = scopeHandlers[SCOPES.ADMIN]   // backwards-compat alias
 
   fastify.decorate('authenticate', authenticate)
-  fastify.decorate('requireAdmin', requireAdmin)
   fastify.decorate('requireScope', requireScope)
   fastify.decorate('scopeHandlers', scopeHandlers)
   // Expose the cache so future stages (admin endpoints) can invalidate it
@@ -369,7 +421,7 @@ export async function authPlugin(fastify) {
   }
 
   // Resolve the required scope for a route: explicit config.scope wins,
-  // legacy config.requireAdmin: true maps to admin, otherwise method-default.
+  // otherwise method-default (GET/HEAD → read, everything else → write).
   function resolveScope(routeOptions) {
     const explicit = routeOptions.config?.scope
     if (explicit) {
@@ -378,7 +430,6 @@ export async function authPlugin(fastify) {
       }
       return explicit
     }
-    if (routeOptions.config?.requireAdmin) return SCOPES.ADMIN
     return defaultScopeForMethod(routeOptions.method)
   }
 

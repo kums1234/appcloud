@@ -50,6 +50,14 @@ const PARTITION_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_audit_log_resource   ON audit_log(resource_type, resource_id)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_log_created    ON audit_log(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_log_actor_key  ON audit_log(actor_key_id) WHERE actor_key_id IS NOT NULL`,
+  // Composite filter index for /audit list queries. The common
+  // request shape is `WHERE action = ? AND resource_type = ? AND
+  // actor_scope = ? ORDER BY created_at DESC LIMIT 50`. Without this
+  // composite, Postgres falls back to nested-loop joins across the
+  // single-column indexes and doesn't prune partitions efficiently
+  // either. At 10M rows this materially changes p95 latency.
+  `CREATE INDEX IF NOT EXISTS idx_audit_log_filters
+     ON audit_log(action, resource_type, actor_scope, created_at DESC)`,
 ]
 
 // Returns 'partitioned' | 'regular' | 'absent'. Source is pg_class.relkind:
@@ -208,6 +216,152 @@ export async function listExpiredPartitions(query, cutoff) {
     if (upper <= cutoff) expired.push({ name: r.name, upper })
   }
   return expired
+}
+
+// Move rows out of the default partition into the appropriate
+// audit_log_YYYY_MM partitions, creating partitions as needed.
+//
+// Why: rows that landed in the table BEFORE the partitioning migration
+// got bulk-loaded into audit_log_default during ensureAuditPartitioning,
+// and any future row whose created_at falls into a month with no
+// matching partition lands there too. Retention's DROP PARTITION skips
+// the default — if we don't redistribute, those rows live forever.
+//
+// Algorithm:
+//   1. DETACH the default partition. Postgres refuses `CREATE TABLE …
+//      PARTITION OF audit_log` while default holds rows whose
+//      created_at would fall into the new partition's range — those
+//      rows can't be silently moved during attach. Detaching turns
+//      default into a standalone table for the duration so we can
+//      freely add monthly partitions.
+//   2. For each month present in default, ensure the matching monthly
+//      partition exists (creating it now succeeds because default is
+//      detached), then move rows in a single CTE statement
+//      (DELETE…RETURNING fed into INSERT).
+//   3. RE-ATTACH default as the catch-all. The post-loop default is
+//      empty for every month we just covered, so attach validates
+//      cleanly. Re-attach lives in a `finally` so a partial failure
+//      still leaves the parent with its catch-all.
+//
+// Safety: a partial failure leaves earlier months done (rows in their
+// new partitions, gone from default) and later months untouched. Re-
+// running is idempotent — already-moved rows are gone from default, so
+// the next pass picks up only what's left.
+//
+// Performance: this is one INSERT…SELECT per month and the matching
+// DELETE, plus the DETACH/ATTACH bookends. With a default partition
+// holding millions of rows, a single month's redistribute can take
+// seconds-to-minutes; the endpoint that triggers this returns the
+// per-month breakdown so operators can see progress in the response.
+export async function redistributeDefaultPartition(query, log) {
+  const DEFAULT_PARTITION = `${PARTITION_PREFIX}default`
+
+  // Confirm the default partition exists before we try to read it. On a
+  // fresh DB created by the partitioned-shell path it always does, but
+  // future migrations could remove it; failing loudly here is better
+  // than emitting a confusing "relation audit_log_default does not
+  // exist" deeper in the call.
+  const exists = await query(
+    `SELECT 1 FROM pg_class
+      WHERE relname = $1
+        AND relnamespace = current_schema()::regnamespace`,
+    [DEFAULT_PARTITION],
+  )
+  if (exists.length === 0) {
+    log?.warn?.(`[audit-partitioning] ${DEFAULT_PARTITION} not present — skipping redistribute`)
+    return { moved: 0, partitionsCreated: [], months: [] }
+  }
+
+  const months = await query(`
+    SELECT DISTINCT
+      EXTRACT(YEAR  FROM created_at)::int AS y,
+      EXTRACT(MONTH FROM created_at)::int AS m
+    FROM ${DEFAULT_PARTITION}
+    ORDER BY y, m
+  `)
+  if (months.length === 0) {
+    return { moved: 0, partitionsCreated: [], months: [] }
+  }
+
+  const partitionsCreated = []
+  const perMonth          = []
+  let totalMoved          = 0
+
+  await query(`ALTER TABLE audit_log DETACH PARTITION ${DEFAULT_PARTITION}`)
+
+  try {
+    for (const { y, m } of months) {
+      const ensured = await ensureMonthlyPartition(query, log, y, m)
+      if (ensured.created) partitionsCreated.push(ensured.name)
+
+      const { from, to } = monthBounds(y, m)
+      // Single statement: rows leave the (detached) default and land in
+      // the parent, which routes to the newly-ensured monthly partition.
+      // SELECT * preserves the PK (id, created_at) so destination rows
+      // keep stable identity across the move.
+      const inserted = await query(
+        `WITH moved AS (
+           DELETE FROM ${DEFAULT_PARTITION}
+            WHERE created_at >= $1 AND created_at < $2
+           RETURNING *
+         )
+         INSERT INTO audit_log SELECT * FROM moved
+         RETURNING id`,
+        [from, to],
+      )
+      totalMoved += inserted.length
+      perMonth.push({ partition: ensured.name, year: y, month: m, moved: inserted.length })
+      log?.info?.({ partition: ensured.name, moved: inserted.length },
+        '[audit-partitioning] redistributed default partition rows')
+    }
+  } finally {
+    // Always re-attach, even on partial failure — leaving audit_log
+    // without a default would silently start rejecting INSERTs whose
+    // month has no partition yet. Log the result either way so an
+    // operator can see "did the re-attach happen" in the structured
+    // logs without needing to re-query pg_inherits manually.
+    try {
+      await query(`ALTER TABLE audit_log ATTACH PARTITION ${DEFAULT_PARTITION} DEFAULT`)
+      log?.info?.({ partition: DEFAULT_PARTITION },
+        '[audit-partitioning] default partition re-attached')
+    } catch (reattachErr) {
+      log?.error?.(
+        { err: reattachErr.message, partition: DEFAULT_PARTITION },
+        '[audit-partitioning] DEFAULT PARTITION RE-ATTACH FAILED — manual recovery required: ' +
+        `ALTER TABLE audit_log ATTACH PARTITION ${DEFAULT_PARTITION} DEFAULT`,
+      )
+      throw reattachErr
+    }
+  }
+
+  return { moved: totalMoved, partitionsCreated, months: perMonth }
+}
+
+// Returns true when audit_log_default exists as a regular table (i.e.
+// it is NOT attached to audit_log as a partition). Operators page on
+// this — a detached default rejects INSERTs whose month has no
+// matching monthly partition. Used by the metrics plugin to expose
+// `appcloud_audit_log_default_detached` and by /admin/audit-cleanup/
+// detached-state to surface the recovery procedure.
+export async function isDefaultPartitionDetached(query) {
+  const DEFAULT_PARTITION = `${PARTITION_PREFIX}default`
+  const rows = await query(`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM pg_class c
+        WHERE c.relname = $1
+          AND c.relnamespace = current_schema()::regnamespace
+      ) AS exists,
+      EXISTS (
+        SELECT 1 FROM pg_inherits i
+        JOIN pg_class child  ON child.oid  = i.inhrelid
+        JOIN pg_class parent ON parent.oid = i.inhparent
+        WHERE child.relname  = $1
+          AND parent.relname = 'audit_log'
+      ) AS attached
+  `, [DEFAULT_PARTITION])
+  if (!rows.length || !rows[0].exists) return false        // table absent
+  return rows[0].exists && !rows[0].attached
 }
 
 export async function dropPartition(query, log, name) {

@@ -105,6 +105,52 @@ describe('makeAuditMachinery', () => {
     expect(fake.successfulResourceIds()).toEqual(['c', 'd', 'e'])
   })
 
+  test('poison row evicts after MAX_ROW_ATTEMPTS so subsequent rows can drain', async () => {
+    // Mimic a "head row always fails, others succeed" scenario — e.g. a
+    // single bad row with an FK violation while the rest of the queue
+    // is fine. Without poison-eviction this would block the queue
+    // forever; with it, the bad row gets logged + evicted after 3
+    // attempts and the queue drains.
+    const calls = []
+    let attemptsOnA = 0
+    const runQuery = async (sql, params) => {
+      calls.push({ params })
+      const isRowA = params[5] === 'a'
+      if (isRowA) {
+        attemptsOnA++
+        throw new Error('FK violation on row a')
+      }
+      // Others succeed.
+      return { rows: [], rowCount: 1 }
+    }
+    const warnings = []
+    const log = { warn: (obj, msg) => warnings.push({ obj, msg }) }
+    const m = makeAuditMachinery({ runQuery, log })
+
+    // Queue rows: a (poison), b, c.
+    await m.audit('system', 'a', 't', 'a', 'a')   // initial INSERT fails → buffered
+    await m.audit('system', 'a', 't', 'b', 'b')   // queues behind a
+    await m.audit('system', 'a', 't', 'c', 'c')
+
+    // The first call to audit('a') tries-and-fails the live INSERT (1 attempt).
+    // Each subsequent audit() kicks a drain that retries 'a' and bails.
+    // Three attempts total → poison threshold hit on the third drain.
+    // After that, the next drain should clear b and c.
+    await m.drain()                              // 4th attempt on `a` — but already evicted at 3
+    expect(m.stats().poisoned).toBe(1)
+    expect(m.pending()).toBe(0)                   // b and c drained
+    // The successful inserts are b and c, in order.
+    const succeeded = calls.filter(c =>
+      ['b', 'c'].includes(c.params[5]),
+    )
+    expect(succeeded.length).toBeGreaterThanOrEqual(2)
+    // The poison-eviction log is structured + actionable.
+    const poisonLog = warnings.find(w => /poison-evicted/.test(w.msg))
+    expect(poisonLog).toBeDefined()
+    expect(poisonLog.obj.actor).toBe('system')
+    expect(poisonLog.obj.resource).toBe('t/a')
+  })
+
   test('concurrent drains do not double-insert (draining flag holds the line)', async () => {
     const fake = fakeRunQuery()
     const m = makeAuditMachinery({ runQuery: fake.runQuery })

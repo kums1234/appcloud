@@ -376,6 +376,169 @@ scripts/audit-summary.sh --update-baseline    # lock in the current state after 
 scripts/audit-summary.sh --no-fail        # print + compare without exiting non-zero
 ```
 
+## Internal TLS posture
+
+**Default — plaintext, scoped to the cluster network.** Both database connections (Neo4j over `bolt://`, Postgres over plain TCP) currently run unencrypted on every shipped deployment. The trust boundary is the K8s cluster network: pod-to-pod traffic stays on the CNI overlay, the database services aren't exposed via Ingress, and the Neo4j / Postgres pods don't accept connections from outside their service ClusterIP. Tests use Testcontainers on localhost — also plaintext, by design.
+
+This stance is acceptable while the API and the databases share a cluster. It stops being acceptable the moment any of the following changes:
+
+- Postgres moves to a managed service (RDS, Cloud SQL, Azure Postgres) — those terminate at a public endpoint and require TLS.
+- Neo4j moves to AuraDB or any cross-VPC deployment — same reasoning.
+- A meshing / zero-trust requirement (mTLS between every pod) lands.
+
+**How to flip it on when needed.**
+
+| Knob | What it does |
+|---|---|
+| `APPCLOUD_NEO4J_URI=bolt+s://host:7687` (or `neo4j+s://`) | Driver-side TLS with full cert verification. Use `bolt+ssc://` only if the server uses a self-signed cert and you can't bundle the CA. |
+| `APPCLOUD_POSTGRES_SSL=true` | Enables `ssl` on the pg pool. With no further config, this disables cert verification (matches `sslmode=require`). |
+| `PG_CA_FILE=/path/to/ca.pem` | Combined with `APPCLOUD_POSTGRES_SSL=true`, switches to `rejectUnauthorized: true` against the supplied CA bundle. |
+| `APPCLOUD_REQUIRE_TLS=true` | Hard-fail: refuse to start unless TLS is configured for both Neo4j and Postgres. Independent of host shape — operators who set this flag mean it, even for in-cluster hostnames. |
+
+The plugins emit a `WARN` log on startup when the configured host looks remote (anything other than `localhost` / `127.0.0.1` / the in-cluster service names `neo4j` / `postgres`) and TLS isn't on. The warning is deliberately not fatal so existing in-cluster deployments don't refuse to start; treat it as a deploy-time signal that the target is outside the original trust boundary and the env vars above need attention.
+
+If you want the strict version — refuse to start when TLS isn't configured at all, regardless of how local-shaped the hostname looks — set `APPCLOUD_REQUIRE_TLS=true`. Local dev keeps the soft warning by default; flipping the strict knob is a deliberate prod-side decision.
+
+## Operator runbook — common production scenarios
+
+Short, copy-pasteable recipes for the failure modes the alerts in the next section actually fire on. Each entry: symptom → diagnostic → action.
+
+### "audit_log is filling Postgres disk"
+
+**Symptom.** Postgres disk-use alarm fires; `\dt+ audit_log` shows the partitioned table is many GB.
+
+**Diagnostic.** Check the retention window — defaults to 365 days, so a deployment that's been receiving traffic for over a year will have grown one partition per month plus the default. Inspect the per-partition row counts:
+
+```sql
+SELECT relname, pg_size_pretty(pg_relation_size(relname::regclass)) AS size, n_live_tup
+FROM pg_class c
+JOIN pg_stat_user_tables s ON s.relid = c.oid
+WHERE relname LIKE 'audit_log_%'
+ORDER BY pg_relation_size(relname::regclass) DESC;
+```
+
+**Action.**
+1. Confirm `APPCLOUD_AUDIT_RETENTION_DAYS` matches your compliance requirement. Lower it if oversize is the issue.
+2. Trigger an immediate retention pass: `curl -X POST -H "X-API-Key: $ADMIN_KEY" "$BASE/admin/audit-cleanup/run-now"`.
+3. If retention's already short and the default partition is huge, see the next entry.
+
+### "audit_log_default has millions of rows"
+
+**Symptom.** Operator notices `audit_log_default` is massively bigger than any monthly partition; retention's `DROP PARTITION` doesn't touch it.
+
+**Diagnostic.** Default partition catches rows whose month has no matching `audit_log_YYYY_MM`. Pre-migration rows OR rows for months where `ensureCurrentAndNextPartitions` lapsed end up there.
+
+**Action.** `curl -X POST -H "X-API-Key: $ADMIN_KEY" "$BASE/admin/audit-cleanup/redistribute-default"`. The endpoint scans the default partition, creates monthly partitions as needed, moves rows in transactions, re-attaches the default. Returns per-month counts.
+
+### "appcloud_audit_log_default_detached == 1"
+
+**Symptom.** The detached-default Prometheus gauge is high — `redistributeDefaultPartition` crashed mid-run and the `finally`-block re-attach failed (rare; a Postgres connectivity blip during the ATTACH).
+
+**Diagnostic.** `curl -H "X-API-Key: $ADMIN_KEY" "$BASE/admin/audit-cleanup/default-partition-state"`. Returns `{ detached: true, recoverySql: "..." }`.
+
+**Action.** Run the SQL the endpoint returned: `ALTER TABLE audit_log ATTACH PARTITION audit_log_default DEFAULT`. Once attached, the gauge drops back to 0.
+
+### "appcloud_auth_disabled == 1 in production"
+
+**Symptom.** A production deploy is running with auth disabled — every request reaches handlers as anonymous-admin. Every audit row records `actor: 'anonymous'`.
+
+**Diagnostic.** The bootstrap secret was lost (deleted ConfigMap, expired Secret, race during secret-mount, mistakenly empty value).
+
+**Action.**
+1. *Immediately:* drain the deployment from external traffic if possible (`kubectl scale --replicas=0`), or remove the public Service endpoints.
+2. Restore the bootstrap key: regenerate or fetch from your secret store, write to `secrets/appcloud_api_key.txt` (or update the K8s `appcloud-api-key` Secret).
+3. Restart the API; verify `appcloud_auth_disabled == 0` and that `/whoami` returns the principal name (not `anonymous`).
+4. Audit: pull every row in `audit_log` where `actor = 'anonymous'` and the time window matches the outage. Investigate any mutations attributed to it.
+
+### "the audit retry buffer is at 100+ rows for 5+ minutes"
+
+**Symptom.** `appcloud_audit_buffer_pending > 100` Prometheus alert.
+
+**Diagnostic.** Postgres unreachable or under heavy load. Check connectivity from the API pod (`kubectl exec -it <api-pod> -- psql ...`).
+
+**Action.**
+1. Bring Postgres back. The buffer drains automatically on the next periodic tick (default 30s, `APPCLOUD_AUDIT_BUFFER_DRAIN_MS`).
+2. If `appcloud_audit_buffer_dropped_total` is rising, raise `APPCLOUD_AUDIT_BUFFER_MAX` (default 1000) and redeploy. Drops are lost rows.
+3. If `appcloud_audit_buffer_poisoned_total` is rising, the issue is per-row (FK / constraint failure on a specific actor or resource), not connectivity. Tail `[pg] audit row poison-evicted` log lines for the actor + action + resource — that's the bad row.
+
+### "Neo4j is unreachable; the API is returning 503 from /ready"
+
+**Symptom.** K8s readiness probe is failing (`kubectl describe pod` shows `Readiness probe failed: HTTP probe failed with statuscode: 503`).
+
+**Diagnostic.** `curl http://<api-pod>:3000/ready` returns `{ "status": "unavailable", "neo4j": "neo4j unavailable" }`. The API has decorated `fastify.neo4j` with the 503 stub instead of crashing.
+
+**Action.**
+1. Bring Neo4j back; check `kubectl logs neo4j-0`.
+2. Restart the API (the stub decoration is set at boot — it doesn't auto-recover until the next process start).
+3. While Neo4j is down, write-paths return 503; read-paths that don't touch the graph stay green.
+
+### "the scheduler is firing twice in a multi-replica deployment"
+
+**Symptom.** `[Scheduler] another replica holds the leader lock — skipping tick` is good. The bug shape is: scans running concurrently, audit rows showing two `scheduler:discovery-scan` actors per cycle.
+
+**Diagnostic.** The advisory-lock leader election (`pg_try_advisory_lock`) requires Postgres connectivity; if a replica's `fastify.pg.pool` is the stub (Postgres unreachable), it falls through to "no-pool" and runs unconditionally. Multi-replica + Postgres-degraded = duplicate scans.
+
+**Action.** Restore Postgres connectivity. Confirm by hitting `/ready` on each replica.
+
+---
+
+## Operator alerts — Prometheus rules to copy
+
+The metrics plugin (`api/src/plugins/metrics.js`) exposes a small set of high-leverage gauges + counters. The intended alert vocabulary, with sample PromQL rules suitable for `kube-prometheus`-style stacks:
+
+```yaml
+groups:
+  - name: appcloud-audit-pipeline
+    rules:
+      # Audit retry buffer is filling up — Postgres unreachable or slow.
+      # 100 rows pending for 5+ minutes means audit data is being held in
+      # memory; survives a restart only via the periodic drain.
+      - alert: AppCloudAuditBufferGrowing
+        expr: appcloud_audit_buffer_pending > 100
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Audit-log retry buffer above threshold for 5m"
+          runbook: "Check Postgres connectivity; see /admin/audit-cleanup/buffer-stats for context"
+
+      # Buffer overflow drops — capacity hit. Fix the underlying outage
+      # and / or bump APPCLOUD_AUDIT_BUFFER_MAX. Distinct from poison
+      # evictions (per-row failures); both alert separately.
+      - alert: AppCloudAuditBufferDropping
+        expr: rate(appcloud_audit_buffer_dropped_total[5m]) > 0
+        for: 5m
+        labels: { severity: warning }
+
+      - alert: AppCloudAuditPoisonEvictions
+        expr: rate(appcloud_audit_buffer_poisoned_total[15m]) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Audit rows being poison-evicted — likely FK / constraint violation"
+
+      # Default partition detached and not re-attached — the
+      # redistribute path crashed mid-run. Recovery is manual: see
+      # GET /admin/audit-cleanup/default-partition-state for the SQL.
+      - alert: AppCloudAuditDefaultPartitionDetached
+        expr: appcloud_audit_log_default_detached == 1
+        for: 5m
+        labels: { severity: critical }
+
+  - name: appcloud-auth
+    rules:
+      # Auth in open-fallback mode for more than a few minutes in any
+      # non-dev environment. A deploy that lost its bootstrap secret.
+      - alert: AppCloudAuthDisabled
+        expr: appcloud_auth_disabled == 1
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "API running with auth disabled (anonymous-admin)"
+          runbook: "Set APPCLOUD_API_KEY / APPCLOUD_ADMIN_API_KEY and restart"
+```
+
+Drop the rules into your existing alerting pipeline; tweak thresholds against your actual scrape interval and on-call patience.
+
 ## Integration with CI/CD
 
 The development setup mirrors production but with:
