@@ -4507,6 +4507,51 @@ paths:
                     description: Set when no buffer is wired up — `no-pg` indicates the Postgres
                       plugin degraded to its stub.
                 additionalProperties: false
+  /admin/audit-cleanup/run-now:
+    post:
+      summary: Trigger an audit-log retention pass right now
+      tags:
+        - Audit
+      description: "Equivalent to the periodic retention tick — drops expired
+        partitions and ensures the current+next-month partitions exist.
+        Idempotent: a second call within seconds will report `dropped: []`.
+        Admin-tier only."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum:
+                      - partitioned
+                      - regular
+                  cutoff:
+                    type: string
+                  retentionDays:
+                    type: integer
+                  dropped:
+                    type: array
+                    items:
+                      type: string
+                  totalDeleted:
+                    type: integer
+                  error:
+                    type: string
+                  durationMs:
+                    type: integer
+                  skipped:
+                    type: string
   /admin/audit-cleanup/default-partition-state:
     get:
       summary: Audit-log default partition attachment state

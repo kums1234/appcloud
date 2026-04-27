@@ -147,6 +147,25 @@ export async function schedulerPlugin(fastify) {
       // tick. The Promise.all aggregates each provider's local
       // grandTotal/errors back into the outer accumulators.
       const aiBaseUrl = `http://localhost:${process.env.PORT || 3000}`
+      // Per-tick request id — the scheduler isn't a request handler so
+      // there's no inbound `req.id`; generate one and attach it to
+      // every internal fetch + log line so a single tick's work is
+      // grep-able across the discovery scan + audit + downstream
+      // structured logs. Server.js's `requestIdHeader: 'x-request-id'`
+      // picks this up on the receiving handler.
+      const tickId = `sched_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      fastify.log.info({ tickId }, '[Scheduler] beginning tick')
+      // Wall-clock cap on each provider's scan via AbortSignal. Without
+      // a timeout, a hung scanner blocks the entire scheduler tick (and
+      // every subsequent tick, since runScheduledScan is gated on the
+      // promise lock). 10 minutes is generous for a real cloud scan
+      // and decisive enough that an operator notices.
+      const SCHED_FETCH_TIMEOUT_MS = parseInt(process.env.APPCLOUD_SCHED_FETCH_TIMEOUT_MS || '600000', 10)
+      const fetchWithTimeout = (url, init) => fetch(url, {
+        ...init,
+        headers: { ...(init?.headers || {}), 'x-request-id': tickId },
+        signal:  AbortSignal.timeout(SCHED_FETCH_TIMEOUT_MS),
+      })
       async function scanAws(account) {
         const cfg = account.config
         const creds = cfg.accessKeyId
@@ -155,7 +174,7 @@ export async function schedulerPlugin(fastify) {
         const regions = cfg.regions
           ? cfg.regions.split(',').map(r => r.trim())
           : ['us-east-1']
-        const res = await fetch(`${aiBaseUrl}/discovery/scan/aws`, {
+        const res = await fetchWithTimeout(`${aiBaseUrl}/discovery/scan/aws`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accountId: account.id, regions, ...(creds ? { credentials: creds } : {}) }),
         })
@@ -166,7 +185,7 @@ export async function schedulerPlugin(fastify) {
         const creds = cfg.clientId && cfg.clientSecret
           ? { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret }
           : null
-        const res = await fetch(`${aiBaseUrl}/discovery/scan/azure`, {
+        const res = await fetchWithTimeout(`${aiBaseUrl}/discovery/scan/azure`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accountId: account.id, subscriptionId: cfg.subscriptionId, ...(creds ? { credentials: creds } : {}) }),
         })
@@ -176,7 +195,7 @@ export async function schedulerPlugin(fastify) {
         const cfg = account.config
         let gcpCreds = null
         if (cfg.serviceAccount) { try { gcpCreds = JSON.parse(cfg.serviceAccount) } catch {} }
-        const res = await fetch(`${aiBaseUrl}/discovery/scan/gcp`, {
+        const res = await fetchWithTimeout(`${aiBaseUrl}/discovery/scan/gcp`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accountId: account.id, projectId: cfg.projectId, ...(gcpCreds ? { credentials: gcpCreds } : {}) }),
         })

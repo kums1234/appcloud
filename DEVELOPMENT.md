@@ -399,6 +399,63 @@ The plugins emit a `WARN` log on startup when the configured host looks remote (
 
 If you want the strict version — refuse to start when TLS isn't configured at all, regardless of how local-shaped the hostname looks — set `APPCLOUD_REQUIRE_TLS=true`. Local dev keeps the soft warning by default; flipping the strict knob is a deliberate prod-side decision.
 
+## Operator alerts — Prometheus rules to copy
+
+The metrics plugin (`api/src/plugins/metrics.js`) exposes a small set of high-leverage gauges + counters. The intended alert vocabulary, with sample PromQL rules suitable for `kube-prometheus`-style stacks:
+
+```yaml
+groups:
+  - name: appcloud-audit-pipeline
+    rules:
+      # Audit retry buffer is filling up — Postgres unreachable or slow.
+      # 100 rows pending for 5+ minutes means audit data is being held in
+      # memory; survives a restart only via the periodic drain.
+      - alert: AppCloudAuditBufferGrowing
+        expr: appcloud_audit_buffer_pending > 100
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Audit-log retry buffer above threshold for 5m"
+          runbook: "Check Postgres connectivity; see /admin/audit-cleanup/buffer-stats for context"
+
+      # Buffer overflow drops — capacity hit. Fix the underlying outage
+      # and / or bump APPCLOUD_AUDIT_BUFFER_MAX. Distinct from poison
+      # evictions (per-row failures); both alert separately.
+      - alert: AppCloudAuditBufferDropping
+        expr: rate(appcloud_audit_buffer_dropped_total[5m]) > 0
+        for: 5m
+        labels: { severity: warning }
+
+      - alert: AppCloudAuditPoisonEvictions
+        expr: rate(appcloud_audit_buffer_poisoned_total[15m]) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Audit rows being poison-evicted — likely FK / constraint violation"
+
+      # Default partition detached and not re-attached — the
+      # redistribute path crashed mid-run. Recovery is manual: see
+      # GET /admin/audit-cleanup/default-partition-state for the SQL.
+      - alert: AppCloudAuditDefaultPartitionDetached
+        expr: appcloud_audit_log_default_detached == 1
+        for: 5m
+        labels: { severity: critical }
+
+  - name: appcloud-auth
+    rules:
+      # Auth in open-fallback mode for more than a few minutes in any
+      # non-dev environment. A deploy that lost its bootstrap secret.
+      - alert: AppCloudAuthDisabled
+        expr: appcloud_auth_disabled == 1
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "API running with auth disabled (anonymous-admin)"
+          runbook: "Set APPCLOUD_API_KEY / APPCLOUD_ADMIN_API_KEY and restart"
+```
+
+Drop the rules into your existing alerting pipeline; tweak thresholds against your actual scrape interval and on-call patience.
+
 ## Integration with CI/CD
 
 The development setup mirrors production but with:

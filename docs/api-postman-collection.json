@@ -769,7 +769,7 @@
                 {
                   "disabled": false,
                   "key": "provider",
-                  "value": "aws"
+                  "value": "gcp"
                 },
                 {
                   "disabled": false,
@@ -1503,7 +1503,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "aws",
+                  "value": "gcp",
                   "key": "provider",
                   "description": "(Required) "
                 }
@@ -1565,7 +1565,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 952.4173499085009,\n    \"key_1\": 9951.222103554755,\n    \"key_2\": 8143.448343034834\n  },\n  \"enabled\": true\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 4375.299860257655\n  },\n  \"enabled\": true,\n  \"key_0\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1697,7 +1697,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"success\",\n  \"total\": 8909,\n  \"error\": null\n}",
+              "raw": "{\n  \"status\": \"success\",\n  \"total\": 1730,\n  \"error\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1776,7 +1776,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"openai\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
+              "raw": "{\n  \"provider\": \"gemini\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1922,7 +1922,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": true,\n    \"key_1\": 2992\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": 1476\n}",
+              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 5061,\n    \"key_1\": 3859.8801498301327\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1956,7 +1956,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "2963388c-659e-cc6d-0a00-7957e9505454",
+                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -1997,7 +1997,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "2963388c-659e-cc6d-0a00-7957e9505454",
+                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2017,7 +2017,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"key_0\": 9501,\n    \"key_1\": \"string\"\n  },\n  \"enabled\": false,\n  \"pollIntervalSeconds\": 8109\n}",
+              "raw": "{\n  \"config\": {\n    \"key_0\": 4938\n  },\n  \"enabled\": false,\n  \"pollIntervalSeconds\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2051,7 +2051,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "2963388c-659e-cc6d-0a00-7957e9505454",
+                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2093,7 +2093,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "2963388c-659e-cc6d-0a00-7957e9505454",
+                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2135,7 +2135,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "2963388c-659e-cc6d-0a00-7957e9505454",
+                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2177,7 +2177,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "2963388c-659e-cc6d-0a00-7957e9505454",
+                  "value": "c6d40a00-7957-9505-5495-856cd86abaf5",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2325,7 +2325,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\"\n  },\n  \"key_0\": \"string\"\n}",
+              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\",\n    \"key_0\": \"string\"\n  },\n  \"key_0\": 5544.325793161988,\n  \"key_1\": 3406.8888798356056\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2372,7 +2372,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  },\n  \"key_0\": \"string\",\n  \"key_1\": 7426,\n  \"key_2\": 1013.8721531257033,\n  \"key_3\": \"string\"\n}",
+              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2419,7 +2419,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": \"string\",\n    \"key_1\": true\n  },\n  \"key_0\": false,\n  \"key_1\": \"string\",\n  \"key_2\": \"string\",\n  \"key_3\": false\n}",
+              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 1422\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2532,7 +2532,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": 329.3228172697127,\n  \"key_1\": 701.3363926671445\n}",
+              "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2688,7 +2688,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": true,\n      \"componentId\": 8915\n    },\n    {\n      \"infraId\": 6959.322874899954,\n      \"componentId\": 8486\n    }\n  ]\n}",
+              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": 5464.494936168194,\n      \"componentId\": \"string\"\n    },\n    {\n      \"infraId\": \"string\",\n      \"componentId\": \"string\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2735,7 +2735,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"link_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 5211.9301073253155,\n          \"key_1\": 9777,\n          \"key_2\": 7843\n        },\n        {\n          \"key_0\": 2754.017566330731,\n          \"key_1\": 9868,\n          \"key_2\": 6957\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": \"string\"\n        },\n        {\n          \"key_0\": 2695\n        }\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"link_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 2,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": 8883.637492544949\n        },\n        {\n          \"key_0\": 5495.409858413041,\n          \"key_1\": 4892,\n          \"key_2\": 5375.443673692644\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": false\n        },\n        {\n          \"key_0\": false\n        }\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2811,7 +2811,7 @@
                 {
                   "disabled": false,
                   "key": "provider",
-                  "value": "aws"
+                  "value": "gcp"
                 },
                 {
                   "disabled": false,
@@ -2906,7 +2906,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"infraId\": \"40440ebf-66f9-9f75-8292-04cf7070c9bb\",\n  \"componentId\": \"5e49968f-efec-f8ef-b3c5-c699f4072981\"\n}",
+              "raw": "{\n  \"infraId\": \"9f75a829-04cf-070c-bb50-e49968f97efe\",\n  \"componentId\": \"f8ef0b3c-c699-4072-8175-9d8c0ef7c09c\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2995,7 +2995,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ids\": [\n    \"c0ef7c09-c012-2391-17c1-a62beb95bf9f\",\n    \"50f97d0c-4ed3-1e88-04a4-1328a86353a6\"\n  ]\n}",
+              "raw": "{\n  \"ids\": [\n    \"2391d17c-a62b-b95b-9f3a-0f97d0c9c4ed\",\n    \"1e88c04a-1328-8635-a6dd-60c8850aca36\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3108,7 +3108,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategy\": \"name-heuristics\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60\n}",
+              "raw": "{\n  \"strategy\": \"tagging\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3480,6 +3480,53 @@
             ],
             "method": "GET",
             "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Trigger an audit-log retention pass right now",
+          "request": {
+            "name": "Trigger an audit-log retention pass right now",
+            "description": {
+              "content": "Equivalent to the periodic retention tick — drops expired partitions and ensures the current+next-month partitions exist. Idempotent: a second call within seconds will report `dropped: []`. Admin-tier only.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "audit-cleanup",
+                "run-now"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "event": [],
           "protocolProfileBehavior": {

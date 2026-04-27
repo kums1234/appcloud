@@ -239,7 +239,11 @@ async function runTick(fastify) {
         MATCH (src:Component { name: e.srcName, origin_source: 'otel', origin_namespace: e.srcNs })
         MATCH (dst:Component { name: e.dstName, origin_source: 'otel', origin_namespace: e.dstNs })
         MERGE (src)-[r:CONNECTS_TO { source: 'otel', via: e.via }]->(dst)
-        SET   r.protocol     = e.protocol,
+        ON CREATE SET r.discovered_at = datetime(),
+                      r.confidence    = 75,
+                      r.evidence      = 'OTel: ' + e.via + ' ' + coalesce(e.protocol, '') + ' ' + coalesce(e.route, '')
+        SET   r.last_seen    = datetime(),
+              r.protocol     = e.protocol,
               r.route        = e.route,
               r.rps          = e.rps,
               r.error_rate   = e.errorRate,

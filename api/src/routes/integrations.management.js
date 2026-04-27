@@ -10,10 +10,20 @@
 // against /integrations/:id. We validate :id as a UUID as a second line of
 // defence in case new static siblings land later.
 
+import { createHash } from 'node:crypto'
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { serializeSpec } from '../connectors/index.js'
 import { validateRequired, ConnectorError } from '../connectors/base.js'
 import { actorFromReq } from '../utils/audit.js'
+
+// SHA-256 over the encrypted-config JSON. The audit row carries this
+// as `configDigest` so an auditor can detect tampering — any change
+// to any field (including secrets) yields a different digest. We never
+// log the cleartext, only the digest.
+function configDigest(encryptedConfig) {
+  if (!encryptedConfig || typeof encryptedConfig !== 'object') return null
+  return createHash('sha256').update(JSON.stringify(encryptedConfig)).digest('hex').slice(0, 16)
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -137,7 +147,12 @@ export default async function integrationManagementRoutes(fastify) {
         [type, name, JSON.stringify(encrypted), !!enabled, pollIntervalSeconds],
       )
       row = rows[0]
-      audit(actor(req), 'create', 'Integration', row.id, `${type}:${name}`, { type })
+      audit(actor(req), 'create', 'Integration', row.id, `${type}:${name}`, {
+        type,
+        // SHA-256 prefix of the encrypted config — lets auditors trace
+        // changes across rows without exposing plaintext secrets.
+        configDigest: configDigest(encrypted),
+      })
     } catch (err) {
       fastify.log.error(`[Integrations] POST error: ${err.message}`)
       return reply.internalServerError(`Failed to save integration: ${err.message}`)
@@ -179,12 +194,15 @@ export default async function integrationManagementRoutes(fastify) {
 
     const { config, enabled, pollIntervalSeconds } = req.body || {}
 
-    // Look up the connector first (we may need beforeUpsert)
+    // Look up the connector first (we may need beforeUpsert). Pull
+    // the existing config too so we can record before/after digests
+    // for tamper-detection in the audit row.
     const existing = await fastify.pg.query(
-      `SELECT type FROM integrations WHERE id = $1`,
+      `SELECT type, config FROM integrations WHERE id = $1`,
       [req.params.id],
     )
     if (!existing.length) return reply.notFound('Integration not found')
+    const beforeDigest = configDigest(existing[0].config)
     const spec = fastify.connectors.get(existing[0].type)
     const hookCtx = { log: fastify.log, pg: fastify.pg, neo4j: fastify.neo4j }
 
@@ -226,7 +244,11 @@ export default async function integrationManagementRoutes(fastify) {
       values,
     )
     if (!rows.length) return reply.notFound('Integration not found')
-    audit(actor(req), 'update', 'Integration', rows[0].id, `${rows[0].type}:${rows[0].name}`, {})
+    audit(actor(req), 'update', 'Integration', rows[0].id, `${rows[0].type}:${rows[0].name}`, {
+      beforeConfigDigest: beforeDigest,
+      afterConfigDigest:  configDigest(rows[0].config),
+      changedFields:      Object.keys(req.body || {}),
+    })
 
     if (spec && typeof spec.afterUpsert === 'function') {
       try {

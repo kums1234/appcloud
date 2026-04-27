@@ -213,11 +213,22 @@ export default async function componentRoutes(fastify) {
     },
   }), async (req, reply) => {
     const { targetId, protocol, port } = req.body
+    // Component-Component edge — uses `via: 'component-link'` (not a
+    // structural via like `subnet`) to distinguish from infra-side
+    // edges. The four required CONNECTS_TO contract properties
+    // (source, via, confidence, evidence) ride along per CLAUDE.md.
+    const evidence = `manual: ${protocol || 'unknown'}` + (port ? `/${port}` : '')
     await write(`
       MATCH (c1:Component {id: $id}), (c2:Component {id: $targetId})
-      MERGE (c1)-[r:CONNECTS_TO]->(c2)
+      MERGE (c1)-[r:CONNECTS_TO { source: 'manual-link', via: 'component-link' }]->(c2)
+      ON CREATE SET r.discovered_at = datetime(),
+                    r.confidence    = 100,
+                    r.evidence      = $evidence
+      ON MATCH  SET r.last_seen     = datetime(),
+                    r.confidence    = 100,
+                    r.evidence      = $evidence
       SET r.protocol = $protocol, r.port = $port
-    `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null })
+    `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null, evidence })
     audit(actor(req), 'connect', 'Component', req.params.id, req.params.id,
       { targetId, protocol, port })
     reply.code(201)

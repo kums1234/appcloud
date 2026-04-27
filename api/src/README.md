@@ -111,6 +111,35 @@ default and the feature stays off until the variable is supplied.
 
 ---
 
+## API versioning
+
+The OpenAPI spec carries a SemVer version at `info.version` (currently `1.1.0`).
+Until v1.0 is cut, the contract is:
+
+- **Patch bumps** (`1.1.0` → `1.1.1`) for additive non-breaking changes:
+  new optional fields on responses, new optional query parameters, new
+  routes, error-message wording. Old clients keep working.
+- **Minor bumps** (`1.1.0` → `1.2.0`) for additive surface that crosses
+  a meaningful capability boundary (a whole new resource family, a new
+  required header on a future request, expanded scope semantics).
+- **Major bumps** (`1.x` → `2.0.0`) for breaking changes: removing /
+  renaming a route, changing a response shape's existing fields, dropping
+  a query parameter, tightening a previously-loose schema in a way that
+  rejects payloads that used to validate. Reserved until v1.0 is cut and
+  the contract has external consumers; pre-v1.0 we may still iterate
+  shape without the bump.
+
+Deprecation: when a route is on the way out, it ships with the
+existing path + a `Deprecation: true` and `Sunset: <RFC 7231 date>`
+response header for at least one minor cycle before the removal. The
+sunset path is `<minor cycle> + 90 days` minimum.
+
+The OpenAPI drift test in `__tests__/openapi-drift.test.js` blocks
+silent contract drift — `docs/openapi.json` must match what the live
+route registrations would produce. CI fails the PR otherwise.
+
+---
+
 ## API Reference
 
 ### Applications — `/applications`
@@ -294,11 +323,18 @@ record operator identity on audited writes.
 See `CLAUDE.md` at the repo root for the full set of rules that apply to
 every write to the graph. The load-bearing ones:
 
-- Every write uses `MERGE`, never `CREATE`. Scanners re-run on a schedule
-  and the graph must converge, not accumulate duplicates.
-- Edges carry traceability properties: `source`, `confidence`, `createdAt`,
-  `lastSeenAt`, `evidence`.
-- Two primary edge types: `:CONNECTS_TO` (inferred) and `:DEPLOYED_ON`
-  (structural hosting).
+- Every scanner / supplement / autolink write uses `MERGE`, never `CREATE`.
+  Scanners re-run on a schedule and the graph must converge, not accumulate
+  duplicates. (User-driven `POST` endpoints with server-generated UUIDs
+  use `CREATE` because each call is a fresh entity by definition.)
+- Edges carry traceability properties: `source`, `via`, `confidence`,
+  `discovered_at`, `last_seen`, `evidence`. The static-analysis test in
+  `__tests__/connects-to-invariant.test.js` enforces this contract
+  across every Cypher writer at PR time.
+- **One** edge label: `:CONNECTS_TO`. The legacy `:DEPLOYED_ON` and
+  `:CONNECTED_TO` labels were consolidated; everything between any pair
+  of nodes (Infra↔Infra, Component↔Infra, Component↔Component, etc.)
+  uses `:CONNECTS_TO` with provenance carried in `source` and `via`
+  properties. See CLAUDE.md "Graph conventions" for the full vocabulary.
 - Azure resources are identified by full ARM resource id, parsed once at
   ingestion into first-class properties.

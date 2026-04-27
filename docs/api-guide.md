@@ -720,10 +720,13 @@ ready once `BASE` and `KEY` are exported.
 
 ## 16. Open issues / known caveats
 
-- `GET /discovery/resources/<id>/refresh` is a no-op today — full provider
-  scans are required to pick up tag changes. The endpoint exists for
-  future per-resource refresh work; the response includes a `hint`
-  explaining this.
+- `GET /discovery/resources/<id>/refresh` is a deliberate stub — it
+  returns `{ status: "deferred", hint: "..." }` and does not refresh
+  anything. Full provider scans (`POST /discovery/scan/<provider>`)
+  are the only path today for picking up tag / property changes. The
+  endpoint exists for future per-resource refresh work; tracked but
+  not scheduled. Until then, prefer polling `GET /discovery/summary`
+  or scheduling a periodic full scan via `POST /discovery/schedule`.
 - AWS scans require the Configuration Aggregator prerequisite documented
   in [secrets_setup.md](../secrets_setup.md). Without it, the scan
   surfaces a clear error at the auth boundary.

@@ -79,11 +79,16 @@ export default async function applicationRoutes(fastify) {
       OPTIONAL MATCH (c)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       RETURN a, collect(DISTINCT c) AS components, collect(DISTINCT i) AS infra
     `, { id: appId })
+    // Defensive: a graph in an inconsistent state could return a row
+    // whose `a` is null (e.g. application MERGE-deleted between our
+    // resolveApplicationId call and this query). Filter out null
+    // collected components/infra so .map(props) never sees a null.
     const r = records[0]
+    if (!r || !r.get('a')) return reply.notFound('Application not found')
     return {
       ...props(r.get('a')),
-      components: r.get('components').map(props),
-      infra:      r.get('infra').map(props),
+      components: (r.get('components') || []).filter(Boolean).map(props),
+      infra:      (r.get('infra')      || []).filter(Boolean).map(props),
     }
   })
 

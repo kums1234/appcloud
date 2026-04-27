@@ -159,9 +159,19 @@ export async function cmdbAssessmentSchedulerPlugin(fastify) {
       return
     }
     fastify.log.info(`[CmdbAssess] scheduler started: tick=${intervalMs}ms, backstop=${backstopMs}ms`)
-    // Fire first tick immediately so boot triggers an initial run if dirty.
-    tick().catch(() => {})
-    timer = setInterval(() => { tick().catch(() => {}) }, intervalMs)
+    // Fire first tick immediately so boot triggers an initial run if
+    // dirty. Log the outcome — a silent .catch(() => {}) used to mean
+    // a broken assessor only surfaced on the second tick when the skew
+    // got noticed; now the startup result is in the structured logs.
+    tick().then(
+      r => fastify.log.info({ startupTick: r ? 'ran' : 'no-op' }, '[CmdbAssess] startup tick complete'),
+      err => fastify.log.error({ err: err.message, code: err.code }, '[CmdbAssess] startup tick failed'),
+    )
+    timer = setInterval(() => {
+      tick().catch(err =>
+        fastify.log.warn({ err: err.message, code: err.code }, '[CmdbAssess] periodic tick failed'),
+      )
+    }, intervalMs)
   })
 
   fastify.addHook('onClose', async () => {

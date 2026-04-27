@@ -49,10 +49,15 @@ function normId(id = '') {
 
 // ─── Edge writer (single :CONNECTS_TO write per logical edge) ────────────────
 
-async function writeObservedEdge(write, { from, to, via, source, extraProps = {} }) {
+async function writeObservedEdge(write, { from, to, via, source, evidence, extraProps = {} }) {
   if (!from || !to || from === to) return 0
   const confidence = viaConfidence(via)
-  const params = { from, to, via, source, confidence, ...extraProps }
+  // CLAUDE.md edge contract — every :CONNECTS_TO needs source / via /
+  // confidence / evidence. Default the evidence string when callers
+  // don't supply one (older callers assumed the supplement-layer
+  // source string carried the context).
+  const evidenceStr = evidence || `Azure supplement: ${via} (${source})`
+  const params = { from, to, via, source, confidence, evidence: evidenceStr, ...extraProps }
   const extraSetFragment = Object.keys(extraProps).length
     ? ', ' + Object.keys(extraProps).map(k => `r.${k} = $${k}`).join(', ')
     : ''
@@ -62,11 +67,13 @@ async function writeObservedEdge(write, { from, to, via, source, extraProps = {}
       MERGE (a)-[r:CONNECTS_TO {via: $via}]->(b)
       ON CREATE SET r.discovered_at = datetime(),
                     r.source        = $source,
-                    r.confidence    = $confidence
+                    r.confidence    = $confidence,
+                    r.evidence      = $evidence
                     ${extraSetFragment}
       ON MATCH  SET r.last_seen     = datetime(),
                     r.source        = $source,
-                    r.confidence    = $confidence
+                    r.confidence    = $confidence,
+                    r.evidence      = $evidence
                     ${extraSetFragment}
     `, params)
     return 1

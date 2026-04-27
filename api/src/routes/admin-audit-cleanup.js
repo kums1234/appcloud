@@ -87,6 +87,41 @@ export default async function adminAuditCleanupRoutes(fastify) {
     return { pending: buf.pending(), stats: buf.stats() }
   })
 
+  // Push-button retention pass. The same code the periodic timer runs
+  // — drops expired partitions, ensures the current/next month exist,
+  // logs structured fields. Useful when:
+  //   - a previous tick failed to drop a partition (the failed name is
+  //     in the per-tick log but no in-memory retry list); re-running
+  //     picks it up because listExpiredPartitions still includes it
+  //   - retention parameters changed and the operator wants to apply
+  //     them now instead of waiting for the next tick (default 24h)
+  fastify.post('/audit-cleanup/run-now', {
+    config: { scope: 'admin' },
+    schema: {
+      summary:     'Trigger an audit-log retention pass right now',
+      description: 'Equivalent to the periodic retention tick — drops expired partitions and ensures the current+next-month partitions exist. Idempotent: a second call within seconds will report `dropped: []`. Admin-tier only.',
+      tags:        ['Audit'],
+      body:        { type: 'object', additionalProperties: false },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            mode:         { type: 'string', enum: ['partitioned', 'regular'] },
+            cutoff:       { type: 'string' },
+            retentionDays:{ type: 'integer' },
+            dropped:      { type: 'array', items: { type: 'string' } },
+            totalDeleted: { type: 'integer' },
+            error:        { type: 'string' },
+            durationMs:   { type: 'integer' },
+            skipped:      { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async () => {
+    return fastify.auditCleanup.runNow()
+  })
+
   // Operator probe — is audit_log_default attached to the partition
   // tree? Returns true only when the partition exists but is NOT in
   // pg_inherits, which is the bad post-DETACH state where INSERTs for

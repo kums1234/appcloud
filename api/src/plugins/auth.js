@@ -33,8 +33,18 @@
 // `config.scope` (or the method-based default).
 
 import fs from 'fs'
+import { timingSafeEqual } from 'crypto'
 import { hashKey, prefixOf, hasScope, SCOPES } from '../utils/api-keys.js'
 import { warnIfLegacyKeyEnvSet } from '../utils/encrypt.js'
+
+// Constant-time hex-string comparison. Both inputs are SHA-256 hex
+// (64 chars) so length is fixed; the timingSafeEqual call works on
+// equal-length Buffers.
+function safeHashEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (a.length !== b.length) return false
+  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))
+}
 
 const MIN_KEY_LEN  = 32
 const CACHE_TTL_MS = parseInt(process.env.APPCLOUD_AUTH_CACHE_TTL_MS || '60000', 10)
@@ -140,6 +150,12 @@ async function loadKeysFromDb(pg) {
       scopes:    r.scopes,
       prefix:    r.key_prefix,
       expiresAt: r.expires_at,
+      // Stash the hash so authenticate() can do an explicit
+      // constant-time recheck after the Map.get hit. Map lookup itself
+      // is constant-time on the hash key, but the recheck is belt-and-
+      // braces against any future re-implementation that introduces
+      // timing variance.
+      keyHash:   r.key_hash,
     })
   }
   return map
@@ -322,6 +338,15 @@ export async function authPlugin(fastify) {
     // bytes (if any) matched a stored key.
     const candidateHash = hashKey(provided)
     const principal     = cache.map.get(candidateHash)
+    // Constant-time recheck against the stored hash. Defense in depth
+    // — Map.get itself is already constant-time on the hash key, but a
+    // future re-implementation (e.g. a custom Map with prefix-shortcut
+    // matching) wouldn't be, and the explicit timingSafeEqual makes
+    // the security intent visible.
+    if (principal && !safeHashEqual(candidateHash, principal.keyHash)) {
+      reply.code(401).send({ error: 'Unauthorized', message: 'Valid X-API-Key header required' })
+      return
+    }
     if (!principal) {
       // Cache empty + DB last-fetch failed → 503, not 401, so an operator
       // sees the real cause instead of chasing a "bad key" red herring.

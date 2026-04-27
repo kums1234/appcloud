@@ -19,10 +19,24 @@ import { registerAllRoutes } from './utils/route-modules.js'
 
 const fastify = Fastify({
   logger: true,
+  // Request-ID propagation. Fastify mints a `req.id` per request and
+  // includes it on every `req.log` entry. We also accept an inbound
+  // `X-Request-Id` so a UI / load balancer can stitch traces across
+  // service boundaries. The same id is echoed on the response and
+  // forwarded by scheduler.js's internal fetches via the same header.
+  requestIdHeader:    'x-request-id',
+  requestIdLogLabel:  'reqId',
+  genReqId:           (req) => req.headers['x-request-id'] || `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
   // OpenAPI 3.0's `example` / `examples` / `xml` keywords aren't part of
   // the JSON Schema spec Ajv ships with — relax strict mode so we can
   // annotate routes with them. We still validate every body / param.
   ajv: { customOptions: { strict: false, keywords: ['example', 'xml'] } },
+})
+
+// Echo the resolved request id on every response so a UI client can
+// quote it back in a bug report.
+fastify.addHook('onSend', async (req, reply) => {
+  reply.header('x-request-id', req.id)
 })
 
 // Core plugins (these use @fastify/cors and @fastify/sensible which handle
@@ -33,9 +47,20 @@ const fastify = Fastify({
 // (e.g. via XSS in the UI or a leaked key in localStorage). The allowlist
 // is configured via APPCLOUD_ALLOWED_ORIGINS (comma-separated). Falls back
 // to the typical local-dev set so `npm run dev` doesn't need extra config.
+// Production deploys MUST set APPCLOUD_ALLOWED_ORIGINS explicitly —
+// the local-dev allowlist (Vite, port 8080, `appcloud.local`) is a
+// misconfiguration if it ships to prod. Refusing to fall back when
+// NODE_ENV=production stops a deploy that lost its CORS config from
+// silently allowing the dev origins.
+const FALLBACK_DEV_ORIGINS = 'http://localhost:3000,http://localhost:5173,http://localhost:8080,http://appcloud.local'
+if (process.env.NODE_ENV === 'production' && !process.env.APPCLOUD_ALLOWED_ORIGINS) {
+  throw new Error(
+    '[server] NODE_ENV=production without APPCLOUD_ALLOWED_ORIGINS — refusing to start with the local-dev CORS allowlist. ' +
+    'Set APPCLOUD_ALLOWED_ORIGINS to a comma-separated list of your real UI origins.',
+  )
+}
 const ALLOWED_ORIGINS = (
-  process.env.APPCLOUD_ALLOWED_ORIGINS
-  || 'http://localhost:3000,http://localhost:5173,http://localhost:8080,http://appcloud.local'
+  process.env.APPCLOUD_ALLOWED_ORIGINS || FALLBACK_DEV_ORIGINS
 ).split(',').map(s => s.trim()).filter(Boolean)
 await fastify.register(cors, {
   origin: (origin, cb) => {

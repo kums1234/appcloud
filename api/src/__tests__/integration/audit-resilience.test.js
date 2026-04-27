@@ -97,6 +97,61 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
     ])
   })
 
+  test('audit() poison-evicts a row that fails MAX_ROW_ATTEMPTS times so subsequent rows drain', async () => {
+    // Wraps the runQuery factory so the audit_log table rejects ONE
+    // specific resource_id with a constraint-shaped error. The retry
+    // buffer should drain everything else; the bad row is poison-
+    // evicted after MAX_ROW_ATTEMPTS (3) attempts.
+    const stats0     = machinery.stats()
+    const poisonedAt = stats0.poisoned ?? 0
+
+    // Fault-inject inside the runQuery wrapper at pgUp=true so existing
+    // calls succeed except for the targeted row.
+    const origPgUp = pgUp
+    pgUp = true
+    let blockReason = 0
+    const wrapClient = pgClient
+    const block = async (sql, params) => {
+      if (params?.[5] === 'poison-row-id') {                  // resource_id at param[5]
+        blockReason++
+        const err = Object.assign(new Error('simulated FK violation'), { code: '23503' })
+        throw err
+      }
+      return wrapClient.query(sql, params)
+    }
+    // Hot-swap the runQuery: machinery already captured it, so we
+    // need a fresh machinery instance for this test.
+    const isolated = makeAuditMachinery({
+      runQuery: block,
+      log:      { warn() {}, info() {} },
+      bufferMax: 1000,
+    })
+    await isolated.audit({ name: 'sys', keyId: null, scope: null },
+      'create', 'TestRow', 'poison-row-id', 'p')
+    // Poison row is now in the buffer (live INSERT failed).
+    // Issue more audits — they should also queue (FIFO behind poison).
+    await isolated.audit({ name: 'sys', keyId: null, scope: null },
+      'create', 'TestRow', 'good-row-1', 'g1')
+    await isolated.audit({ name: 'sys', keyId: null, scope: null },
+      'create', 'TestRow', 'good-row-2', 'g2')
+
+    // First drain: poison row attempts incremented to 1, bail.
+    await isolated.drain()
+    // Second drain: attempts → 2, bail.
+    await isolated.drain()
+    // Third drain: attempts → 3 → poison-evicted, then good rows drain.
+    await isolated.drain()
+
+    expect(isolated.stats().poisoned).toBeGreaterThanOrEqual(1)
+    expect(isolated.pending()).toBe(0)
+    // Confirm the good rows actually landed in audit_log.
+    const survivors = await pgClient.query(
+      `SELECT resource_id FROM audit_log WHERE action = 'create' AND resource_id IN ('good-row-1','good-row-2') ORDER BY resource_id`,
+    )
+    expect(survivors.rows.map(r => r.resource_id)).toEqual(['good-row-1', 'good-row-2'])
+    pgUp = origPgUp
+  })
+
   test('audit retention deletes rows older than the cutoff', async () => {
     // Insert two old + one recent fixture row.
     await pgClient.query(`

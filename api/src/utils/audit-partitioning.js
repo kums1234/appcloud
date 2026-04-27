@@ -50,6 +50,14 @@ const PARTITION_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_audit_log_resource   ON audit_log(resource_type, resource_id)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_log_created    ON audit_log(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_log_actor_key  ON audit_log(actor_key_id) WHERE actor_key_id IS NOT NULL`,
+  // Composite filter index for /audit list queries. The common
+  // request shape is `WHERE action = ? AND resource_type = ? AND
+  // actor_scope = ? ORDER BY created_at DESC LIMIT 50`. Without this
+  // composite, Postgres falls back to nested-loop joins across the
+  // single-column indexes and doesn't prune partitions efficiently
+  // either. At 10M rows this materially changes p95 latency.
+  `CREATE INDEX IF NOT EXISTS idx_audit_log_filters
+     ON audit_log(action, resource_type, actor_scope, created_at DESC)`,
 ]
 
 // Returns 'partitioned' | 'regular' | 'absent'. Source is pg_class.relkind:
