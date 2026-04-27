@@ -175,7 +175,9 @@ export function aggregateBatch(rows) {
 }
 
 // ── Core tick ───────────────────────────────────────────────────────────────
-async function runTick(fastify) {
+// Exported for integration tests (cross-store at-least-once); the
+// plugin uses it via the periodic timer.
+export async function runTick(fastify) {
   if (!fastify.pg?.pool || !fastify.neo4j?.write) return null
 
   // Safety purge of very old rows — unconditional so a backlog of spans we
