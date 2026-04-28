@@ -17,6 +17,7 @@
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { parseAndValidateRegions } from '../utils/aws-regions.js'
 import { actorFromReq } from '../utils/audit.js'
+import { requireTenantPg } from '../utils/route-helpers.js'
 import {
   CloudAccountSchema,
   CloudAccountCreateBodySchema,
@@ -39,22 +40,6 @@ function validateProviderConfig(provider, config) {
 export default async function cloudAccountRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = actorFromReq
-
-  // Routes here all require a resolved tenant — req.pg is the
-  // tenant-scoped query helper bound by tenantContext. When it's
-  // missing (super-admin without X-Tenant-Slug, or a misconfigured
-  // bypass), 400 with a clear message rather than crashing on a
-  // TypeError at the first .query() call.
-  const requireTenantPg = (req, reply) => {
-    if (!req.pg) {
-      reply.code(400).send({
-        error:   'Bad Request',
-        message: 'this route is tenant-scoped — provide X-API-Key bound to a tenant (or X-Tenant-Slug for super-admin keys)',
-      })
-      return false
-    }
-    return true
-  }
 
   // ── GET /integrations/cloud ──────────────────────────────────────────────
   fastify.get('/cloud', {

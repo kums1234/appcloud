@@ -1,6 +1,7 @@
 import fs from 'fs'
 import { makeAuditMachinery } from '../utils/audit-buffer.js'
 import { ensureAuditPartitioning, ensureCurrentAndNextPartitions } from '../utils/audit-partitioning.js'
+import { makeForTenant, makeControlTransaction } from '../utils/pg-helpers.js'
 
 function readSecret(fileEnvVar, plainEnvVar, fallback = '') {
   const filePath = process.env[fileEnvVar]
@@ -167,58 +168,11 @@ export async function postgresPlugin(fastify) {
   }, AUDIT_BUFFER_DRAIN_MS)
   drainTimer.unref?.()
 
-  // Schema names go straight into a dynamic-SQL string (`SET LOCAL
-  // search_path` cannot be parameterized). Reject anything outside the
-  // conservative tenant-schema shape so a caller can't smuggle SQL
-  // through schemaName. Identical to the guard in
-  // utils/tenant-schema-runner.js — kept duplicated rather than imported
-  // to avoid a circular dependency at plugin load.
-  const quoteSchemaIdent = (name) => {
-    if (!/^[a-z_][a-z0-9_]{1,62}$/.test(name)) {
-      throw new Error(`pg.forTenant: refusing unsafe schema name '${name}'`)
-    }
-    return `"${name}"`
-  }
-
-  // Open a checked-out connection, BEGIN, optionally set search_path,
-  // run `fn(client)`, COMMIT (or ROLLBACK on throw). Always releases.
-  // The `searchPathClause` is a pre-built `SET LOCAL search_path = …`
-  // string when set (validated at forTenant() time so we can't
-  // smuggle SQL through it here) or null for control-plane work.
-  const runInTransaction = async (searchPathClause, fn) => {
-    const client = await pool.connect()
-    try {
-      await client.query('BEGIN')
-      if (searchPathClause) {
-        await client.query(searchPathClause)
-      }
-      const result = await fn(client)
-      await client.query('COMMIT')
-      return result
-    } catch (err) {
-      try { await client.query('ROLLBACK') } catch {}
-      throw err
-    } finally {
-      client.release()
-    }
-  }
-
-  // Tenant-scoped query helper. Validates the schema name eagerly so
-  // an unsafe name fails before any connection is checked out. Each
-  // .query() / .transaction() call opens its own transaction so
-  // search_path stays bounded to the call.
-  const forTenant = (schemaName) => {
-    const ident = quoteSchemaIdent(schemaName)                          // throws on unsafe
-    const searchPathClause = `SET LOCAL search_path = ${ident}, public`
-    return {
-      schemaName,
-      query: async (sql, params = []) =>
-        runInTransaction(searchPathClause, async (client) =>
-          (await client.query(sql, params)).rows,
-        ),
-      transaction: (fn) => runInTransaction(searchPathClause, fn),
-    }
-  }
+  // Tenant-scoped + control-plane transaction helpers live in
+  // utils/pg-helpers.js so they're independently unit-testable. We
+  // close them over `pool` here so callers don't have to plumb it.
+  const forTenant   = (schemaName) => makeForTenant(pool, schemaName)
+  const ctlTransact = makeControlTransaction(pool)
 
   fastify.decorate('pg', {
     pool,
@@ -237,7 +191,7 @@ export async function postgresPlugin(fastify) {
     // transaction(fn) — control-plane transaction without setting
     // search_path. Useful for /admin/tenants where row-insert and
     // schema-provision must succeed together.
-    transaction: (fn) => runInTransaction(null, fn),
+    transaction: ctlTransact,
     // audit() — see utils/audit-buffer.js for full semantics. Briefly:
     //   - hot path: direct INSERT
     //   - on failure or backlog: queue + periodic retry

@@ -9,12 +9,18 @@
 // the pre-existing /terraform/* and /cloud/* routes keep winning matches
 // against /integrations/:id. We validate :id as a UUID as a second line of
 // defence in case new static siblings land later.
+//
+// Phase 1c: integrations + sync_jobs live in the per-tenant schema
+// (tenant_default for the default tenant). All queries go through
+// req.pg, which the tenantContext preHandler attaches with
+// search_path = <tenant_schema>, public set on the connection.
 
 import { createHash } from 'node:crypto'
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { serializeSpec } from '../connectors/index.js'
 import { validateRequired, ConnectorError } from '../connectors/base.js'
 import { actorFromReq } from '../utils/audit.js'
+import { requireTenantPg } from '../utils/route-helpers.js'
 
 // SHA-256 over the encrypted-config JSON. The audit row carries this
 // as `configDigest` so an auditor can detect tampering — any change
@@ -53,9 +59,10 @@ export default async function integrationManagementRoutes(fastify) {
       description: 'Returns every row from the `integrations` table — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends, etc. Secret fields are decrypted; client UIs are responsible for further obscuring.',
       response:    { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
     },
-  }, async () => {
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
-    const rows = await fastify.pg.query(`
+    if (!requireTenantPg(req, reply)) return
+    const rows = await req.pg.query(`
       SELECT id, type, name, enabled, config, poll_interval_seconds,
              last_sync_at, last_sync_status, last_sync_error,
              created_at, updated_at
@@ -75,7 +82,8 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
-    const rows = await fastify.pg.query(
+    if (!requireTenantPg(req, reply)) return
+    const rows = await req.pg.query(
       `SELECT id, type, name, enabled, config, poll_interval_seconds,
               last_sync_at, last_sync_status, last_sync_error,
               created_at, updated_at
@@ -104,6 +112,7 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
+    if (!requireTenantPg(req, reply)) return
 
     const { type, name, config = {}, enabled = true, pollIntervalSeconds = null } = req.body || {}
     if (!type || !name) return reply.badRequest('type and name are required')
@@ -134,7 +143,7 @@ export default async function integrationManagementRoutes(fastify) {
     let row
     try {
       const encrypted = encryptConfig({ ...effective })
-      const rows = await fastify.pg.query(
+      const rows = await req.pg.query(
         `INSERT INTO integrations (type, name, config, enabled, poll_interval_seconds)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (type, name) DO UPDATE
@@ -191,13 +200,14 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
+    if (!requireTenantPg(req, reply)) return
 
     const { config, enabled, pollIntervalSeconds } = req.body || {}
 
     // Look up the connector first (we may need beforeUpsert). Pull
     // the existing config too so we can record before/after digests
     // for tamper-detection in the audit row.
-    const existing = await fastify.pg.query(
+    const existing = await req.pg.query(
       `SELECT type, config FROM integrations WHERE id = $1`,
       [req.params.id],
     )
@@ -236,7 +246,7 @@ export default async function integrationManagementRoutes(fastify) {
     fields.push(`updated_at = now()`)
     values.push(req.params.id)
 
-    const rows = await fastify.pg.query(
+    const rows = await req.pg.query(
       `UPDATE integrations SET ${fields.join(', ')} WHERE id = $${i}
        RETURNING id, type, name, enabled, config, poll_interval_seconds,
                  last_sync_at, last_sync_status, last_sync_error,
@@ -274,7 +284,8 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
-    const rows = await fastify.pg.query(
+    if (!requireTenantPg(req, reply)) return
+    const rows = await req.pg.query(
       `DELETE FROM integrations WHERE id = $1 RETURNING id, type, name`,
       [req.params.id],
     )
@@ -294,7 +305,8 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
-    const rows = await fastify.pg.query(
+    if (!requireTenantPg(req, reply)) return
+    const rows = await req.pg.query(
       `SELECT id, type, name, config FROM integrations WHERE id = $1`,
       [req.params.id],
     )
@@ -326,8 +338,9 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
+    if (!requireTenantPg(req, reply)) return
 
-    const rows = await fastify.pg.query(
+    const rows = await req.pg.query(
       `SELECT id, type, name, config FROM integrations WHERE id = $1`,
       [req.params.id],
     )
@@ -335,14 +348,14 @@ export default async function integrationManagementRoutes(fastify) {
     const row = rows[0]
     const decryptedConfig = decryptConfig(row.config || {})
 
-    const [job] = await fastify.pg.query(
+    const [job] = await req.pg.query(
       `INSERT INTO sync_jobs (integration_id, integration_type, status, triggered_by)
        VALUES ($1, $2, 'running', 'manual') RETURNING id, started_at`,
       [row.id, row.type],
     )
 
     try {
-      await fastify.pg.query(
+      await req.pg.query(
         `UPDATE integrations SET last_sync_status = 'running', last_sync_at = now() WHERE id = $1`,
         [row.id],
       )
@@ -352,7 +365,7 @@ export default async function integrationManagementRoutes(fastify) {
       const hasErrors = (result.warnings || []).length > 0
       const status    = hasErrors ? 'partial' : 'success'
 
-      await fastify.pg.query(
+      await req.pg.query(
         `UPDATE sync_jobs
             SET status = $1, finished_at = now(),
                 duration_ms = EXTRACT(EPOCH FROM (now() - started_at)) * 1000,
@@ -364,7 +377,7 @@ export default async function integrationManagementRoutes(fastify) {
         [status, result.resourcesFound, result.resourcesCreated,
          result.resourcesUpdated, JSON.stringify(result), job.id],
       )
-      await fastify.pg.query(
+      await req.pg.query(
         `UPDATE integrations SET last_sync_status = $1, last_sync_error = NULL WHERE id = $2`,
         [status, row.id],
       )
@@ -379,14 +392,14 @@ export default async function integrationManagementRoutes(fastify) {
     } catch (err) {
       const msg = err instanceof ConnectorError ? err.message : `scan failed: ${err.message}`
       fastify.log.error(msg)
-      await fastify.pg.query(
+      await req.pg.query(
         `UPDATE sync_jobs SET status = 'error', finished_at = now(),
                               duration_ms = EXTRACT(EPOCH FROM (now() - started_at)) * 1000,
                               error_message = $1
           WHERE id = $2`,
         [msg, job.id],
       ).catch(() => {})
-      await fastify.pg.query(
+      await req.pg.query(
         `UPDATE integrations SET last_sync_status = 'error', last_sync_error = $1 WHERE id = $2`,
         [msg, row.id],
       ).catch(() => {})
@@ -404,7 +417,8 @@ export default async function integrationManagementRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!requirePg(fastify, reply)) return
-    const rows = await fastify.pg.query(
+    if (!requireTenantPg(req, reply)) return
+    const rows = await req.pg.query(
       `SELECT id, status, triggered_by, started_at, finished_at, duration_ms,
               resources_found, resources_created, resources_updated,
               error_message, summary

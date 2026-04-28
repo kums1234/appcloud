@@ -30,7 +30,15 @@
 // mutations bump `fastify.tenantCache.refreshedAt = 0` so changes take
 // effect immediately rather than after TTL.
 
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { hasScope, SCOPES } from '../utils/api-keys.js'
+import { applyMigrations } from '../utils/tenant-schema-runner.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Per-tenant template migrations live alongside the source. Same
+// constant lives in routes/admin-tenants.js — keep them in sync.
+const TENANT_MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations', 'tenant-schema')
 
 const CACHE_TTL_MS = parseInt(process.env.APPCLOUD_TENANT_CACHE_TTL_MS || '60000', 10)
 
@@ -107,13 +115,21 @@ async function refreshIfStale(cache, pg, log) {
   }
 }
 
-// Idempotent default-tenant cutover. Mirrors postgres-init/15-default-tenant-cutover.sql
-// so a deployment that didn't run init scripts (or pulled the migration
-// after a fresh boot) converges on next startup. Each step gates on
-// "have we already done it?" so the SQL is safe to run repeatedly.
+// Idempotent default-tenant cutover. Mirrors
+// postgres-init/{15,16}-*-cutover.sql so a deployment that didn't run
+// init scripts (or pulled the migrations after a fresh boot) converges
+// on next startup. Each step gates on "have we already done it?" so
+// the SQL is safe to run repeatedly.
+//
+// The cutover moves the *default* tenant's data tables from `public`
+// into `tenant_default` via `ALTER TABLE … SET SCHEMA`, then records a
+// 'cutover' sentinel row in control.schema_migrations so the runner's
+// re-migration sweep treats those template files as already-applied.
 async function ensureDefaultTenantCutover(pg, log) {
   try {
     await pg.query(`CREATE SCHEMA IF NOT EXISTS tenant_default`)
+
+    // Phase 1b: move cloud_accounts.
     await pg.query(`
       DO $$
       BEGIN
@@ -128,24 +144,103 @@ async function ensureDefaultTenantCutover(pg, log) {
         END IF;
       END $$
     `)
+
+    // Phase 1c: move integrations + sync_jobs together. The FK
+    // sync_jobs.integration_id → integrations(id) preserves under
+    // ALTER TABLE … SET SCHEMA (Postgres tracks FKs by OID, not by
+    // schema-qualified name). Order doesn't matter, but moving the
+    // referenced table first keeps the intermediate state cleaner.
+    await pg.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_name = 'integrations'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'tenant_default' AND table_name = 'integrations'
+        ) THEN
+          ALTER TABLE public.integrations SET SCHEMA tenant_default;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_name = 'sync_jobs'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'tenant_default' AND table_name = 'sync_jobs'
+        ) THEN
+          ALTER TABLE public.sync_jobs SET SCHEMA tenant_default;
+        END IF;
+      END $$
+    `)
+
     await pg.query(`
       UPDATE control.tenants
          SET schema_name = 'tenant_default'
        WHERE slug = 'default'
          AND schema_name = 'public'
     `)
+
+    // Record cutover sentinels for both template files. The runner
+    // treats sha='cutover' as already-applied (never recompares against
+    // the file content), so the next sweep skips these for tenant_default.
     await pg.query(`
       INSERT INTO control.schema_migrations (schema_name, filename, sha256)
-      VALUES ('tenant_default', '001-base-tables.sql', 'cutover')
+      VALUES
+        ('tenant_default', '001-base-tables.sql',     'cutover'),
+        ('tenant_default', '002-sync-jobs.sql',       'cutover')
       ON CONFLICT (schema_name, filename) DO NOTHING
     `)
-    log?.info?.('[tenant-context] default-tenant cutover ensured')
+    log?.info?.('[tenant-context] default-tenant cutover ensured (1b + 1c)')
   } catch (err) {
-    // Don't crash the server on cutover failure — surface loudly so an
-    // operator can intervene. Pre-cutover state still works (the 503
-    // guard catches non-default tenants); post-cutover state still
-    // works (the operations are idempotent no-ops).
     log?.error?.({ err }, '[tenant-context] cutover failed — leaving DB as-is, may need operator action')
+  }
+}
+
+// Apply any unapplied template migrations to every active tenant
+// schema on startup. Driven by control.schema_migrations: rows with
+// `sha256 = 'cutover'` mean "already applied via SET SCHEMA, never
+// re-run"; rows with a real sha mean the file was applied normally;
+// missing rows trigger an apply.
+//
+// Each tenant runs in its own transaction so a failure on one (e.g. a
+// migration that conflicts with manual operator changes) doesn't block
+// other tenants. The runner already validates the schema name, so a
+// pathological control.tenants row can't smuggle SQL.
+async function runStartupReMigrationSweep(pg, log, migrationsDir) {
+  let tenants
+  try {
+    tenants = await pg.query(`
+      SELECT id, slug, schema_name FROM control.tenants
+       WHERE status = 'active'
+       ORDER BY created_at
+    `)
+  } catch (err) {
+    log?.warn?.({ err: err.message }, '[tenant-context] re-migration sweep skipped — control.tenants unreadable')
+    return
+  }
+  for (const t of tenants) {
+    try {
+      await pg.transaction(async (client) => {
+        const applied = await applyMigrations({
+          client,
+          schemaName:    t.schema_name,
+          migrationsDir,
+          log,
+        })
+        if (applied.length > 0) {
+          log?.info?.(
+            { tenant: t.slug, schema: t.schema_name, applied: applied.length, files: applied },
+            '[tenant-context] startup re-migration sweep applied new migrations',
+          )
+        }
+      })
+    } catch (err) {
+      log?.error?.(
+        { tenant: t.slug, schema: t.schema_name, err: err.message },
+        '[tenant-context] re-migration failed for tenant — leaving as-is, manual intervention may be needed',
+      )
+    }
   }
 }
 
@@ -156,8 +251,18 @@ export async function tenantContextPlugin(fastify) {
     throw new Error('tenantContextPlugin requires fastify.pg')
   }
 
-  // Phase 1b: bring existing deployments forward without operator intervention.
+  // Bring existing deployments forward without operator intervention:
+  // run the idempotent default-tenant cutover (1b + 1c moves), then
+  // sweep all active tenants and apply any unapplied template migrations.
+  // pg.transaction is required for the sweep — fall through silently if
+  // the postgres plugin isn't fully wired (e.g. test setups with a
+  // bare stub that decorates only .query / .pool).
   await ensureDefaultTenantCutover(pg, fastify.log)
+  if (typeof pg.transaction === 'function') {
+    await runStartupReMigrationSweep(pg, fastify.log, TENANT_MIGRATIONS_DIR)
+  } else {
+    fastify.log.debug?.('[tenant-context] pg.transaction unavailable — skipping startup re-migration sweep')
+  }
 
   const cache = makeTenantCache()
   await refreshIfStale(cache, pg, fastify.log)
