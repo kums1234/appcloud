@@ -3,6 +3,16 @@
 // Supports multiple accounts per provider — one row per subscription/account.
 // Secret fields (clientSecret, secretAccessKey, private_key) are
 // AES-256-GCM encrypted before INSERT and decrypted on SELECT.
+//
+// Phase 1b: the `cloud_accounts` table lives in the per-tenant schema
+// (`tenant_default` for the default tenant). Every query goes through
+// `req.pg`, which the tenantContext preHandler attaches with the right
+// search_path bound. The legacy onReady CREATE TABLE was removed —
+// per-tenant table provisioning is now the runner's job
+// (api/src/utils/tenant-schema-runner.js applying
+//  api/src/migrations/tenant-schema/001-base-tables.sql) plus
+// postgres-init/15-default-tenant-cutover.sql for the default tenant
+// upgrade path.
 
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
 import { parseAndValidateRegions } from '../utils/aws-regions.js'
@@ -26,39 +36,25 @@ function validateProviderConfig(provider, config) {
   }
 }
 
-// SQL to ensure the table exists — run once at startup via onReady hook
-const CREATE_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS cloud_accounts (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider    TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    config      JSONB NOT NULL DEFAULT '{}',
-    enabled     BOOLEAN NOT NULL DEFAULT true,
-    last_scan_at       TIMESTAMPTZ,
-    last_scan_status   TEXT,
-    last_scan_total    INTEGER DEFAULT 0,
-    last_scan_error    TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (provider, name)
-  );
-  CREATE INDEX IF NOT EXISTS idx_cloud_accounts_provider ON cloud_accounts(provider);
-`
-
 export default async function cloudAccountRoutes(fastify) {
   const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = actorFromReq
 
-  // Ensure table exists when server starts — non-fatal if Postgres unavailable
-  fastify.addHook('onReady', async () => {
-    if (!fastify.pg?.pool) return
-    try {
-      await fastify.pg.query(CREATE_TABLE_SQL)
-      fastify.log.info('[CloudAccounts] Table ready')
-    } catch (err) {
-      fastify.log.warn(`[CloudAccounts] Table init warning: ${err.message}`)
+  // Routes here all require a resolved tenant — req.pg is the
+  // tenant-scoped query helper bound by tenantContext. When it's
+  // missing (super-admin without X-Tenant-Slug, or a misconfigured
+  // bypass), 400 with a clear message rather than crashing on a
+  // TypeError at the first .query() call.
+  const requireTenantPg = (req, reply) => {
+    if (!req.pg) {
+      reply.code(400).send({
+        error:   'Bad Request',
+        message: 'this route is tenant-scoped — provide X-API-Key bound to a tenant (or X-Tenant-Slug for super-admin keys)',
+      })
+      return false
     }
-  })
+    return true
+  }
 
   // ── GET /integrations/cloud ──────────────────────────────────────────────
   fastify.get('/cloud', {
@@ -69,8 +65,9 @@ export default async function cloudAccountRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
+    if (!requireTenantPg(req, reply)) return
     try {
-      const rows = await fastify.pg.query(
+      const rows = await req.pg.query(
         `SELECT id, provider, name, config, enabled,
                 last_scan_at, last_scan_status, last_scan_total, last_scan_error,
                 created_at, updated_at
@@ -97,8 +94,9 @@ export default async function cloudAccountRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
+    if (!requireTenantPg(req, reply)) return
     try {
-      const rows = await fastify.pg.query(
+      const rows = await req.pg.query(
         `SELECT id, provider, name, config, enabled,
                 last_scan_at, last_scan_status, last_scan_total
          FROM cloud_accounts
@@ -126,6 +124,7 @@ export default async function cloudAccountRoutes(fastify) {
   }, async (req, reply) => {
     if (!fastify.pg?.pool)
       return reply.serviceUnavailable('Database not available — check Postgres connection')
+    if (!requireTenantPg(req, reply)) return
 
     const { provider, name, config = {}, enabled = true } = req.body || {}
     if (!provider || !name)
@@ -138,7 +137,7 @@ export default async function cloudAccountRoutes(fastify) {
     try {
       const encryptedConfig = encryptConfig({ ...config })
 
-      const rows = await fastify.pg.query(
+      const rows = await req.pg.query(
         `INSERT INTO cloud_accounts (provider, name, config, enabled)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (provider, name) DO UPDATE
@@ -173,8 +172,9 @@ export default async function cloudAccountRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
+    if (!requireTenantPg(req, reply)) return
     try {
-      const existing = await fastify.pg.query(
+      const existing = await req.pg.query(
         `SELECT * FROM cloud_accounts WHERE id = $1`, [req.params.id]
       )
       if (!existing.length) return reply.notFound('Cloud account not found')
@@ -189,7 +189,7 @@ export default async function cloudAccountRoutes(fastify) {
         ? encryptConfig({ ...decryptConfig(current.config || {}), ...config })
         : current.config
 
-      const rows = await fastify.pg.query(
+      const rows = await req.pg.query(
         `UPDATE cloud_accounts
          SET name    = COALESCE($1, name),
              config  = $2,
@@ -218,12 +218,13 @@ export default async function cloudAccountRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!fastify.pg?.pool) return reply.serviceUnavailable('Database not available')
+    if (!requireTenantPg(req, reply)) return
     try {
-      const existing = await fastify.pg.query(
+      const existing = await req.pg.query(
         `SELECT provider, name FROM cloud_accounts WHERE id = $1`, [req.params.id]
       )
       if (!existing.length) return reply.notFound('Cloud account not found')
-      await fastify.pg.query(`DELETE FROM cloud_accounts WHERE id = $1`, [req.params.id])
+      await req.pg.query(`DELETE FROM cloud_accounts WHERE id = $1`, [req.params.id])
       audit(actor(req), 'delete', 'CloudAccount', req.params.id,
         `${existing[0].provider}:${existing[0].name}`, {})
       reply.code(204)
@@ -247,6 +248,7 @@ export default async function cloudAccountRoutes(fastify) {
   }, async (req, reply) => {
     if (!fastify.pg?.pool)  return reply.serviceUnavailable('Database not available')
     if (!fastify.neo4j)     return reply.serviceUnavailable('Neo4j not available')
+    if (!requireTenantPg(req, reply)) return
 
     try {
       const records = await fastify.neo4j.query(
@@ -265,7 +267,7 @@ export default async function cloudAccountRoutes(fastify) {
         if (!['aws','azure','gcp'].includes(provider)) continue
 
         const enc = encryptConfig({ ...config })
-        await fastify.pg.query(
+        await req.pg.query(
           `INSERT INTO cloud_accounts (provider, name, config, enabled)
            VALUES ($1, $2, $3, true)
            ON CONFLICT (provider, name) DO UPDATE
@@ -296,9 +298,10 @@ export default async function cloudAccountRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!fastify.pg?.pool) return { updated: false }
+    if (!req.pg)           return { updated: false }
     try {
       const { status, total, error } = req.body || {}
-      await fastify.pg.query(
+      await req.pg.query(
         `UPDATE cloud_accounts
          SET last_scan_at     = now(),
              last_scan_status = $1,

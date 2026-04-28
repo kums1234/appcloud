@@ -98,15 +98,44 @@ export async function schedulerPlugin(fastify) {
     try {
       // Load all enabled cloud accounts grouped by provider
       // Load from Postgres cloud_accounts first, fall back to Neo4j CloudAccount nodes
+      //
+      // Phase 1b: cloud_accounts lives in `tenant_default` (per the
+      // default-tenant cutover). Iterate active tenants from
+      // control.tenants and run each through fastify.pg.forTenant(),
+      // which sets `search_path = <schema>, public` on the connection.
+      // In Phase 1b only `tenant_default` actually has cloud_accounts —
+      // other tenants 503 in tenant-context anyway, but the loop shape
+      // is forward-compatible with Phase 1c.
       let allAccounts = []
-      if (fastify.pg?.pool) {
+      if (fastify.pg?.pool && typeof fastify.pg.forTenant === 'function') {
+        let tenants = []
         try {
-          allAccounts = await fastify.pg.query(
-            `SELECT id, provider, name, config FROM cloud_accounts
-             WHERE enabled = true ORDER BY provider, name`
+          tenants = await fastify.pg.query(
+            `SELECT id, slug, schema_name FROM control.tenants WHERE status = 'active'`,
           )
         } catch (e) {
-          fastify.log.warn(`[Scheduler] Postgres query failed: ${e.message}`)
+          fastify.log.warn(`[Scheduler] Failed to list tenants: ${e.message}`)
+        }
+        for (const t of tenants) {
+          try {
+            const tenantPg = fastify.pg.forTenant(t.schema_name)
+            const rows = await tenantPg.query(
+              `SELECT id, provider, name, config FROM cloud_accounts
+               WHERE enabled = true ORDER BY provider, name`,
+            )
+            for (const r of rows) {
+              // Stamp the tenant on each row so a fan-out scan later
+              // can route results back to the right tenant. Phase 1c
+              // promotes this to a first-class field on every audit /
+              // sync_jobs row.
+              allAccounts.push({ ...r, _tenantSchema: t.schema_name, _tenantSlug: t.slug })
+            }
+          } catch (e) {
+            // Tables-not-yet-provisioned for non-default tenants is the
+            // common case in 1b — log at debug so we don't drown the
+            // scheduler log in expected misses.
+            fastify.log.debug?.({ tenant: t.slug, err: e.message }, '[Scheduler] cloud_accounts read skipped for tenant')
+          }
         }
       }
 

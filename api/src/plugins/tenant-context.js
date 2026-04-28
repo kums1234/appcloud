@@ -107,12 +107,57 @@ async function refreshIfStale(cache, pg, log) {
   }
 }
 
+// Idempotent default-tenant cutover. Mirrors postgres-init/15-default-tenant-cutover.sql
+// so a deployment that didn't run init scripts (or pulled the migration
+// after a fresh boot) converges on next startup. Each step gates on
+// "have we already done it?" so the SQL is safe to run repeatedly.
+async function ensureDefaultTenantCutover(pg, log) {
+  try {
+    await pg.query(`CREATE SCHEMA IF NOT EXISTS tenant_default`)
+    await pg.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_name = 'cloud_accounts'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'tenant_default' AND table_name = 'cloud_accounts'
+        ) THEN
+          ALTER TABLE public.cloud_accounts SET SCHEMA tenant_default;
+        END IF;
+      END $$
+    `)
+    await pg.query(`
+      UPDATE control.tenants
+         SET schema_name = 'tenant_default'
+       WHERE slug = 'default'
+         AND schema_name = 'public'
+    `)
+    await pg.query(`
+      INSERT INTO control.schema_migrations (schema_name, filename, sha256)
+      VALUES ('tenant_default', '001-base-tables.sql', 'cutover')
+      ON CONFLICT (schema_name, filename) DO NOTHING
+    `)
+    log?.info?.('[tenant-context] default-tenant cutover ensured')
+  } catch (err) {
+    // Don't crash the server on cutover failure — surface loudly so an
+    // operator can intervene. Pre-cutover state still works (the 503
+    // guard catches non-default tenants); post-cutover state still
+    // works (the operations are idempotent no-ops).
+    log?.error?.({ err }, '[tenant-context] cutover failed — leaving DB as-is, may need operator action')
+  }
+}
+
 export async function tenantContextPlugin(fastify) {
   const pg = fastify.pg
   if (!pg?.query) {
     fastify.log.error('[tenant-context] fastify.pg.query unavailable — tenant resolution disabled')
     throw new Error('tenantContextPlugin requires fastify.pg')
   }
+
+  // Phase 1b: bring existing deployments forward without operator intervention.
+  await ensureDefaultTenantCutover(pg, fastify.log)
 
   const cache = makeTenantCache()
   await refreshIfStale(cache, pg, fastify.log)
@@ -184,28 +229,35 @@ export async function tenantContextPlugin(fastify) {
           message: `tenant '${tenant.slug}' is pending deletion`,
         })
       }
-      // Phase 1a guard: data routes only work for the default tenant
-      // (whose schema is still `public`). Non-default tenants exist as
-      // metadata + provisioned schemas, but the per-request search_path
-      // mechanism that makes their data reachable lands in Phase 1b.
-      // Until then, route requests to non-default tenants 503 with a
-      // clear message so the failure mode is visible rather than
-      // mixing tenants' data via the wrong search_path.
+      // Phase 1b guard: data routes route through the per-request
+      // search_path mechanism for the default tenant only. Non-default
+      // tenants have provisioned schemas with the *minimal* template
+      // (integrations + cloud_accounts) but lack the rest of the
+      // per-tenant table set; queries against missing tables would
+      // either fail or — worse — fall through search_path to `public`
+      // and read another tenant's data. Phase 1c expands the template
+      // to cover all tables and lifts this guard.
       //
       // Control-plane routes (/admin/tenants*) are super-admin scope
-      // and don't need a tenant resolved — they bypass this branch
-      // because the super-admin-with-no-header path returned earlier
-      // without setting tenant.
-      if (tenant.schemaName !== 'public') {
+      // and bypass this branch because super-admin-without-header
+      // returns earlier without setting `tenant`.
+      if (tenant.schemaName !== 'tenant_default') {
         return reply.code(503).send({
           error: 'Service Unavailable',
           message:
-            `tenant '${tenant.slug}' data isolation is pending — Phase 1b will wire ` +
-            `the per-request search_path. The tenant exists and its schema is provisioned, ` +
-            `but data routes will not return its data until that work lands.`,
+            `tenant '${tenant.slug}' data isolation is partial — Phase 1c will expand ` +
+            `the per-tenant template to cover all required tables. The tenant exists ` +
+            `with a provisioned schema, but data routes are 503-gated until that work lands.`,
         })
       }
       req.tenant = tenant
+      // Tenant-scoped pg surface: every query on req.pg opens a
+      // connection with `SET LOCAL search_path = <tenant_schema>, public`
+      // so unqualified table names resolve into the tenant's schema.
+      // For multi-step atomicity, route handlers use req.pg.transaction(fn).
+      if (typeof pg.forTenant === 'function') {
+        req.pg = pg.forTenant(tenant.schemaName)
+      }
     }
     // No tenant resolved (super-admin without header, no principal.tenantId):
     // leave req.tenant undefined. Tenant-scoped routes must check and

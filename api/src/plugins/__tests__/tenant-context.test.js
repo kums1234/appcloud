@@ -17,27 +17,34 @@ import Fastify from 'fastify'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiSrc    = path.resolve(__dirname, '..', '..')
 
+// Post Phase 1b cutover the default tenant's schema is `tenant_default`
+// (postgres-init/15-default-tenant-cutover.sql + tenant-context startup
+// hook). The 503 guard now permits requests bound to that schema and
+// rejects everything else until 1c lifts it.
 const TENANT_DEFAULT = {
   id:             '00000000-0000-0000-0000-000000000001',
   slug:           'default',
   display_name:   'Default tenant',
   status:         'active',
-  schema_name:    'public',
+  schema_name:    'tenant_default',
   neo4j_database: 'tenant_default',
   created_at:     new Date().toISOString(),
   created_by:     'bootstrap',
   metadata:       {},
 }
-// Acme uses schema='public' in the test fixtures so the principal-bound
-// resolution + super-admin override tests reach the handler. A dedicated
-// fixture (TENANT_NEW below) covers the Phase 1a 503 guard for tenants
-// whose schema differs from 'public'.
+// Acme also uses schema='tenant_default' in the test fixture so the
+// principal-bound resolution + super-admin override tests reach the
+// handler. A dedicated fixture (TENANT_NEW below) covers the
+// 503 guard for tenants whose schema differs from 'tenant_default'.
+// (In production each tenant has its own schema; the fixture collapses
+// them onto the same one so we can exercise resolution-by-id /
+// resolution-by-slug independently of the table-presence question.)
 const TENANT_ACME = {
   id:             '00000000-0000-0000-0000-000000000002',
   slug:           'acme-corp',
   display_name:   'Acme Corp',
   status:         'active',
-  schema_name:    'public',
+  schema_name:    'tenant_default',
   neo4j_database: 'tenant_acme',
   created_at:     new Date().toISOString(),
   created_by:     'admin',
@@ -86,7 +93,15 @@ async function build({ tenantRows, principal } = {}) {
   const sensible = (await import('@fastify/sensible')).default
   await fastify.register(sensible)
 
-  fastify.decorate('pg', makeStubPg(tenantRows || [TENANT_DEFAULT, TENANT_ACME, TENANT_NEW, TENANT_SUSPENDED, TENANT_DOOMED]))
+  const stubPg = makeStubPg(tenantRows || [TENANT_DEFAULT, TENANT_ACME, TENANT_NEW, TENANT_SUSPENDED, TENANT_DOOMED])
+  // Phase 1b: tenantContext attaches req.pg = pg.forTenant(schemaName).
+  // Stub forTenant so the tests can observe it being called.
+  stubPg.forTenant = (schemaName) => ({
+    schemaName,
+    query: async () => [],
+    transaction: async () => {},
+  })
+  fastify.decorate('pg', stubPg)
 
   const { authPlugin } = await import(path.join(apiSrc, 'plugins/auth.js'))
   await authPlugin(fastify)
@@ -106,6 +121,10 @@ async function build({ tenantRows, principal } = {}) {
       ? { id: req.tenant.id, slug: req.tenant.slug, schemaName: req.tenant.schemaName, neo4jDatabase: req.tenant.neo4jDatabase, status: req.tenant.status }
       : null,
     principal: { name: req.principal?.name, scopes: req.principal?.scopes, tenantId: req.principal?.tenantId },
+    // Surface req.pg so the test can assert tenantContext wired the
+    // tenant-scoped query helper. We can't serialise functions, so just
+    // expose its bound schemaName.
+    reqPg: req.pg ? { schemaName: req.pg.schemaName } : null,
   }))
 
   await fastify.ready()
@@ -129,9 +148,10 @@ describe('tenantContextPlugin — principal-bound resolution', () => {
     expect(r.statusCode).toBe(200)
     const body = JSON.parse(r.body)
     expect(body.tenant.slug).toBe('acme-corp')
-    // schema_name is 'public' in the fixture (Phase 1a test setup);
-    // a real Phase 1+ tenant would have schema='tenant_<id>'.
-    expect(body.tenant.schemaName).toBe('public')
+    // schema_name is 'tenant_default' in the fixture so the request
+    // clears the Phase-1b 503 guard. neo4j_database stays distinct
+    // (each tenant gets its own DB in Phase 2).
+    expect(body.tenant.schemaName).toBe('tenant_default')
     expect(body.tenant.neo4jDatabase).toBe('tenant_acme')
   })
 
@@ -195,27 +215,26 @@ describe('tenantContextPlugin — super-admin override', () => {
   })
 })
 
-describe('tenantContextPlugin — Phase 1a non-default-tenant guard', () => {
-  test('non-default tenant 503s with a Phase-1b explanation', async () => {
+describe('tenantContextPlugin — Phase 1b non-tenant_default guard', () => {
+  test('non-tenant_default tenant 503s with a Phase-1c explanation', async () => {
     const fastify = await build({
       principal: {
         id: 'k', name: 'tenant-key', scopes: ['admin'], prefix: 'ak_aa',
-        // TENANT_NEW.schema_name === 'tenant_new', NOT 'public' — triggers
-        // the Phase 1a guard.
+        // TENANT_NEW.schema_name === 'tenant_new', NOT 'tenant_default'.
         tenantId: TENANT_NEW.id,
       },
     })
     try {
       const r = await fastify.inject({ method: 'GET', url: '/_probe' })
       expect(r.statusCode).toBe(503)
-      expect(r.body).toMatch(/data isolation is pending/)
-      expect(r.body).toMatch(/Phase 1b/)
+      expect(r.body).toMatch(/data isolation is partial/)
+      expect(r.body).toMatch(/Phase 1c/)
     } finally {
       await fastify.close()
     }
   })
 
-  test('default tenant (schema=public) passes through to the handler', async () => {
+  test('default tenant (schema=tenant_default) passes through to the handler', async () => {
     const fastify = await build({
       principal: {
         id: 'k', name: 'tenant-key', scopes: ['admin'], prefix: 'ak_aa',
@@ -227,7 +246,11 @@ describe('tenantContextPlugin — Phase 1a non-default-tenant guard', () => {
       expect(r.statusCode).toBe(200)
       const body = JSON.parse(r.body)
       expect(body.tenant.slug).toBe('default')
-      expect(body.tenant.schemaName).toBe('public')
+      expect(body.tenant.schemaName).toBe('tenant_default')
+      // Phase 1b: req.pg is bound to the tenant's schema by the
+      // tenantContext preHandler so route handlers can use it without
+      // having to call forTenant() themselves.
+      expect(body.reqPg.schemaName).toBe('tenant_default')
     } finally {
       await fastify.close()
     }

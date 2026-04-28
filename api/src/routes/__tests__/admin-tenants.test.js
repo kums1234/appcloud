@@ -63,6 +63,23 @@ function makeStubPg() {
     return consume()
   }
 
+  // Mirror the production fastify.pg.transaction() helper — checks out
+  // the fake client, BEGINs, runs fn, COMMITs (or ROLLBACKs on throw).
+  // The POST /admin/tenants handler uses this; tests need it for the
+  // handler to reach the stub.
+  const transaction = async (fn) => {
+    const client = { query: poolClientQuery, release: () => {} }
+    await client.query('BEGIN')
+    try {
+      const result = await fn(client)
+      await client.query('COMMIT')
+      return result
+    } catch (err) {
+      try { await client.query('ROLLBACK') } catch {}
+      throw err
+    }
+  }
+
   return {
     state,
     pg: {
@@ -76,6 +93,7 @@ function makeStubPg() {
         }),
       },
       query:       pgQuery,
+      transaction,
       audit:       async () => {},
       ping:        async () => true,
       auditBuffer: { pending: () => 0, stats: () => ({}) },

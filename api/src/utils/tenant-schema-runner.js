@@ -56,6 +56,15 @@ function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex')
 }
 
+// Sentinel sha256 written by postgres-init/15-default-tenant-cutover.sql
+// to record that a migration's tables landed in a tenant schema by way of
+// `ALTER TABLE … SET SCHEMA` rather than by running the migration file
+// itself. The runner treats it as "already applied, never recompare" —
+// re-applying the file's DDL on top of moved tables would either no-op
+// (CREATE TABLE IF NOT EXISTS) or worse, fail because the indexes /
+// constraints already exist with the same names.
+const CUTOVER_SHA = 'cutover'
+
 // Returns the list of `.sql` files in `dir`, sorted lexically — i.e. the
 // numeric prefix dictates apply order. Hidden files and non-`.sql` files
 // are filtered out.
@@ -112,8 +121,9 @@ export async function applyMigrations({ client, schemaName, migrationsDir, log =
       [schemaName, filename],
     )
     if (existing.rows.length > 0) {
-      if (existing.rows[0].sha256 === sha) {
-        log?.debug?.({ schemaName, filename }, '[tenant-schema-runner] migration already applied, skipping')
+      const recordedSha = existing.rows[0].sha256
+      if (recordedSha === sha || recordedSha === CUTOVER_SHA) {
+        log?.debug?.({ schemaName, filename, recordedSha }, '[tenant-schema-runner] migration already applied, skipping')
         continue
       }
       throw new Error(

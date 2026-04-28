@@ -124,53 +124,47 @@ export default async function adminTenantRoutes(fastify) {
       return reply.badRequest(`slug '${slug}' is reserved`)
     }
 
-    // Provisioning is two coupled side-effects (the row insert and the
-    // schema creation+migration), so we co-locate them on a single
-    // checked-out connection. Postgres DDL is transactional, so a failure
-    // mid-migration rolls back the schema and leaves no half-created
-    // state. The tenants-row INSERT runs in the same transaction.
+    // Provisioning is two coupled side-effects — the row insert and
+    // the schema CREATE + migration apply. fastify.pg.transaction()
+    // gives us a single connection that owns the BEGIN/COMMIT and
+    // releases on completion. Postgres DDL is transactional, so a
+    // failure mid-migration rolls back the schema and the tenant row
+    // together (no orphan schema, no orphan row).
     let row
-    const client = await fastify.pg.pool.connect()
     try {
-      await client.query('BEGIN')
+      row = await fastify.pg.transaction(async (client) => {
+        // Generate id first so schema_name + neo4j_database are derivable
+        // before the INSERT. (CTE would also work but the intermediate
+        // id is needed by provisionTenantSchema below.)
+        const { rows: idRows } = await client.query(`SELECT gen_random_uuid() AS id`)
+        const id = idRows[0].id
+        const { schemaName, neo4jDatabase } = deriveTenantNames(id)
 
-      // Generate id first so schema_name + neo4j_database are derivable
-      // before the INSERT. (Could also do this with a CTE, but the
-      // intermediate id is needed by provisionTenantSchema below.)
-      const { rows: idRows } = await client.query(`SELECT gen_random_uuid() AS id`)
-      const id = idRows[0].id
-      const { schemaName, neo4jDatabase } = deriveTenantNames(id)
+        const { rows: insertRows } = await client.query(`
+          INSERT INTO control.tenants (id, slug, display_name, status, schema_name, neo4j_database, created_by, metadata)
+          VALUES ($1, $2, $3, 'active', $4, $5, $6, $7::jsonb)
+          RETURNING id, slug, display_name, status, schema_name, neo4j_database,
+                    created_at, created_by, metadata
+        `, [
+          id,
+          slug,
+          displayName,
+          schemaName,
+          neo4jDatabase,
+          req.principal?.name || 'unknown',
+          JSON.stringify(metadata || {}),
+        ])
 
-      const { rows: insertRows } = await client.query(`
-        INSERT INTO control.tenants (id, slug, display_name, status, schema_name, neo4j_database, created_by, metadata)
-        VALUES ($1, $2, $3, 'active', $4, $5, $6, $7::jsonb)
-        RETURNING id, slug, display_name, status, schema_name, neo4j_database,
-                  created_at, created_by, metadata
-      `, [
-        id,
-        slug,
-        displayName,
-        schemaName,
-        neo4jDatabase,
-        req.principal?.name || 'unknown',
-        JSON.stringify(metadata || {}),
-      ])
-      row = insertRows[0]
+        await provisionTenantSchema({
+          client,
+          schemaName,
+          migrationsDir: TENANT_MIGRATIONS_DIR,
+          log:           req.log,
+        })
 
-      // Provision the schema on the same client so CREATE SCHEMA + the
-      // initial migrations share the outer transaction with the row
-      // insert. A failure mid-migration rolls everything back (no
-      // orphan schema, no orphan tenant row).
-      await provisionTenantSchema({
-        client,
-        schemaName,
-        migrationsDir:  TENANT_MIGRATIONS_DIR,
-        log:            req.log,
+        return insertRows[0]
       })
-
-      await client.query('COMMIT')
     } catch (err) {
-      try { await client.query('ROLLBACK') } catch {}
       if (String(err.code) === '23505') {
         return reply.conflict(`tenant slug '${slug}' already exists`)
       }
@@ -179,8 +173,6 @@ export default async function adminTenantRoutes(fastify) {
         error:   'Internal Server Error',
         message: `tenant provisioning failed: ${err.message}`,
       })
-    } finally {
-      client.release()
     }
 
     invalidateTenantCache()
