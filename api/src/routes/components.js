@@ -48,7 +48,9 @@ const CONFIDENTIALITY = [
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
   const { withAuth } = makeRouteHelpers(fastify)
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  // Phase 1d: audit() is now per-request via req.audit (curried with
+  // the resolved tenant_id). Each handler calls
+  // req.audit(...).catch(() => {}).
   const actor = actorFromReq
 
   // GET /components/metadata — taxonomy + enums for form builders
@@ -152,8 +154,8 @@ export default async function componentRoutes(fastify) {
       RETURN c
     `, { name, type, runtime: runtime || null, appId })
     const result = props(records[0].get('c'))
-    audit(actor(req), 'create', 'Component', result.id, result.name,
-      { type: result.type, runtime: result.runtime, appId })
+    req.audit(actor(req), 'create', 'Component', result.id, result.name,
+      { type: result.type, runtime: result.runtime, appId }).catch(() => {})
     reply.code(201)
     return result
   })
@@ -178,8 +180,8 @@ export default async function componentRoutes(fastify) {
     `, { id: req.params.id, name, type, runtime })
     if (!records.length) return reply.notFound('Component not found')
     const result = props(records[0].get('c'))
-    audit(actor(req), 'update', 'Component', result.id, result.name,
-      { changes: req.body })
+    req.audit(actor(req), 'update', 'Component', result.id, result.name,
+      { changes: req.body }).catch(() => {})
     return result
   })
 
@@ -198,7 +200,7 @@ export default async function componentRoutes(fastify) {
     if (!pre.length) return reply.notFound('Component not found')
     const name = pre[0].get('name') || req.params.id
     await write(`MATCH (c:Component {id: $id}) DETACH DELETE c`, { id: req.params.id })
-    audit(actor(req), 'delete', 'Component', req.params.id, name)
+    req.audit(actor(req), 'delete', 'Component', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 
@@ -229,8 +231,8 @@ export default async function componentRoutes(fastify) {
                     r.evidence      = $evidence
       SET r.protocol = $protocol, r.port = $port
     `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null, evidence })
-    audit(actor(req), 'connect', 'Component', req.params.id, req.params.id,
-      { targetId, protocol, port })
+    req.audit(actor(req), 'connect', 'Component', req.params.id, req.params.id,
+      { targetId, protocol, port }).catch(() => {})
     reply.code(201)
     return { connected: true }
   })
@@ -257,8 +259,8 @@ export default async function componentRoutes(fastify) {
                     rel.source        = 'manual-deploy',
                     rel.confidence    = 100
     `, { id: req.params.id, infraId })
-    audit(actor(req), 'deploy', 'Component', req.params.id, req.params.id,
-      { infraId })
+    req.audit(actor(req), 'deploy', 'Component', req.params.id, req.params.id,
+      { infraId }).catch(() => {})
     reply.code(201)
     return { deployed: true }
   })

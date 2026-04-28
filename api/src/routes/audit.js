@@ -102,6 +102,11 @@ export default async function auditRoutes(fastify) {
     const params     = []
     let   p          = 1
 
+    // Phase 1d: filter by req.tenant.id when set so a tenant-bound key
+    // sees only its own audit history. Super-admin requests without
+    // X-Tenant-Slug have no req.tenant — they get cross-tenant reads,
+    // which is the desired behaviour for ops investigation.
+    if (req.tenant) { conditions.push(`tenant_id = $${p++}`)        ; params.push(req.tenant.id) }
     if (action)       { conditions.push(`action = $${p++}`)        ; params.push(action) }
     if (resourceType) { conditions.push(`resource_type = $${p++}`) ; params.push(resourceType) }
     if (resourceId)   { conditions.push(`resource_id = $${p++}`)   ; params.push(resourceId) }
@@ -159,6 +164,10 @@ export default async function auditRoutes(fastify) {
     if (!pgOk()) return { byAction: {}, byResourceType: {}, byActor: [], byScope: {}, recentActivity: [] }
 
     const { days = 30 } = req.query
+    // Phase 1d: tenant-bound requests scope stats to their own tenant.
+    // Super-admin without X-Tenant-Slug gets cross-tenant aggregates.
+    const tenantClause = req.tenant ? `AND tenant_id = $2` : ''
+    const tenantParams = req.tenant ? [parseInt(days), req.tenant.id] : [parseInt(days)]
 
     const [byAction, byType, byActor, byScope, daily] = await Promise.all([
       // Count by action
@@ -166,16 +175,18 @@ export default async function auditRoutes(fastify) {
         SELECT action, COUNT(*) AS cnt
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
+          ${tenantClause}
         GROUP BY action ORDER BY cnt DESC
-      `, [parseInt(days)]),
+      `, tenantParams),
 
       // Count by resource_type
       fastify.pg.query(`
         SELECT resource_type, COUNT(*) AS cnt
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
+          ${tenantClause}
         GROUP BY resource_type ORDER BY cnt DESC
-      `, [parseInt(days)]),
+      `, tenantParams),
 
       // Top actors — group by (actor_key_id, actor) so two keys that
       // happened to share a display name (e.g. a name reused after the
@@ -192,9 +203,10 @@ export default async function auditRoutes(fastify) {
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
           AND actor IS NOT NULL
+          ${tenantClause}
         GROUP BY actor_key_id, actor
         ORDER BY cnt DESC LIMIT 20
-      `, [parseInt(days)]),
+      `, tenantParams),
 
       // Count by actor_scope — pre-RBAC rows show up under '(none)' so
       // operators can see the migration progress.
@@ -202,8 +214,9 @@ export default async function auditRoutes(fastify) {
         SELECT COALESCE(actor_scope, '(none)') AS scope, COUNT(*) AS cnt
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
+          ${tenantClause}
         GROUP BY actor_scope ORDER BY cnt DESC
-      `, [parseInt(days)]),
+      `, tenantParams),
 
       // Daily activity for sparkline (last 30 days)
       fastify.pg.query(`
@@ -211,8 +224,9 @@ export default async function auditRoutes(fastify) {
                COUNT(*) AS cnt
         FROM audit_log
         WHERE created_at >= now() - ($1 || ' days')::interval
+          ${tenantClause}
         GROUP BY day ORDER BY day ASC
-      `, [parseInt(days)]),
+      `, tenantParams),
     ])
 
     return {
@@ -245,13 +259,18 @@ export default async function auditRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!pgOk()) return []
+    const tenantClause = req.tenant ? 'AND tenant_id = $3' : ''
+    const tenantParams = req.tenant
+      ? [req.params.type, req.params.id, req.tenant.id]
+      : [req.params.type, req.params.id]
     const rows = await fastify.pg.query(`
       SELECT ${SELECT_COLS}
       FROM audit_log
       WHERE resource_type = $1 AND resource_id = $2
+        ${tenantClause}
       ORDER BY created_at DESC
       LIMIT 500
-    `, [req.params.type, req.params.id])
+    `, tenantParams)
 
     return rows.map(mapRow)
   })
@@ -302,8 +321,9 @@ export default async function auditRoutes(fastify) {
       ? [`%${req.params.name}%`]
       : [req.params.name]
     let   p          = 2
-    if (keyId) { conditions.push(`actor_key_id = $${p++}`); params.push(keyId) }
-    if (scope) { conditions.push(`actor_scope  = $${p++}`); params.push(scope) }
+    if (keyId)      { conditions.push(`actor_key_id = $${p++}`); params.push(keyId) }
+    if (scope)      { conditions.push(`actor_scope  = $${p++}`); params.push(scope) }
+    if (req.tenant) { conditions.push(`tenant_id    = $${p++}`); params.push(req.tenant.id) }
     const where = `WHERE ${conditions.join(' AND ')}`
 
     const [rows, countRows] = await Promise.all([

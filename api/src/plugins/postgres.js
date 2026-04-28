@@ -196,7 +196,22 @@ export async function postgresPlugin(fastify) {
     //   - hot path: direct INSERT
     //   - on failure or backlog: queue + periodic retry
     //   - bounded buffer with oldest-eviction on overflow
+    //
+    // Phase 1d: tenantId is required (audit_log.tenant_id NOT NULL).
+    // Most call sites should use req.audit (curried with the tenant
+    // resolved by tenantContext) rather than this directly.
     audit: auditMachinery.audit,
+    // auditFor(tenantId) — returns an audit() function with tenantId
+    // pre-bound. Used by the tenantContext preHandler to attach
+    // req.audit, and by out-of-request callers (scheduler iterating
+    // tenants) that need to write audit rows for a specific tenant.
+    auditFor: (tenantId) => {
+      if (!tenantId) {
+        throw new Error('pg.auditFor: tenantId is required')
+      }
+      return (actor, action, resourceType, resourceId, resourceName, metadata = {}, diff = null) =>
+        auditMachinery.audit(actor, action, resourceType, resourceId, resourceName, metadata, diff, tenantId)
+    },
     // Test/inspection accessors so an integration test (or a future ops
     // endpoint) can assert on buffer state without poking module internals.
     auditBuffer: {

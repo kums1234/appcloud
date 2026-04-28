@@ -23,30 +23,24 @@ export async function schedulerPlugin(fastify) {
   // prevents concurrent ticks across replicas.
   const scanLock = makeOnceLock()
 
-  const INIT_SQL = `
-    CREATE TABLE IF NOT EXISTS discovery_schedule (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      scope TEXT NOT NULL DEFAULT 'global',
-      enabled BOOLEAN NOT NULL DEFAULT true,
-      interval_mins INTEGER NOT NULL DEFAULT 15,
-      last_run_at TIMESTAMPTZ,
-      last_run_status TEXT,
-      last_run_total INTEGER DEFAULT 0,
-      next_run_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE (scope)
-    );
-    INSERT INTO discovery_schedule (scope, enabled, interval_mins)
-    VALUES ('global', false, 15)
-    ON CONFLICT (scope) DO NOTHING;
-  `
+  // Phase 1d: discovery_schedule lives in tenant_default. The runner
+  // applies api/src/migrations/tenant-schema/005-discovery-schedule.sql
+  // to new tenants on creation; the cutover migrates the legacy default
+  // tenant's row in place. The scheduler runs on the default tenant's
+  // schedule for now — Phase 1e will iterate per-tenant schedules so
+  // each tenant can pick its own interval.
+  const SCHEDULER_TENANT_SCHEMA = 'tenant_default'
+  const tenantPg = () =>
+    typeof fastify.pg?.forTenant === 'function'
+      ? fastify.pg.forTenant(SCHEDULER_TENANT_SCHEMA)
+      : null
 
   // ── Read current schedule from Postgres ─────────────────────────────────
   const getSchedule = async () => {
-    if (!fastify.pg?.pool) return null
+    const pg = tenantPg()
+    if (!pg) return null
     try {
-      const rows = await fastify.pg.query(
+      const rows = await pg.query(
         `SELECT * FROM discovery_schedule WHERE scope = 'global' LIMIT 1`
       )
       return rows[0] || null
@@ -55,7 +49,8 @@ export async function schedulerPlugin(fastify) {
 
   // ── Update schedule in Postgres ──────────────────────────────────────────
   const updateSchedule = async (fields) => {
-    if (!fastify.pg?.pool) return null
+    const pg = tenantPg()
+    if (!pg) return null
     const setClauses = []
     const values = []
     let idx = 1
@@ -65,7 +60,7 @@ export async function schedulerPlugin(fastify) {
     }
     setClauses.push(`updated_at = now()`)
     values.push('global')
-    const rows = await fastify.pg.query(
+    const rows = await pg.query(
       `UPDATE discovery_schedule SET ${setClauses.join(', ')}
        WHERE scope = $${idx} RETURNING *`,
       values
@@ -421,12 +416,10 @@ export async function schedulerPlugin(fastify) {
       fastify.log.warn('[Scheduler] PostgreSQL not available — scheduler disabled')
       return
     }
-    // Ensure table exists
-    try {
-      await fastify.pg.query(INIT_SQL)
-    } catch (err) {
-      fastify.log.warn(`[Scheduler] Table init: ${err.message}`)
-    }
+    // Phase 1d: discovery_schedule is provisioned by the runner (for
+    // new tenants) and by postgres-init/18-tables-cutover.sql (for the
+    // default tenant). No init SQL here anymore — the table existence
+    // is the runner's responsibility.
     await startTimer()
   })
 

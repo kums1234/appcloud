@@ -11,7 +11,6 @@ import {
 } from '../schemas/openapi.js'
 
 export default async function graphRoutes(fastify) {
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
   const actor = actorFromReq
   const { query } = fastify.neo4j
 
@@ -252,8 +251,8 @@ export default async function graphRoutes(fastify) {
       }) RETURN s
     `, { label })
     const snap = props(records[0].get('s'))
-    audit(actor(req), 'create', 'Snapshot', snap.id, label || snap.id,
-      { nodeCount: snap.nodeCount })
+    req.audit(actor(req), 'create', 'Snapshot', snap.id, label || snap.id,
+      { nodeCount: snap.nodeCount }).catch(() => {})
     reply.code(201)
     return snap
   })

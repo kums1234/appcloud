@@ -52,8 +52,8 @@ export default async function integrationRoutes(fastify) {
 
     // Create import job record in PostgreSQL
     let jobId = null
-    if (fastify.pg?.pool) {
-      const [job] = await fastify.pg.query(
+    if (fastify.pg?.pool && req.pg) {
+      const [job] = await req.pg.query(
         `INSERT INTO terraform_imports (filename, file_size_bytes, status)
          VALUES ($1, $2, 'parsing') RETURNING id`,
         [filename, fileSizeBytes]
@@ -65,8 +65,8 @@ export default async function integrationRoutes(fastify) {
     const { resources, errors, version, workspace } = parseTerraformState(stateJson)
 
     if (errors.length && !resources.length) {
-      if (fastify.pg?.pool && jobId) {
-        await fastify.pg.query(
+      if (fastify.pg?.pool && jobId && req.pg) {
+        await req.pg.query(
           `UPDATE terraform_imports SET status='error', error_message=$1, finished_at=now()
            WHERE id=$2`, [errors.join('; '), jobId]
         )
@@ -91,8 +91,8 @@ export default async function integrationRoutes(fastify) {
       warnings:    ingestResult.warnings,
     }
 
-    if (fastify.pg?.pool && jobId) {
-      await fastify.pg.query(
+    if (fastify.pg?.pool && jobId && req.pg) {
+      await req.pg.query(
         `UPDATE terraform_imports SET
            status='done', terraform_version=$1, workspace=$2,
            resources_found=$3, resources_imported=$4, resources_skipped=$5,
@@ -109,20 +109,26 @@ export default async function integrationRoutes(fastify) {
       // that intent and use the explicit systemActor() helper so
       // actor_key_id / actor_scope are deliberately NULL rather than
       // accidentally dropped from the bare-string code path.
-      await fastify.pg.audit(
-        systemActor(SYSTEM_ACTORS.terraformImport),
-        'import', 'TerraformImport', jobId, filename,
-        {
-          created:    ingestResult.resourcesCreated,
-          updated:    ingestResult.resourcesUpdated,
-          skipped:    ingestResult.resourcesSkipped,
-          total:      resources.length,
-          // Surface the principal that triggered the import in metadata so
-          // an auditor can still trace it back even though the row's actor
-          // field is the system label.
-          triggeredBy: req.principal?.name || null,
-        }
-      )
+      // Phase 1d: audit() goes through req.audit (curried with the
+      // tenant_id resolved by tenantContext) — the row's `actor` is
+      // still the system label, but the tenant attribution is now
+      // first-class.
+      if (req.audit) {
+        await req.audit(
+          systemActor(SYSTEM_ACTORS.terraformImport),
+          'import', 'TerraformImport', jobId, filename,
+          {
+            created:    ingestResult.resourcesCreated,
+            updated:    ingestResult.resourcesUpdated,
+            skipped:    ingestResult.resourcesSkipped,
+            total:      resources.length,
+            // Surface the principal that triggered the import in metadata so
+            // an auditor can still trace it back even though the row's actor
+            // field is the system label.
+            triggeredBy: req.principal?.name || null,
+          },
+        ).catch(() => {})
+      }
     }
 
     reply.code(200).send({
@@ -148,7 +154,8 @@ export default async function integrationRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!fastify.pg?.pool) return []
-    const rows = await fastify.pg.query(
+    if (!req.pg) return []
+    const rows = await req.pg.query(
       `SELECT id, filename, status, terraform_version, workspace,
               resources_found, resources_imported, resources_skipped,
               error_message, created_at, finished_at,

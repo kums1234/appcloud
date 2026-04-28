@@ -174,6 +174,41 @@ async function ensureDefaultTenantCutover(pg, log) {
       END $$
     `)
 
+    // Phase 1d: move terraform_imports + ai_jobs + discovery_schedule.
+    // All three are FK-free so they move independently.
+    await pg.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_name = 'terraform_imports'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'tenant_default' AND table_name = 'terraform_imports'
+        ) THEN
+          ALTER TABLE public.terraform_imports SET SCHEMA tenant_default;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_name = 'ai_jobs'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'tenant_default' AND table_name = 'ai_jobs'
+        ) THEN
+          ALTER TABLE public.ai_jobs SET SCHEMA tenant_default;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'public' AND table_name = 'discovery_schedule'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+           WHERE table_schema = 'tenant_default' AND table_name = 'discovery_schedule'
+        ) THEN
+          ALTER TABLE public.discovery_schedule SET SCHEMA tenant_default;
+        END IF;
+      END $$
+    `)
+
     await pg.query(`
       UPDATE control.tenants
          SET schema_name = 'tenant_default'
@@ -181,14 +216,59 @@ async function ensureDefaultTenantCutover(pg, log) {
          AND schema_name = 'public'
     `)
 
-    // Record cutover sentinels for both template files. The runner
-    // treats sha='cutover' as already-applied (never recompares against
-    // the file content), so the next sweep skips these for tenant_default.
+    // Phase 1d: audit_log gains a tenant_id column (NOT NULL, FK to
+    // control.tenants). Backfill goes to the default tenant so
+    // pre-cutover rows aren't lost. The table stays in `public` —
+    // see postgres-init/17-audit-tenant-id.sql for rationale.
+    await pg.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name   = 'audit_log'
+             AND column_name  = 'tenant_id'
+        ) THEN
+          ALTER TABLE audit_log ADD COLUMN tenant_id UUID;
+        END IF;
+        UPDATE audit_log
+           SET tenant_id = (SELECT id FROM control.tenants WHERE slug = 'default')
+         WHERE tenant_id IS NULL;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name   = 'audit_log'
+             AND column_name  = 'tenant_id'
+             AND is_nullable  = 'YES'
+        ) THEN
+          ALTER TABLE audit_log ALTER COLUMN tenant_id SET NOT NULL;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'audit_log_tenant_fk'
+        ) THEN
+          ALTER TABLE audit_log
+            ADD CONSTRAINT audit_log_tenant_fk
+              FOREIGN KEY (tenant_id) REFERENCES control.tenants(id)
+              ON DELETE RESTRICT;
+        END IF;
+      END $$
+    `)
+    await pg.query(`
+      CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_created_at
+        ON audit_log (tenant_id, created_at DESC)
+    `)
+
+    // Record cutover sentinels. The runner treats sha='cutover' as
+    // already-applied (never recompares against the file content), so
+    // the next sweep skips these for tenant_default.
     await pg.query(`
       INSERT INTO control.schema_migrations (schema_name, filename, sha256)
       VALUES
-        ('tenant_default', '001-base-tables.sql',     'cutover'),
-        ('tenant_default', '002-sync-jobs.sql',       'cutover')
+        ('tenant_default', '001-base-tables.sql',       'cutover'),
+        ('tenant_default', '002-sync-jobs.sql',         'cutover'),
+        ('tenant_default', '003-terraform-imports.sql', 'cutover'),
+        ('tenant_default', '004-ai-jobs.sql',           'cutover'),
+        ('tenant_default', '005-discovery-schedule.sql','cutover')
       ON CONFLICT (schema_name, filename) DO NOTHING
     `)
     log?.info?.('[tenant-context] default-tenant cutover ensured (1b + 1c)')
@@ -362,6 +442,14 @@ export async function tenantContextPlugin(fastify) {
       // For multi-step atomicity, route handlers use req.pg.transaction(fn).
       if (typeof pg.forTenant === 'function') {
         req.pg = pg.forTenant(tenant.schemaName)
+      }
+      // Phase 1d: req.audit is the audit-write surface curried with
+      // the request's tenant_id. Route handlers used to call
+      // fastify.pg.audit(...).catch(); now they call
+      // req.audit(...).catch() with the same arg shape minus the
+      // tenant_id (the curry supplies it).
+      if (typeof pg.auditFor === 'function') {
+        req.audit = pg.auditFor(tenant.id)
       }
     }
     // No tenant resolved (super-admin without header, no principal.tenantId):

@@ -114,7 +114,7 @@ export default async function applicationRoutes(fastify) {
          confidentiality: confidentiality || 'internal',
          domain: domain || '' })
     const result = props(records[0].get('a'))
-    fastify.pg.audit(actor(req), 'create', 'Application', result.id, result.name,
+    req.audit(actor(req), 'create', 'Application', result.id, result.name,
       { tier: result.tier, environment: result.environment }).catch(() => {})
     reply.code(201)
     return result
@@ -148,7 +148,7 @@ export default async function applicationRoutes(fastify) {
          owner, environment, availability, confidentiality, domain })
     if (!records.length) return reply.notFound('Application not found')
     const result = props(records[0].get('a'))
-    fastify.pg.audit(actor(req), 'update', 'Application', result.id, result.name,
+    req.audit(actor(req), 'update', 'Application', result.id, result.name,
       { changes: req.body }).catch(() => {})
     return result
   })
@@ -215,7 +215,7 @@ export default async function applicationRoutes(fastify) {
     // Finally delete the application itself (DETACH removes CONTAINS relations)
     await write(`MATCH (a:Application {id: $id}) DETACH DELETE a`, { id: req.params.id })
 
-    fastify.pg.audit(actor(req), 'delete', 'Application', req.params.id, name).catch(() => {})
+    req.audit(actor(req), 'delete', 'Application', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 

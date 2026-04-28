@@ -47,7 +47,8 @@ function redact(row) {
 }
 
 export default async function integrationManagementRoutes(fastify) {
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  // Phase 1d: audit() is now per-request via req.audit. Each call site
+  // uses req.audit(...).catch(() => {}).
   const actor = actorFromReq
 
   // ── GET /integrations ───────────────────────────────────────────────────────
@@ -156,12 +157,12 @@ export default async function integrationManagementRoutes(fastify) {
         [type, name, JSON.stringify(encrypted), !!enabled, pollIntervalSeconds],
       )
       row = rows[0]
-      audit(actor(req), 'create', 'Integration', row.id, `${type}:${name}`, {
+      req.audit(actor(req), 'create', 'Integration', row.id, `${type}:${name}`, {
         type,
         // SHA-256 prefix of the encrypted config — lets auditors trace
         // changes across rows without exposing plaintext secrets.
         configDigest: configDigest(encrypted),
-      })
+      }).catch(() => {})
     } catch (err) {
       fastify.log.error(`[Integrations] POST error: ${err.message}`)
       return reply.internalServerError(`Failed to save integration: ${err.message}`)
@@ -254,11 +255,11 @@ export default async function integrationManagementRoutes(fastify) {
       values,
     )
     if (!rows.length) return reply.notFound('Integration not found')
-    audit(actor(req), 'update', 'Integration', rows[0].id, `${rows[0].type}:${rows[0].name}`, {
+    req.audit(actor(req), 'update', 'Integration', rows[0].id, `${rows[0].type}:${rows[0].name}`, {
       beforeConfigDigest: beforeDigest,
       afterConfigDigest:  configDigest(rows[0].config),
       changedFields:      Object.keys(req.body || {}),
-    })
+    }).catch(() => {})
 
     if (spec && typeof spec.afterUpsert === 'function') {
       try {
@@ -290,7 +291,7 @@ export default async function integrationManagementRoutes(fastify) {
       [req.params.id],
     )
     if (!rows.length) return reply.notFound('Integration not found')
-    audit(actor(req), 'delete', 'Integration', rows[0].id, `${rows[0].type}:${rows[0].name}`, {})
+    req.audit(actor(req), 'delete', 'Integration', rows[0].id, `${rows[0].type}:${rows[0].name}`, {}).catch(() => {})
     reply.code(204).send()
   })
 
@@ -381,7 +382,7 @@ export default async function integrationManagementRoutes(fastify) {
         `UPDATE integrations SET last_sync_status = $1, last_sync_error = NULL WHERE id = $2`,
         [status, row.id],
       )
-      audit(actor(req), 'scan', 'Integration', row.id, `${row.type}:${row.name}`, result)
+      req.audit(actor(req), 'scan', 'Integration', row.id, `${row.type}:${row.name}`, result).catch(() => {})
 
       // Tell the CMDB assessment scheduler a fresh scan has landed so it
       // picks up the new :CmdbCi / :Infra nodes on its next tick. No-op if

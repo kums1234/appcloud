@@ -38,7 +38,8 @@ function validateProviderConfig(provider, config) {
 }
 
 export default async function cloudAccountRoutes(fastify) {
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  // Phase 1d: audit() is now per-request via req.audit. Each call site
+  // uses req.audit(...).catch(() => {}).
   const actor = actorFromReq
 
   // ── GET /integrations/cloud ──────────────────────────────────────────────
@@ -133,7 +134,7 @@ export default async function cloudAccountRoutes(fastify) {
         [provider, name, JSON.stringify(encryptedConfig), enabled]
       )
       const row = rows[0]
-      audit(actor(req), 'create', 'CloudAccount', row.id, `${provider}:${name}`, { provider })
+      req.audit(actor(req), 'create', 'CloudAccount', row.id, `${provider}:${name}`, { provider }).catch(() => {})
       reply.code(201)
       return { ...row, config: decryptConfig(encryptedConfig) }
     } catch (err) {
@@ -184,8 +185,8 @@ export default async function cloudAccountRoutes(fastify) {
          RETURNING id, provider, name, enabled, updated_at`,
         [name ?? null, JSON.stringify(newConfig), enabled ?? null, req.params.id]
       )
-      audit(actor(req), 'update', 'CloudAccount', req.params.id,
-        `${current.provider}:${current.name}`, {})
+      req.audit(actor(req), 'update', 'CloudAccount', req.params.id,
+        `${current.provider}:${current.name}`, {}).catch(() => {})
       return { ...rows[0], config: decryptConfig(newConfig) }
     } catch (err) {
       fastify.log.error(`[CloudAccounts] PATCH error: ${err.message}`)
@@ -210,8 +211,8 @@ export default async function cloudAccountRoutes(fastify) {
       )
       if (!existing.length) return reply.notFound('Cloud account not found')
       await req.pg.query(`DELETE FROM cloud_accounts WHERE id = $1`, [req.params.id])
-      audit(actor(req), 'delete', 'CloudAccount', req.params.id,
-        `${existing[0].provider}:${existing[0].name}`, {})
+      req.audit(actor(req), 'delete', 'CloudAccount', req.params.id,
+        `${existing[0].provider}:${existing[0].name}`, {}).catch(() => {})
       reply.code(204)
     } catch (err) {
       fastify.log.error(`[CloudAccounts] DELETE error: ${err.message}`)

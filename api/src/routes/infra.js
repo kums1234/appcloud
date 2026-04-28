@@ -86,7 +86,7 @@ export default async function infraRoutes(fastify) {
       }) RETURN i
     `, { name, provider, resource_type, region: region || '', public: !!isPublic })
     const result = props(records[0].get('i'))
-    fastify.pg.audit(actor(req), 'create', 'Infra', result.id, result.name,
+    req.audit(actor(req), 'create', 'Infra', result.id, result.name,
       { provider, resource_type }).catch(() => {})
     reply.code(201)
     return result
@@ -111,7 +111,7 @@ export default async function infraRoutes(fastify) {
     `, { id: req.params.id, name, region, public: isPublic })
     if (!records.length) return reply.notFound('Infra not found')
     const result = props(records[0].get('i'))
-    fastify.pg.audit(actor(req), 'update', 'Infra', result.id, result.name,
+    req.audit(actor(req), 'update', 'Infra', result.id, result.name,
       { changes: req.body }).catch(() => {})
     return result
   })
@@ -129,7 +129,7 @@ export default async function infraRoutes(fastify) {
       { id: req.params.id })
     const name = pre[0]?.get('name') || req.params.id
     await write(`MATCH (i:Infra {id: $id}) DETACH DELETE i`, { id: req.params.id })
-    fastify.pg.audit(actor(req), 'delete', 'Infra', req.params.id, name).catch(() => {})
+    req.audit(actor(req), 'delete', 'Infra', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 

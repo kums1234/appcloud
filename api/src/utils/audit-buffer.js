@@ -33,13 +33,22 @@
 //     never knowing why.
 
 export const AUDIT_INSERT_SQL = `
-  INSERT INTO audit_log(actor, actor_key_id, actor_scope, action, resource_type, resource_id, resource_name, metadata, diff)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  INSERT INTO audit_log(actor, actor_key_id, actor_scope, action, resource_type, resource_id, resource_name, metadata, diff, tenant_id)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 // Build the (actor, action, …) parameter tuple from the polymorphic actor
 // argument. Used by both the live INSERT path and the buffered-retry path.
-export function buildAuditRow(actor, action, resourceType, resourceId, resourceName, metadata, diff) {
+//
+// Phase 1d: tenant_id is required (audit_log.tenant_id NOT NULL post-cutover).
+// Callers without a tenant context (none should exist for new code paths,
+// but the audit_log schema constraint is the backstop) get an explicit
+// error rather than a NULL that the DB later rejects with an opaque
+// constraint violation.
+export function buildAuditRow(actor, action, resourceType, resourceId, resourceName, metadata, diff, tenantId) {
+  if (!tenantId) {
+    throw new Error('buildAuditRow: tenantId is required (audit_log.tenant_id NOT NULL since Phase 1d)')
+  }
   let actorName, actorKeyId = null, actorScope = null
   if (typeof actor === 'string') {
     actorName = actor
@@ -55,6 +64,7 @@ export function buildAuditRow(actor, action, resourceType, resourceId, resourceN
     action, resourceType, resourceId, resourceName,
     JSON.stringify(metadata || {}),
     diff ? JSON.stringify(diff) : null,
+    tenantId,
   ]
 }
 
@@ -163,8 +173,8 @@ export function makeAuditMachinery({ runQuery, log, bufferMax = 1000 } = {}) {
     }
   }
 
-  async function audit(actor, action, resourceType, resourceId, resourceName, metadata = {}, diff = null) {
-    const rowParams = buildAuditRow(actor, action, resourceType, resourceId, resourceName, metadata, diff)
+  async function audit(actor, action, resourceType, resourceId, resourceName, metadata = {}, diff = null, tenantId = null) {
+    const rowParams = buildAuditRow(actor, action, resourceType, resourceId, resourceName, metadata, diff, tenantId)
     // Backlog or in-flight drain → queue (preserves order). The fast path
     // (direct INSERT, no buffer interaction) is the empty-and-idle case.
     if (draining || pendingAudits.length > 0) {

@@ -378,7 +378,8 @@ export default async function discoveryRoutes(fastify) {
     }))
   }
   const { write, query } = fastify.neo4j
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
+  // Phase 1d: audit() is now per-request via req.audit. Each call site
+  // uses req.audit(...).catch(() => {}).
   const actor = actorFromReq
 
   // Cloud-account CRUD lives in `routes/integrations-cloud.js` under
@@ -449,7 +450,7 @@ export default async function discoveryRoutes(fastify) {
       const stale = await cleanupStaleNodes(write, query, fastify.log, 'aws', scanEpoch, stats)
       const duration = Date.now() - startedAt
       const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
-      audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { regions, total, duration, breakdown: stats })
+      req.audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { regions, total, duration, breakdown: stats }).catch(() => {})
       return { provider: 'aws', accounts: 1, regions, duration, total, breakdown: stats, stale, completedAt: new Date().toISOString() }
     }
 
@@ -486,7 +487,7 @@ export default async function discoveryRoutes(fastify) {
 
     const duration = Date.now() - startedAt
     const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
-    audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { accounts: toScan.length, grandTotal, duration })
+    req.audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { accounts: toScan.length, grandTotal, duration }).catch(() => {})
     return { provider: 'aws', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
@@ -529,7 +530,7 @@ export default async function discoveryRoutes(fastify) {
       const stale = await cleanupStaleNodes(write, query, fastify.log, 'azure', scanEpoch, stats)
       const duration = Date.now() - startedAt
       const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
-      audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { subscriptionId, total, duration, breakdown: stats })
+      req.audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { subscriptionId, total, duration, breakdown: stats }).catch(() => {})
       return { provider: 'azure', accounts: 1, subscriptionId, duration, total, breakdown: stats, stale, completedAt: new Date().toISOString() }
     }
 
@@ -563,7 +564,7 @@ export default async function discoveryRoutes(fastify) {
 
     const duration = Date.now() - startedAt
     const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
-    audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { accounts: toScan.length, grandTotal, duration })
+    req.audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { accounts: toScan.length, grandTotal, duration }).catch(() => {})
     return { provider: 'azure', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
@@ -602,7 +603,7 @@ export default async function discoveryRoutes(fastify) {
       const stale = await cleanupStaleNodes(write, query, fastify.log, 'gcp', scanEpoch, stats)
       const duration = Date.now() - startedAt
       const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
-      audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { projectId, total, duration, breakdown: stats })
+      req.audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { projectId, total, duration, breakdown: stats }).catch(() => {})
       return { provider: 'gcp', accounts: 1, projectId, duration, total, breakdown: stats, stale, completedAt: new Date().toISOString() }
     }
 
@@ -635,7 +636,7 @@ export default async function discoveryRoutes(fastify) {
 
     const duration = Date.now() - startedAt
     const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
-    audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { accounts: toScan.length, grandTotal, duration })
+    req.audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { accounts: toScan.length, grandTotal, duration }).catch(() => {})
     return { provider: 'gcp', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
@@ -748,8 +749,8 @@ export default async function discoveryRoutes(fastify) {
     }
 
     const duration = Date.now() - startedAt
-    audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
-      { accounts: accounts.length, grandTotal, duration, results, errors, episodeId })
+    req.audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
+      { accounts: accounts.length, grandTotal, duration, results, errors, episodeId }).catch(() => {})
 
     // Tell the CMDB assessment scheduler that fresh data has landed. The
     // scheduler picks this up on its next tick (or immediately, since the
@@ -900,8 +901,8 @@ export default async function discoveryRoutes(fastify) {
         await fastify.scheduler.restart()
       }
 
-      audit(actor(req), 'update', 'DiscoverySchedule', 'global', 'Discovery Schedule',
-        { enabled, interval_mins: intervalMins })
+      req.audit(actor(req), 'update', 'DiscoverySchedule', 'global', 'Discovery Schedule',
+        { enabled, interval_mins: intervalMins }).catch(() => {})
 
       return schedule || { scope: 'global', enabled: enabled ?? false, interval_mins: intervalMins ?? 15 }
     } catch (err) {
@@ -1602,8 +1603,8 @@ export default async function discoveryRoutes(fastify) {
         `, { componentId, infraId })
         if (r.length) {
           results.applied++
-          audit(actor(req), 'create', 'Infra', infraId,
-            r[0].get('infra'), { componentId, source: 'auto-mapped' })
+          req.audit(actor(req), 'create', 'Infra', infraId,
+            r[0].get('infra'), { componentId, source: 'auto-mapped' }).catch(() => {})
         } else {
           results.errors.push(`${infraId}: component or infra not found`)
         }
@@ -1661,8 +1662,8 @@ export default async function discoveryRoutes(fastify) {
           `, { componentId: action.componentId, infraId })
           if (r.length) {
             results.linked++
-            audit(actor(req), 'create', 'Infra', infraId, r[0].get('infra'),
-              { componentId: action.componentId, source: 'auto-mapped' })
+            req.audit(actor(req), 'create', 'Infra', infraId, r[0].get('infra'),
+              { componentId: action.componentId, source: 'auto-mapped' }).catch(() => {})
           }
 
         } else if (action.action === 'create_component') {
@@ -1696,7 +1697,7 @@ export default async function discoveryRoutes(fastify) {
           if (r.length) {
             results.componentsCreated++
             results.linked++
-            audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
+            req.audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
               { applicationId: action.applicationId, source: 'auto-created', infraId })
           }
 
@@ -1760,9 +1761,9 @@ export default async function discoveryRoutes(fastify) {
                 results.applicationsCreated++
                 results.componentsCreated++
                 results.linked++
-                audit(actor(req), 'create', 'Application', r[0].get('appId'), appName,
+                req.audit(actor(req), 'create', 'Application', r[0].get('appId'), appName,
                   { source: 'auto-created', infraId })
-                audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
+                req.audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
                   { applicationId: r[0].get('appId'), source: 'auto-created', infraId })
               }
             } catch (err) {
@@ -2032,7 +2033,7 @@ export default async function discoveryRoutes(fastify) {
                     rel.evidence      = 'manual link via /discovery/link'
       ON MATCH  SET rel.last_seen = datetime()
     `, { infraId, componentId })
-    audit(actor(req), 'link', 'Infra', infraId, infraId, { componentId })
+    req.audit(actor(req), 'link', 'Infra', infraId, infraId, { componentId })
     return { linked: true, infraId, componentId }
   })
 
@@ -2067,7 +2068,7 @@ export default async function discoveryRoutes(fastify) {
       MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery'
       DETACH DELETE i
     `, { id: req.params.id })
-    audit(actor(req), 'delete', 'Infra', req.params.id,
+    req.audit(actor(req), 'delete', 'Infra', req.params.id,
       pre[0]?.get('name') || req.params.id,
       { source: 'discovery', provider: pre[0]?.get('provider') })
     reply.code(204)
@@ -2119,7 +2120,7 @@ export default async function discoveryRoutes(fastify) {
           `MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery' DETACH DELETE i`,
           { id }
         )
-        audit(actor(req), 'delete', 'Infra', id, pre[0].get('name'),
+        req.audit(actor(req), 'delete', 'Infra', id, pre[0].get('name'),
           { source: 'bulk-delete' })
         results.deleted++
       } catch (err) {
@@ -2321,7 +2322,7 @@ export default async function discoveryRoutes(fastify) {
         minScore,
       })
 
-      audit(actor(req), 'enrich', 'CloudAccount', target.id, target.name, {
+      req.audit(actor(req), 'enrich', 'CloudAccount', target.id, target.name, {
         strategy, layers: strat.layers, ...result,
       })
 

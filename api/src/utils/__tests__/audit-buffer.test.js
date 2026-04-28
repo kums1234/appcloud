@@ -1,6 +1,11 @@
 import { describe, test, expect } from '@jest/globals'
 import { makeAuditMachinery, buildAuditRow } from '../audit-buffer.js'
 
+// Phase 1d: every audit() / buildAuditRow() call now requires a tenant_id
+// (audit_log.tenant_id NOT NULL post-cutover). Tests pass a fixed UUID
+// — the algorithm under test doesn't care about the actual value.
+const TENANT_ID = '00000000-0000-0000-0000-000000000001'
+
 // A tiny pool-like helper that records inserts and can be made to fail.
 // Each entry in `calls` carries an `ok: boolean` flag so tests can
 // distinguish attempts from successful inserts without re-deriving it.
@@ -26,7 +31,7 @@ function fakeRunQuery() {
 
 describe('buildAuditRow', () => {
   test('string actor lands in actor name; key_id and scope NULL', () => {
-    const row = buildAuditRow('system', 'a', 't', 'r', 'rn', { x: 1 })
+    const row = buildAuditRow('system', 'a', 't', 'r', 'rn', { x: 1 }, null, TENANT_ID)
     expect(row[0]).toBe('system')
     expect(row[1]).toBeNull()
     expect(row[2]).toBeNull()
@@ -36,6 +41,7 @@ describe('buildAuditRow', () => {
     const row = buildAuditRow(
       { name: 'admin-key', keyId: 'uuid-1', scope: 'admin' },
       'create', 'App', 'r-1', 'app-1',
+      undefined, undefined, TENANT_ID,
     )
     expect(row[0]).toBe('admin-key')
     expect(row[1]).toBe('uuid-1')
@@ -43,12 +49,12 @@ describe('buildAuditRow', () => {
   })
 
   test('null/undefined actor falls back to "system"', () => {
-    expect(buildAuditRow(null,      'a', 't', 'r', 'n')[0]).toBe('system')
-    expect(buildAuditRow(undefined, 'a', 't', 'r', 'n')[0]).toBe('system')
+    expect(buildAuditRow(null,      'a', 't', 'r', 'n', undefined, undefined, TENANT_ID)[0]).toBe('system')
+    expect(buildAuditRow(undefined, 'a', 't', 'r', 'n', undefined, undefined, TENANT_ID)[0]).toBe('system')
   })
 
   test('metadata defaults to empty object as JSON', () => {
-    expect(buildAuditRow('system', 'a', 't', 'r', 'n')[7]).toBe('{}')
+    expect(buildAuditRow('system', 'a', 't', 'r', 'n', undefined, undefined, TENANT_ID)[7]).toBe('{}')
   })
 })
 
@@ -56,7 +62,7 @@ describe('makeAuditMachinery', () => {
   test('hot path: successful audit hits runQuery once, no buffer use', async () => {
     const fake = fakeRunQuery()
     const m = makeAuditMachinery({ runQuery: fake.runQuery })
-    await m.audit('system', 'a', 't', 'r', 'n')
+    await m.audit('system', 'a', 't', 'r', 'n', undefined, undefined, TENANT_ID)
     expect(fake.calls).toHaveLength(1)
     expect(m.pending()).toBe(0)
   })
@@ -65,8 +71,8 @@ describe('makeAuditMachinery', () => {
     const fake = fakeRunQuery()
     const m = makeAuditMachinery({ runQuery: fake.runQuery })
     fake.setFail(true)
-    await m.audit('system', 'a', 't', 'r-1', 'n')
-    await m.audit('system', 'a', 't', 'r-2', 'n')
+    await m.audit('system', 'a', 't', 'r-1', 'n', undefined, undefined, TENANT_ID)
+    await m.audit('system', 'a', 't', 'r-2', 'n', undefined, undefined, TENANT_ID)
     expect(m.pending()).toBe(2)
     fake.setFail(false)
     const result = await m.drain()
@@ -78,12 +84,12 @@ describe('makeAuditMachinery', () => {
     const fake = fakeRunQuery()
     const m = makeAuditMachinery({ runQuery: fake.runQuery })
     fake.setFail(true)
-    await m.audit('system', 'a', 't', 'r-buf-1', 'n')
-    await m.audit('system', 'a', 't', 'r-buf-2', 'n')
+    await m.audit('system', 'a', 't', 'r-buf-1', 'n', undefined, undefined, TENANT_ID)
+    await m.audit('system', 'a', 't', 'r-buf-2', 'n', undefined, undefined, TENANT_ID)
     fake.setFail(false)
     // Recovery audit — should NOT race ahead of the buffer; with the
     // queue non-empty it enqueues itself and lets the drain go FIFO.
-    await m.audit('system', 'a', 't', 'r-recovery', 'n')
+    await m.audit('system', 'a', 't', 'r-recovery', 'n', undefined, undefined, TENANT_ID)
     await m.drain()
     // The three successful INSERTs are in original call order. Failed
     // attempts (during outage / mid-drain) are filtered out by `ok`.
@@ -95,7 +101,7 @@ describe('makeAuditMachinery', () => {
     const m = makeAuditMachinery({ runQuery: fake.runQuery, bufferMax: 3 })
     fake.setFail(true)
     for (const id of ['a', 'b', 'c', 'd', 'e']) {
-      await m.audit('system', 'create', 't', id, id)
+      await m.audit('system', 'create', 't', id, id, undefined, undefined, TENANT_ID)
     }
     expect(m.pending()).toBe(3)               // capped at bufferMax
     expect(m.stats().dropped).toBe(2)         // 'a' and 'b' evicted
@@ -128,9 +134,9 @@ describe('makeAuditMachinery', () => {
     const m = makeAuditMachinery({ runQuery, log })
 
     // Queue rows: a (poison), b, c.
-    await m.audit('system', 'a', 't', 'a', 'a')   // initial INSERT fails → buffered
-    await m.audit('system', 'a', 't', 'b', 'b')   // queues behind a
-    await m.audit('system', 'a', 't', 'c', 'c')
+    await m.audit('system', 'a', 't', 'a', 'a', undefined, undefined, TENANT_ID)   // initial INSERT fails → buffered
+    await m.audit('system', 'a', 't', 'b', 'b', undefined, undefined, TENANT_ID)   // queues behind a
+    await m.audit('system', 'a', 't', 'c', 'c', undefined, undefined, TENANT_ID)
 
     // The first call to audit('a') tries-and-fails the live INSERT (1 attempt).
     // Each subsequent audit() kicks a drain that retries 'a' and bails.
@@ -155,7 +161,7 @@ describe('makeAuditMachinery', () => {
     const fake = fakeRunQuery()
     const m = makeAuditMachinery({ runQuery: fake.runQuery })
     fake.setFail(true)
-    await m.audit('system', 'a', 't', 'r-1', 'n')
+    await m.audit('system', 'a', 't', 'r-1', 'n', undefined, undefined, TENANT_ID)
     fake.setFail(false)
     // Race two drains. The second one should see draining=true and bail.
     const [r1, r2] = await Promise.all([m.drain(), m.drain()])
