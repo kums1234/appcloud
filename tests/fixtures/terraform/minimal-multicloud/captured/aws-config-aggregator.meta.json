@@ -1,0 +1,7 @@
+{
+  "target": "aws-config-aggregator.json",
+  "source_call": "aws configservice select-aggregate-resource-config",
+  "expression": "SELECT accountId, awsRegion, resourceType, resourceId, arn, configuration, tags WHERE awsRegion IN ('us-east-1','us-west-2')",
+  "captured_from": "hand-crafted to mirror Terraform in tests/fixtures/terraform/minimal-multicloud/aws/main.tf",
+  "real_response_note": "Real responses wrap each row's configuration as a JSON STRING in Results[]. Tests must JSON.parse each entry — see api/src/routes/discovery.aws.js scanner. This fixture pre-parses for readability; the test harness should re-stringify before feeding the scanner OR consume parsed rows directly."
+}

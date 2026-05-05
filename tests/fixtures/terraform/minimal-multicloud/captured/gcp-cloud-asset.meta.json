@@ -1,0 +1,6 @@
+{
+  "target": "gcp-cloud-asset.json",
+  "source_call": "gcloud asset list --content-type=resource",
+  "captured_from": "hand-crafted to mirror Terraform in tests/fixtures/terraform/minimal-multicloud/gcp/main.tf",
+  "real_response_note": "Real listAssetsAsync yields one asset per iteration. The discovery.gcp.js scanner accumulates them; test harnesses can feed them as an array. The `resource.data` field carries the full GCP API representation — fields below are abbreviated to what the scanner actually reads."
+}

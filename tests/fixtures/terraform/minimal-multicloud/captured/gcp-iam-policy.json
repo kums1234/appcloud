@@ -1,0 +1,46 @@
+{
+  "assets": [
+    {
+      "name": "//storage.googleapis.com/projects/_/buckets/bucket-public-fixture-001",
+      "assetType": "storage.googleapis.com/Bucket",
+      "iamPolicy": {
+        "version": 1,
+        "etag": "BwXabcd1234=",
+        "bindings": [
+          {
+            "role": "roles/storage.objectViewer",
+            "members": ["allUsers"]
+          },
+          {
+            "role": "roles/storage.objectAdmin",
+            "members": ["serviceAccount:sa-batch@gcp-batch-002.iam.gserviceaccount.com"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+      "assetType": "cloudresourcemanager.googleapis.com/Project",
+      "iamPolicy": {
+        "version": 1,
+        "etag": "BwXproject01=",
+        "bindings": [
+          {
+            "role": "roles/compute.serviceAgent",
+            "members": ["serviceAccount:sa-web@gcp-web-prod-001.iam.gserviceaccount.com"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "//run.googleapis.com/projects/gcp-batch-002/locations/us-central1/services/svc-batch",
+      "assetType": "run.googleapis.com/Service",
+      "iamPolicy": {
+        "version": 1,
+        "etag": "BwXrun01=",
+        "bindings": []
+      }
+    }
+  ],
+  "nextPageToken": null
+}
