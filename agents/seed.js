@@ -127,14 +127,8 @@ async function ensureUser() {
 async function clean() {
   log('🧹', 'Cleaning previous seed data...');
 
-  // Delete changes, then components, then apps, then infra
-  const changes = await req('GET', '/changes') || [];
-  for (const ch of changes) {
-    if (ch.title?.startsWith('[seed]')) {
-      await req('DELETE', `/changes/${ch.id}`);
-    }
-  }
-
+  // /changes was removed during the refocus — nothing to clean there.
+  // Delete components-by-cascade via /applications, then infra.
   const apps = await req('GET', '/applications') || [];
   for (const app of apps) {
     if (app.name?.startsWith('[seed]')) {
@@ -198,7 +192,7 @@ async function seed() {
     // Notification Hub
     { name: '[seed] notif-api',        type: 'api',      runtime: 'nodejs',  appName: '[seed] Notification Hub' },
     { name: '[seed] notif-queue',      type: 'queue',    runtime: 'docker',  appName: '[seed] Notification Hub' },
-    // Dev Sandbox — no components (left for onboarding agent to create)
+    // Dev Sandbox — no components (left for the Mapping agent's Pass 2 to propose)
   ];
 
   for (const def of compDefs) {
@@ -322,72 +316,10 @@ async function seed() {
     }
   }
 
-  console.log('\n── Creating Changes ──');
-
-  const changeDefs = [
-    {
-      title: '[seed] Upgrade Payment RDS to db.r6g.xlarge',
-      description: 'Scale up the payment database for Black Friday traffic. Requires 10-minute maintenance window.',
-      type: 'general',
-      riskScore: 8,
-      modifies: ['[seed] prod-payment-rds'],
-      affects: ['[seed] Payment Gateway'],
-    },
-    {
-      title: '[seed] Rotate Portal API TLS certificates',
-      description: 'Annual TLS cert rotation for portal-api instances. Rolling restart required.',
-      type: 'general',
-      riskScore: 5,
-      modifies: ['[seed] prod-portal-vm-1', '[seed] prod-portal-vm-2'],
-      affects: ['[seed] User Portal'],
-    },
-    {
-      title: '[seed] Migrate Analytics to new GKE node pool',
-      description: 'Move analytics workloads to ARM-based node pool for cost savings.',
-      type: 'migration',
-      riskScore: 6,
-      modifies: ['[seed] prod-analytics-gke'],
-      affects: ['[seed] Analytics Engine'],
-    },
-    {
-      title: '[seed] Decommission orphan S3 bucket',
-      description: 'Remove unused log bucket that has been idle for 6 months.',
-      type: 'general',
-      riskScore: 2,
-      modifies: ['[seed] orphan-s3-logs'],
-      affects: [],
-    },
-  ];
-
-  // We need a user node in Neo4j for SUBMITTED relationship
-  await req('POST', '/users', { name: 'seed-admin', email: 'seed@appcloud.local', role: 'admin' });
-
-  // Get the user ID from Neo4j
-  const users = await req('GET', '/users') || [];
-  const seedUser = users.find(u => u.name === 'seed-admin') || users[0];
-
-  if (seedUser) {
-    for (const def of changeDefs) {
-      const modifiesIds = def.modifies.map(n => infra[n]?.id).filter(Boolean);
-      const affectsIds = def.affects.map(n => apps[n]?.id).filter(Boolean);
-
-      const change = await req('POST', '/changes', {
-        title: def.title,
-        description: def.description,
-        type: def.type,
-        riskScore: def.riskScore,
-        submittedBy: seedUser.id,
-        modifiesIds,
-        affectsIds,
-      });
-      if (change?.id) {
-        log(def.riskScore >= 7 ? '🔴' : def.riskScore >= 4 ? '🟡' : '🟢',
-          `Change: ${def.title} (risk: ${def.riskScore})`);
-      }
-    }
-  } else {
-    log('⚠', 'Skipped changes — no user available for SUBMITTED relationship');
-  }
+  // /changes and /users were removed during the refocus. The blast-radius
+  // agent answers ad-hoc impact questions over the current graph rather
+  // than over a registry of pending changes — so the seed no longer needs
+  // to populate either domain.
 
   // ── Summary ─────────────────────────────────────────────────────────────
 
@@ -397,9 +329,8 @@ async function seed() {
   console.log(`  Applications:    ${Object.keys(apps).length}`);
   console.log(`  Components:      ${Object.keys(comps).length}`);
   console.log(`  Infra (mapped):  ${infraDefs.length}`);
-  console.log(`  Infra (unmapped): ${unmappedDefs.length} (for agents to handle)`);
+  console.log(`  Infra (unmapped): ${unmappedDefs.length} (for the Mapping agent's Pass 2 to handle)`);
   console.log(`  Connections:     ${connections.length}`);
-  console.log(`  Changes:         ${changeDefs.length}`);
   console.log('');
   console.log('  Next steps:');
   console.log('    cd agents');

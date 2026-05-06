@@ -1,7 +1,6 @@
 import { createLogger } from './lib/logger.js';
 import { runDiscoveryAgent } from './agents/discovery.js';
 import { runMappingAgent } from './agents/mapping.js';
-import { runOnboardingAgent } from './agents/onboarding.js';
 import { runBlastRadiusAgent } from './agents/blast-radius.js';
 
 const log = createLogger('Orchestrator');
@@ -19,34 +18,33 @@ function extractResult(response, tag) {
 
 /**
  * Run the full multi-agent pipeline:
- * Discovery → Mapping → Onboarding → Blast Radius
+ * Discovery → Mapping (two-pass: link existing + propose new) → Blast Radius.
+ *
+ * The standalone Onboarding stage was removed in this branch — its only
+ * useful job (inferring Application/Component from naming patterns when no
+ * mapping candidate clears threshold) is now Pass 2 of the Mapping agent.
  */
 export async function runPipeline() {
   const startTime = Date.now();
 
   log.separator();
   log.info('Starting multi-agent pipeline...');
-  log.info('Pipeline: Discovery → Mapping → Onboarding → Blast Radius');
+  log.info('Pipeline: Discovery → Mapping → Blast Radius');
   log.separator();
 
   // Stage 1: Discovery
-  log.info('Stage 1/4: Discovery');
+  log.info('Stage 1/3: Discovery');
   const discoveryResult = await runDiscoveryAgent();
   const discoveryContext = extractResult(discoveryResult, 'DISCOVERY_RESULT');
 
-  // Stage 2: Mapping
-  log.info('Stage 2/4: Mapping & Linking');
+  // Stage 2: Mapping (two-pass — Pass 2 absorbs old Onboarding's Job 2)
+  log.info('Stage 2/3: Mapping & Linking');
   const mappingResult = await runMappingAgent(discoveryContext);
   const mappingContext = extractResult(mappingResult, 'MAPPING_RESULT');
 
-  // Stage 3: Onboarding
-  log.info('Stage 3/4: Application Onboarding');
-  const onboardingResult = await runOnboardingAgent(mappingContext);
-  const onboardingContext = extractResult(onboardingResult, 'ONBOARDING_RESULT');
-
-  // Stage 4: Blast Radius
-  log.info('Stage 4/4: Blast Radius Analysis');
-  const blastRadiusResult = await runBlastRadiusAgent(onboardingContext);
+  // Stage 3: Blast Radius
+  log.info('Stage 3/3: Blast Radius Analysis');
+  const blastRadiusResult = await runBlastRadiusAgent(mappingContext);
 
   // Final report
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -59,8 +57,6 @@ export async function runPipeline() {
   console.log(discoveryContext);
   console.log('\n--- Mapping ---');
   console.log(mappingContext);
-  console.log('\n--- Onboarding ---');
-  console.log(onboardingContext);
   console.log('\n--- Blast Radius ---');
   console.log(extractResult(blastRadiusResult, 'BLAST_RADIUS_RESULT'));
   console.log('\n========================\n');
@@ -68,7 +64,6 @@ export async function runPipeline() {
   return {
     discovery: discoveryResult,
     mapping: mappingResult,
-    onboarding: onboardingResult,
     blastRadius: blastRadiusResult,
     duration,
   };

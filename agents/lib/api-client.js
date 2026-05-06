@@ -53,12 +53,21 @@ export class AppCloudClient {
   scanAll()                 { return this.request('POST', '/discovery/scan/all'); }
   getDiscoverySummary()     { return this.request('GET', '/discovery/summary'); }
   getResources(query = '')  { return this.request('GET', `/discovery/resources${query ? '?' + query : ''}`); }
+  getUnmappedResources()    {
+    // /discovery/resources doesn't have a mapped=false filter — fetch all and slice client-side.
+    return this.request('GET', '/discovery/resources').then(rows => rows.filter(r => !r.mapped));
+  }
   getSuggestions()           { return this.request('GET', '/discovery/suggest'); }
   linkInfra(infraId, componentId) {
     return this.request('POST', '/discovery/link', { infraId, componentId });
   }
-  applyAllSuggestions(suggestions) {
-    return this.request('POST', '/discovery/suggest/apply-all', { suggestions });
+  // Body shape on the API side is { actions: [...] }. Three action types:
+  //   link_component       — { action, infraId, componentId }
+  //   create_component     — { action, infraId, applicationId, newCompName, suggestedType }
+  //   create_application   — { action, infraId, newAppName, newCompName, suggestedType,
+  //                            suggestedTier, suggestedEnv, suggestedOwner }
+  applySuggestActions(actions) {
+    return this.request('POST', '/discovery/suggest/apply-all', { actions });
   }
   enrichAzure()             { return this.request('POST', '/discovery/enrich/azure'); }
   bootstrap()               { return this.request('POST', '/discovery/bootstrap'); }
@@ -92,8 +101,16 @@ export class AppCloudClient {
   getCrossAppDeps()         { return this.request('GET', '/graph/cross-app-dependencies'); }
   getImpact(infraId)        { return this.request('GET', `/graph/impact?infraId=${encodeURIComponent(infraId)}`); }
 
+  // AI assistant chat
+  aiStatus()                { return this.request('GET', '/ai/status'); }
+  chat(messages, opts = {}) {
+    const body = { messages, ...opts };  // opts may include useLocal, cloudOverride
+    return this.request('POST', '/ai/chat', body);
+  }
+
   // NOTE: /changes/*, /workflows/*, /users were removed when the project
-  // refocused on the multi-tenant control plane. The blast-radius and
-  // onboarding agents previously called those routes — blast-radius has
-  // been ported to the /graph/* surface; onboarding still needs porting.
+  // refocused on the multi-tenant control plane. The blast-radius agent
+  // was ported to /graph/* in this branch. The onboarding agent's only
+  // useful behaviour (Job 2 — infer Application/Component from naming
+  // patterns) was folded into the mapping agent's two-pass loop.
 }
