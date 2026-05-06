@@ -4649,7 +4649,9 @@ paths:
         Postgres schema (`tenant_<id>`) by applying every per-tenant migration
         in api/src/migrations/tenant-schema/. Both happen in a single
         transaction so failure to provision the schema rolls back the row
-        insert. Phase 2 will add the per-tenant Neo4j database.
+        insert. Phase 2 will add the per-tenant Neo4j database. Pass
+        `?allowReserved=true` to override the reserved-slug guard (super-admin
+        only — used by agents/seed.js to bootstrap `default-test`).
       requestBody:
         required: true
         content:
@@ -4679,6 +4681,15 @@ paths:
                 displayName: Acme Corporation
                 metadata:
                   region: us-east-1
+      parameters:
+        - schema:
+            type: boolean
+            default: false
+          in: query
+          name: allowReserved
+          required: false
+          description: Bypass the reserved-slug guard. Super-admin only. Used by
+            agents/seed.js to provision the `default-test` tenant.
       responses:
         "201":
           description: Default Response

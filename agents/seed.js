@@ -3,37 +3,73 @@
 /**
  * Seed script for AppCloud Multi-Agent Pipeline demo.
  *
- * Populates the AppCloud graph with realistic infrastructure, applications,
- * components, connections, and changes — so the agents have data to work with
- * without needing real cloud accounts.
+ * Populates the `default-test` tenant — and ONLY that tenant — with realistic
+ * applications, components, connections, and infra so the agents have data to
+ * work against without real cloud accounts.
+ *
+ * Hard rules:
+ *   - The target tenant slug is hard-coded to `default-test`. Not configurable.
+ *     Customers cannot create that slug (reserved on the API side); the seeder
+ *     is the only path that provisions it, via ?allowReserved=true on
+ *     POST /admin/tenants (super-admin only).
+ *   - Refuses to run when NODE_ENV=production.
  *
  * Usage:
- *   node seed.js              # Seed with default API URL
- *   node seed.js --clean      # Delete all seeded data first, then re-seed
+ *   node seed.js              # Seed (auto-creates default-test if missing)
+ *   node seed.js --clean      # Delete previously seeded rows first
  *
- * Requires: AppCloud API running (docker-compose up)
+ * Requires: AppCloud API running, APPCLOUD_API_KEY set to a super-admin key.
  */
 
+const TENANT_SLUG   = 'default-test';      // hard-coded — see file header
+const TENANT_NAME   = 'Seed test tenant';
 const API           = process.env.APPCLOUD_API_URL || 'http://localhost:3000';
 const API_KEY       = process.env.APPCLOUD_API_KEY  || '';
-const TENANT_SLUG   = process.env.APPCLOUD_TENANT_SLUG || '';
 const doClean       = process.argv.includes('--clean');
+
+if (process.env.NODE_ENV === 'production') {
+  console.error('ERROR: agents/seed.js refuses to run with NODE_ENV=production.');
+  console.error('  This script writes to a hard-coded `default-test` tenant intended for dev/test only.');
+  process.exit(1);
+}
 
 if (!API_KEY) {
   console.error('ERROR: APPCLOUD_API_KEY is required (sets the X-API-Key header).');
-  console.error('  Use the bootstrap key from the API container or mint one via /admin/api-keys.');
+  console.error('  Use the bootstrap super-admin key from the API container.');
   process.exit(1);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-async function req(method, path, body = null) {
+// reqRaw() does not send X-Tenant-Slug — used for /admin/* calls that resolve
+// the target tenant from the body or path, not the header. req() pins every
+// other call to the seeded tenant.
+async function reqRaw(method, path, body = null) {
   const headers = {
     'Content-Type': 'application/json',
     'X-API-Key':    API_KEY,
   };
-  if (TENANT_SLUG) headers['X-Tenant-Slug'] = TENANT_SLUG;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
 
+  const res = await fetch(`${API}${path}`, opts);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+
+  if (!res.ok && res.status !== 409) {
+    console.error(`  FAIL ${method} ${path} (${res.status}):`, typeof data === 'string' ? data.slice(0, 200) : data);
+    return null;
+  }
+  return data;
+}
+
+async function req(method, path, body = null) {
+  const headers = {
+    'Content-Type':  'application/json',
+    'X-API-Key':     API_KEY,
+    'X-Tenant-Slug': TENANT_SLUG,
+  };
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
@@ -51,13 +87,38 @@ async function req(method, path, body = null) {
 
 function log(icon, msg) { console.log(`  ${icon}  ${msg}`); }
 
-// ─── Auth ───────────────────────────────────────────────────────────────────
-// X-API-Key + X-Tenant-Slug are sent on every request via req(); there is no
-// register/login flow on the multi-tenant API. ensureUser() returns a synthetic
-// principal so the rest of the seed can keep working unchanged.
+// ─── Tenant + Auth ──────────────────────────────────────────────────────────
+// The target tenant is hard-coded to `default-test`. We auto-create it via
+// /admin/tenants?allowReserved=true (super-admin only) when missing, so a
+// fresh DB doesn't require any operator pre-step.
+
+async function ensureTenant() {
+  const tenants = await reqRaw('GET', '/admin/tenants');
+  if (!Array.isArray(tenants)) {
+    console.error('ERROR: could not list tenants — does APPCLOUD_API_KEY have super-admin scope?');
+    process.exit(1);
+  }
+  const existing = tenants.find(t => t.slug === TENANT_SLUG);
+  if (existing) {
+    log('🏢', `Tenant '${TENANT_SLUG}' already exists`);
+    return existing;
+  }
+  log('🏢', `Tenant '${TENANT_SLUG}' missing — creating via ?allowReserved=true`);
+  const created = await reqRaw(
+    'POST',
+    '/admin/tenants?allowReserved=true',
+    { slug: TENANT_SLUG, displayName: TENANT_NAME, metadata: { seededBy: 'agents/seed.js' } },
+  );
+  if (!created?.id) {
+    console.error(`ERROR: could not create tenant '${TENANT_SLUG}'.`);
+    process.exit(1);
+  }
+  return created;
+}
 
 async function ensureUser() {
-  log('👤', `Authenticated via X-API-Key${TENANT_SLUG ? ` (tenant=${TENANT_SLUG})` : ''}`);
+  await ensureTenant();
+  log('👤', `Authenticated via X-API-Key (tenant=${TENANT_SLUG})`);
   return { id: 'seed-admin', name: 'seed-admin' };
 }
 

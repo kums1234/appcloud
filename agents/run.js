@@ -20,12 +20,14 @@ Commands:
   blast-radius   Run Blast Radius Agent only (analyze change impact)
 
 Options:
-  --change-id <id>   For blast-radius: analyze a specific change
+  --subject "<question>"  For blast-radius: free-text question, e.g.
+                          "what happens if I change prod-payment-rds?"
 
 Examples:
   node run.js pipeline
   node run.js discover
-  node run.js blast-radius --change-id abc-123
+  node run.js blast-radius
+  node run.js blast-radius --subject "what breaks if portal-api is restarted?"
 `;
 
 const [command, ...args] = process.argv.slice(2);
@@ -57,9 +59,9 @@ async function main() {
       break;
 
     case 'blast-radius': {
-      const changeIdIdx = args.indexOf('--change-id');
-      const changeId = changeIdIdx !== -1 ? args[changeIdIdx + 1] : null;
-      await runBlastRadiusAgent('', changeId);
+      const subjectIdx = args.indexOf('--subject');
+      const subject = subjectIdx !== -1 ? args[subjectIdx + 1] : '';
+      await runBlastRadiusAgent('', subject);
       break;
     }
 

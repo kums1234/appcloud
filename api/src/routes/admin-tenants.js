@@ -34,10 +34,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const TENANT_MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations', 'tenant-schema')
 
 const SLUG_RE     = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
-const RESERVED_SLUGS = new Set(['admin', 'system', 'api'])
-// 'default' is reserved too — it's the seeded tenant. Operators shouldn't
-// be able to create a second 'default' or accidentally mint one with a
-// slug that collides with the seed semantics.
+// 'default' — seeded tenant; creating a second one is a footgun.
+// 'default-test' — owned by agents/seed.js. Customers can't create it; the
+// seeder bypasses with ?allowReserved=true (super-admin only).
+const RESERVED_SLUGS = new Set(['admin', 'system', 'api', 'default', 'default-test'])
 
 const TenantRowSchema = {
   type: 'object',
@@ -106,7 +106,14 @@ export default async function adminTenantRoutes(fastify) {
     schema: {
       tags:        ['Admin'],
       summary:     'Create a tenant',
-      description: 'Inserts a row in `control.tenants` and provisions the matching Postgres schema (`tenant_<id>`) by applying every per-tenant migration in api/src/migrations/tenant-schema/. Both happen in a single transaction so failure to provision the schema rolls back the row insert. Phase 2 will add the per-tenant Neo4j database.',
+      description: 'Inserts a row in `control.tenants` and provisions the matching Postgres schema (`tenant_<id>`) by applying every per-tenant migration in api/src/migrations/tenant-schema/. Both happen in a single transaction so failure to provision the schema rolls back the row insert. Phase 2 will add the per-tenant Neo4j database. Pass `?allowReserved=true` to override the reserved-slug guard (super-admin only — used by agents/seed.js to bootstrap `default-test`).',
+      querystring: {
+        type:                 'object',
+        additionalProperties: false,
+        properties: {
+          allowReserved: { type: 'boolean', default: false, description: 'Bypass the reserved-slug guard. Super-admin only. Used by agents/seed.js to provision the `default-test` tenant.' },
+        },
+      },
       body:        CreateBodySchema,
       response: {
         201: TenantRowSchema,
@@ -117,11 +124,18 @@ export default async function adminTenantRoutes(fastify) {
   }, async (req, reply) => {
     if (!pgOk()) return reply.serviceUnavailable('Postgres not available')
     const { slug, displayName, metadata } = req.body
+    const allowReserved = req.query?.allowReserved === true
     if (!SLUG_RE.test(slug)) {
       return reply.badRequest(`slug '${slug}' must match ${SLUG_RE.source}`)
     }
-    if (RESERVED_SLUGS.has(slug) || slug.startsWith('_')) {
+    if (!allowReserved && (RESERVED_SLUGS.has(slug) || slug.startsWith('_'))) {
       return reply.badRequest(`slug '${slug}' is reserved`)
+    }
+    if (allowReserved && (RESERVED_SLUGS.has(slug) || slug.startsWith('_'))) {
+      req.log.warn(
+        { slug, principal: req.principal?.name },
+        '[admin-tenants] reserved-slug guard bypassed via ?allowReserved=true',
+      )
     }
 
     // Provisioning is two coupled side-effects — the row insert and

@@ -66,31 +66,34 @@ export class AppCloudClient {
 
   // Applications
   listApplications()        { return this.request('GET', '/applications'); }
+  getApplication(id)        { return this.request('GET', `/applications/${id}`); }
+  getAppTopology(id)        { return this.request('GET', `/applications/${id}/topology`); }
+  getAppDependencies(id)    { return this.request('GET', `/applications/${id}/dependencies`); }
   createApplication(data)   { return this.request('POST', '/applications', data); }
   updateApplication(id, data) { return this.request('PATCH', `/applications/${id}`, data); }
 
   // Components
   listComponents()          { return this.request('GET', '/components'); }
+  getComponent(id)          { return this.request('GET', `/components/${id}`); }
   createComponent(data)     { return this.request('POST', '/components', data); }
   deployComponent(id, infraId) {
     return this.request('POST', `/components/${id}/deploy`, { infraId });
   }
 
-  // Workflows
-  checkOnboarding(appId)    { return this.request('GET', `/workflows/onboarding/${appId}`); }
-  completeOnboardingStep(appId, step, data = {}) {
-    return this.request('POST', `/workflows/onboarding/${appId}/complete-step`, { step, ...data });
-  }
-
-  // Changes & Blast Radius
-  listChanges(status)       { return this.request('GET', `/changes${status ? '?status=' + status : ''}`); }
-  getBlastRadius(changeId)  { return this.request('GET', `/changes/${changeId}/blast-radius`); }
-  previewImpact(targetIds)  { return this.request('POST', '/changes/impact-preview', { targetIds }); }
-  getHighRiskChanges()      { return this.request('GET', '/changes/risk/high'); }
+  // Infra
+  listInfra()               { return this.request('GET', '/infra'); }
+  getInfra(id)              { return this.request('GET', `/infra/${id}`); }
+  getPublicExposed()        { return this.request('GET', '/infra/public/exposed'); }
+  getSharedInfra()          { return this.request('GET', '/infra/shared/resources'); }
 
   // Graph
   getTopology()             { return this.request('GET', '/graph/topology'); }
   getGraphSummary()         { return this.request('GET', '/graph/summary'); }
   getCrossAppDeps()         { return this.request('GET', '/graph/cross-app-dependencies'); }
-  getImpact(infraId)        { return this.request('GET', `/graph/impact?infraId=${infraId}`); }
+  getImpact(infraId)        { return this.request('GET', `/graph/impact?infraId=${encodeURIComponent(infraId)}`); }
+
+  // NOTE: /changes/*, /workflows/*, /users were removed when the project
+  // refocused on the multi-tenant control plane. The blast-radius and
+  // onboarding agents previously called those routes — blast-radius has
+  // been ported to the /graph/* surface; onboarding still needs porting.
 }

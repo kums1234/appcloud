@@ -192,6 +192,47 @@ describe('POST /admin/tenants', () => {
     expect(r.body).toMatch(/reserved/)
   })
 
+  test('rejects reserved slug `default` (the seeded tenant)', async () => {
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/tenants',
+      payload: { slug: 'default', displayName: 'x' },
+    })
+    expect(r.statusCode).toBe(400)
+    expect(r.body).toMatch(/reserved/)
+  })
+
+  test('rejects reserved slug `default-test` (owned by agents/seed.js)', async () => {
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/tenants',
+      payload: { slug: 'default-test', displayName: 'x' },
+    })
+    expect(r.statusCode).toBe(400)
+    expect(r.body).toMatch(/reserved/)
+  })
+
+  test('?allowReserved=true bypasses the reserved-slug guard for `default-test`', async () => {
+    stub.state.queue = [
+      [{ id: '44444444-4444-4444-4444-444444444444' }],
+      [{
+        id: '44444444-4444-4444-4444-444444444444',
+        slug: 'default-test',
+        display_name: 'Seed test tenant',
+        status: 'active',
+        schema_name: 'tenant_44444444444444444444444444444444',
+        neo4j_database: 'tenant_44444444444444444444444444444444',
+        created_at: new Date().toISOString(),
+        created_by: 'anonymous',
+        metadata: {},
+      }],
+    ]
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/tenants?allowReserved=true',
+      payload: { slug: 'default-test', displayName: 'Seed test tenant' },
+    })
+    expect(r.statusCode).toBe(201)
+    expect(JSON.parse(r.body).slug).toBe('default-test')
+  })
+
   test('rejects slug starting with underscore', async () => {
     const r = await fastify.inject({
       method: 'POST', url: '/admin/tenants',
