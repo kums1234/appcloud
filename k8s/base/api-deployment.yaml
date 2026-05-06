@@ -73,6 +73,15 @@ spec:
               value: /run/secrets/pg_password
             - name: APPCLOUD_API_KEY_FILE
               value: /run/secrets/appcloud_api_key
+            # Bootstrap super-admin key — needed for cross-tenant ops
+            # (POST /admin/tenants, agents/seed.js). Created by an
+            # operator one-off:
+            #   openssl rand -hex 32 > /tmp/sa.key
+            #   kubectl -n appcloud create secret generic \
+            #     appcloud-super-admin-api-key \
+            #     --from-file=appcloud_super_admin_api_key=/tmp/sa.key
+            - name: APPCLOUD_SUPER_ADMIN_API_KEY_FILE
+              value: /run/secrets/appcloud_super_admin_api_key
             - name: APPCLOUD_ENCRYPTION_KEY_FILE
               value: /run/secrets/appcloud_encryption_key
           volumeMounts:
@@ -95,6 +104,10 @@ spec:
             - name: appcloud-api-key
               mountPath: /run/secrets/appcloud_api_key
               subPath: appcloud_api_key
+              readOnly: true
+            - name: appcloud-super-admin-api-key
+              mountPath: /run/secrets/appcloud_super_admin_api_key
+              subPath: appcloud_super_admin_api_key
               readOnly: true
             - name: appcloud-encryption-key
               mountPath: /run/secrets/appcloud_encryption_key
@@ -149,6 +162,9 @@ spec:
         - name: appcloud-api-key
           secret:
             secretName: appcloud-api-key
+        - name: appcloud-super-admin-api-key
+          secret:
+            secretName: appcloud-super-admin-api-key
         - name: appcloud-encryption-key
           secret:
             secretName: appcloud-encryption-key

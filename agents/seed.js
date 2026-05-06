@@ -1,35 +1,58 @@
 #!/usr/bin/env node
 
+// Load agents/.env (APPCLOUD_API_KEY etc.) before reading process.env.
+// Other entrypoints get this transitively via lib/config.js; seed.js
+// doesn't import config and was silently ignoring .env.
+import 'dotenv/config';
+
 /**
  * Seed script for AppCloud Multi-Agent Pipeline demo.
  *
- * Populates the `default-test` tenant — and ONLY that tenant — with realistic
+ * Populates the `default` tenant — and ONLY that tenant — with realistic
  * applications, components, connections, and infra so the agents have data to
  * work against without real cloud accounts.
  *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  TODO (Phase 1c follow-up branch — see docs/TODO-phase-1c.md):         ║
+ * ║                                                                        ║
+ * ║  This seed is *supposed* to write to a dedicated `default-test`        ║
+ * ║  tenant, isolated from `default`. The supporting plumbing already      ║
+ * ║  ships on this branch — `?allowReserved=true` on POST /admin/tenants,  ║
+ * ║  the reserved-slug list, the auto-create flow.                         ║
+ * ║                                                                        ║
+ * ║  But api/src/plugins/tenant-context.js:429 currently 503-gates every   ║
+ * ║  data write on non-default tenants because the per-tenant Postgres     ║
+ * ║  schema template only contains the minimal table set (integrations +   ║
+ * ║  cloud_accounts). Lifting that gate is Phase 1c — expanding the        ║
+ * ║  template to cover every data table.                                   ║
+ * ║                                                                        ║
+ * ║  Until Phase 1c lands we target `default` so the smoke flow (seed →    ║
+ * ║  map → blast-radius → chat) actually does something. The moment it     ║
+ * ║  lands, switch this back to 'default-test' (single-line change).       ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
  * Hard rules:
- *   - The target tenant slug is hard-coded to `default-test`. Not configurable.
- *     Customers cannot create that slug (reserved on the API side); the seeder
- *     is the only path that provisions it, via ?allowReserved=true on
- *     POST /admin/tenants (super-admin only).
+ *   - The target tenant slug is hard-coded. Not configurable.
  *   - Refuses to run when NODE_ENV=production.
  *
  * Usage:
- *   node seed.js              # Seed (auto-creates default-test if missing)
+ *   node seed.js              # Seed
  *   node seed.js --clean      # Delete previously seeded rows first
  *
  * Requires: AppCloud API running, APPCLOUD_API_KEY set to a super-admin key.
  */
 
-const TENANT_SLUG   = 'default-test';      // hard-coded — see file header
-const TENANT_NAME   = 'Seed test tenant';
+// TODO(phase-1c): switch back to 'default-test' once the per-tenant schema
+// template is complete and tenant-context.js:429 no longer 503s data writes.
+const TENANT_SLUG   = 'default';
+const TENANT_NAME   = 'Default tenant';
 const API           = process.env.APPCLOUD_API_URL || 'http://localhost:3000';
 const API_KEY       = process.env.APPCLOUD_API_KEY  || '';
 const doClean       = process.argv.includes('--clean');
 
 if (process.env.NODE_ENV === 'production') {
   console.error('ERROR: agents/seed.js refuses to run with NODE_ENV=production.');
-  console.error('  This script writes to a hard-coded `default-test` tenant intended for dev/test only.');
+  console.error(`  This script writes to a hard-coded \`${TENANT_SLUG}\` tenant intended for dev/test only.`);
   process.exit(1);
 }
 
@@ -232,22 +255,27 @@ async function seed() {
     { from: '[seed] notif-api',       to: '[seed] notif-queue',      protocol: 'amqp',  port: 5672 },
   ];
 
+  let connectionsWritten = 0;
   for (const conn of connections) {
     const from = comps[conn.from];
     const to = comps[conn.to];
     if (from && to) {
-      await req('POST', `/components/${from.id}/connections`, {
+      const r = await req('POST', `/components/${from.id}/connections`, {
         targetId: to.id,
         protocol: conn.protocol,
         port: conn.port,
       });
-      log('✓', `${conn.from} → ${conn.to} (${conn.protocol}:${conn.port})`);
+      if (r) {
+        connectionsWritten++;
+        log('✓', `${conn.from} → ${conn.to} (${conn.protocol}:${conn.port})`);
+      }
     }
   }
 
   console.log('\n── Creating Infrastructure (mapped) ──');
 
   const infra = {};
+  let mappedInfraWritten = 0;
   const infraDefs = [
     // AWS — mapped to Payment Gateway
     { name: '[seed] prod-payment-api-1',     provider: 'aws', resource_type: 'ec2_instance',       region: 'us-east-1', deployTo: '[seed] payment-api' },
@@ -280,6 +308,7 @@ async function seed() {
     });
     if (node?.id) {
       infra[def.name] = node;
+      mappedInfraWritten++;
       // Deploy component to infra
       const comp = comps[def.deployTo];
       if (comp) {
@@ -291,6 +320,7 @@ async function seed() {
 
   console.log('\n── Creating Infrastructure (unmapped — for agents to discover/map) ──');
 
+  let unmappedInfraWritten = 0;
   const unmappedDefs = [
     // These have no deployTo — agents should figure out where they belong
     { name: '[seed] prod-mystery-vm-1',      provider: 'azure', resource_type: 'vm',              region: 'eastus' },
@@ -312,6 +342,7 @@ async function seed() {
     });
     if (node?.id) {
       infra[def.name] = node;
+      unmappedInfraWritten++;
       log('⚠', `Unmapped: ${def.name} (${def.provider}) — agents will handle this`);
     }
   }
@@ -323,14 +354,22 @@ async function seed() {
 
   // ── Summary ─────────────────────────────────────────────────────────────
 
+  // Summary counters reflect actual successful POSTs, not the static def
+  // arrays — the seed used to print def-array lengths even when every write
+  // 503'd, so the summary lied. The "/N defined" suffix preserves visibility
+  // into how many were attempted vs. how many landed.
+  const ok = (got, want) => got === want
+    ? String(got)
+    : `${got}/${want} ⚠ — see FAIL lines above`;
+
   console.log('\n══════════════════════════════════════════════════════════');
   console.log('  SEED COMPLETE');
   console.log('══════════════════════════════════════════════════════════');
-  console.log(`  Applications:    ${Object.keys(apps).length}`);
-  console.log(`  Components:      ${Object.keys(comps).length}`);
-  console.log(`  Infra (mapped):  ${infraDefs.length}`);
-  console.log(`  Infra (unmapped): ${unmappedDefs.length} (for the Mapping agent's Pass 2 to handle)`);
-  console.log(`  Connections:     ${connections.length}`);
+  console.log(`  Applications:     ${ok(Object.keys(apps).length, appDefs.length)}`);
+  console.log(`  Components:       ${ok(Object.keys(comps).length, compDefs.length)}`);
+  console.log(`  Infra (mapped):   ${ok(mappedInfraWritten, infraDefs.length)}`);
+  console.log(`  Infra (unmapped): ${ok(unmappedInfraWritten, unmappedDefs.length)} (for the Mapping agent's Pass 2 to handle)`);
+  console.log(`  Connections:      ${ok(connectionsWritten, connections.length)}`);
   console.log('');
   console.log('  Next steps:');
   console.log('    cd agents');
@@ -342,6 +381,22 @@ async function seed() {
 // ─── Run ────────────────────────────────────────────────────────────────────
 
 seed().catch((err) => {
-  console.error('\nSeed failed:', err.message);
+  // Node's fetch wraps the underlying network error in `err.cause` and gives
+  // the outer Error a vague "fetch failed" message — surface the cause so a
+  // missing port-forward or wrong APPCLOUD_API_URL is obvious.
+  const cause = err?.cause;
+  const code  = cause?.code;
+  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT') {
+    console.error(`\nSeed failed: cannot reach the AppCloud API at ${API}`);
+    console.error(`  Cause: ${code}${cause.address ? ` ${cause.address}:${cause.port}` : ''}`);
+    console.error('  Is the API running and port-forwarded?');
+    console.error('    kubectl -n appcloud port-forward svc/api 3000:3000');
+    console.error('  Or set APPCLOUD_API_URL to the right base URL.');
+  } else {
+    console.error('\nSeed failed:', err.message);
+    if (cause?.message && cause.message !== err.message) {
+      console.error('  Cause:', cause.message);
+    }
+  }
   process.exit(1);
 });

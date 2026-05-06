@@ -59,6 +59,20 @@ patches:
       kind: Deployment
       name: api
 
+  # NODE_ENV=production (set in the Dockerfile) makes server.js refuse to
+  # start without an explicit CORS allowlist. Real prod overlays
+  # (aks/eks/openshift) configure their own UI origins; for minikube we
+  # hard-code the local-dev surfaces so the API actually boots.
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: APPCLOUD_ALLOWED_ORIGINS
+          value: http://appcloud.local,http://localhost:4000,http://localhost:3000
+    target:
+      kind: Deployment
+      name: api
+
   # Use Recreate strategy on minikube — rolling updates need spare node capacity
   # that a single-node local cluster often doesn't have
   - patch: |-
