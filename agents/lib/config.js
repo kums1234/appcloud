@@ -1,7 +1,12 @@
 import 'dotenv/config';
 
 export const config = {
-  // AI provider: 'ollama' (free, local) | 'anthropic' (API credits) | 'azure_openai' (Azure)
+  // AI provider:
+  //   ollama       — free, local
+  //   anthropic    — API credits
+  //   azure_openai — Azure-hosted OpenAI
+  //   gemini       — Google Gemini via OpenAI-compat endpoint (recommended free tier)
+  //   groq         — Groq via OpenAI-compat endpoint (highest req/day on free tier)
   aiProvider: process.env.AI_PROVIDER || 'ollama',
 
   // Anthropic settings
@@ -13,6 +18,18 @@ export const config = {
   azureOpenAiEndpoint: process.env.AZURE_OPENAI_ENDPOINT || '',
   azureOpenAiDeployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o',
   azureOpenAiApiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-10-21',
+
+  // Google Gemini (via OpenAI-compat endpoint at generativelanguage.googleapis.com).
+  // gemini-2.5-flash-lite has the most permissive free tier — 15 RPM,
+  // 1,000 req/day. Switch to gemini-2.5-flash for higher quality at 250 req/day.
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel:  process.env.GEMINI_MODEL  || 'gemini-2.5-flash-lite',
+
+  // Groq (OpenAI-compat). llama-3.1-8b-instant has the most permissive
+  // free tier — 30 RPM, 14,400 req/day, 500K daily tokens. For higher
+  // quality switch to llama-3.3-70b-versatile (1,000 req/day cap).
+  groqApiKey: process.env.GROQ_API_KEY || '',
+  groqModel:  process.env.GROQ_MODEL  || 'llama-3.1-8b-instant',
 
   // Ollama settings
   ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
@@ -29,15 +46,35 @@ export const config = {
 };
 
 export function validateConfig() {
-  if (config.aiProvider === 'anthropic' && !config.anthropicApiKey) {
+  const provider = config.aiProvider;
+
+  if (provider === 'anthropic' && !config.anthropicApiKey) {
     console.error('ERROR: ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic');
     console.error('  Either set AI_PROVIDER=ollama (free, local) or provide an API key.');
     process.exit(1);
   }
 
-  if (config.aiProvider === 'azure_openai' && !config.azureOpenAiKey) {
+  if (provider === 'azure_openai' && !config.azureOpenAiKey) {
     console.error('ERROR: AZURE_OPENAI_KEY is required when AI_PROVIDER=azure_openai');
     console.error('  Set AZURE_OPENAI_KEY and AZURE_OPENAI_ENDPOINT in .env');
+    process.exit(1);
+  }
+
+  if (provider === 'gemini' && !config.geminiApiKey) {
+    console.error('ERROR: GEMINI_API_KEY is required when AI_PROVIDER=gemini');
+    console.error('  Get a free key at https://aistudio.google.com/ — no card required.');
+    process.exit(1);
+  }
+
+  if (provider === 'groq' && !config.groqApiKey) {
+    console.error('ERROR: GROQ_API_KEY is required when AI_PROVIDER=groq');
+    console.error('  Get a free key at https://console.groq.com/ — no card required.');
+    process.exit(1);
+  }
+
+  if (!['ollama', 'anthropic', 'azure_openai', 'gemini', 'groq'].includes(provider)) {
+    console.error(`ERROR: AI_PROVIDER=${provider} is not recognised.`);
+    console.error('  Use: ollama | anthropic | azure_openai | gemini | groq');
     process.exit(1);
   }
 
@@ -47,12 +84,12 @@ export function validateConfig() {
     process.exit(1);
   }
 
-  if (config.aiProvider === 'ollama') {
-    console.log(`Using Ollama (${config.ollamaModel}) at ${config.ollamaUrl}`);
-  } else if (config.aiProvider === 'azure_openai') {
-    console.log(`Using Azure OpenAI (${config.azureOpenAiDeployment}) at ${config.azureOpenAiEndpoint}`);
-  } else {
-    console.log(`Using Anthropic (${config.claudeModel})`);
+  switch (provider) {
+    case 'ollama':       console.log(`Using Ollama (${config.ollamaModel}) at ${config.ollamaUrl}`);       break;
+    case 'azure_openai': console.log(`Using Azure OpenAI (${config.azureOpenAiDeployment}) at ${config.azureOpenAiEndpoint}`); break;
+    case 'gemini':       console.log(`Using Gemini (${config.geminiModel}) — free tier`);                  break;
+    case 'groq':         console.log(`Using Groq (${config.groqModel}) — free tier`);                      break;
+    case 'anthropic':    console.log(`Using Anthropic (${config.claudeModel})`);                           break;
   }
 
   if (config.appcloudTenantSlug) {
