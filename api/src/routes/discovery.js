@@ -1930,21 +1930,31 @@ export default async function discoveryRoutes(fastify) {
   fastify.get('/resources', {
     schema: {
       summary:     'List discovered Infra (with mapping status)',
-      description: 'Filterable by `provider` and `resourceType`. Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:"component-mapping"}`.',
+      description: 'Filterable by `provider`, `resourceType`, and `mapped` (true=only owned by a Component, false=only orphans). Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:"component-mapping"}`.',
       querystring: { type: 'object', properties: {
         provider:     { type: 'string', enum: ['aws', 'azure', 'gcp'] },
         resourceType: { type: 'string' },
+        mapped:       { type: 'boolean', description: 'Filter by mapping status. Omit for both. true = only resources with at least one Component owner; false = only orphans (the Mapping agent\'s Pass 2 universe).' },
         limit:        { type: ['integer', 'string'], default: 200 },
       } },
       response: { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
     },
   }, async (req) => {
-    const { provider, resourceType, limit = 200 } = req.query
+    const { provider, resourceType, mapped, limit = 200 } = req.query
+    // Pre-filter the MATCH on mapping status using a Cypher EXISTS subquery.
+    // Doing it here (vs. post-filter after OPTIONAL MATCH + collect) keeps
+    // the LIMIT honest — otherwise an unmapped=false caller would silently
+    // truncate the unmapped set when the first 200 rows happen to be mapped.
+    const mappedClause =
+      mapped === true  ? 'AND EXISTS { (i)<-[:CONNECTS_TO {via: \'component-mapping\'}]-(:Component) }' :
+      mapped === false ? 'AND NOT EXISTS { (i)<-[:CONNECTS_TO {via: \'component-mapping\'}]-(:Component) }' :
+      ''
     const records = await query(`
       MATCH (i:Infra)
       WHERE i.source = 'discovery'
         ${provider     ? 'AND i.provider      = $provider'     : ''}
         ${resourceType ? 'AND i.resource_type = $resourceType' : ''}
+        ${mappedClause}
       OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
       RETURN i,

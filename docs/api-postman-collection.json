@@ -1565,7 +1565,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 5403.714533895254\n  },\n  \"enabled\": false,\n  \"key_0\": 4638,\n  \"key_1\": 3629.472549073398\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 9014,\n    \"key_1\": \"string\"\n  },\n  \"enabled\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1697,7 +1697,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"error\",\n  \"total\": 9954,\n  \"error\": null\n}",
+              "raw": "{\n  \"status\": \"error\",\n  \"total\": 5511,\n  \"error\": \"string\",\n  \"key_0\": true,\n  \"key_1\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1776,7 +1776,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"azure\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
+              "raw": "{\n  \"provider\": \"anthropic\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1922,7 +1922,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": false\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
+              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": \"string\"\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1956,7 +1956,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "ea5dbd79-c129-0ff5-6c9e-ca337dda1ad9",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -1997,7 +1997,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "ea5dbd79-c129-0ff5-6c9e-ca337dda1ad9",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2017,7 +2017,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"config\": {\n    \"key_0\": 7208.177177235484\n  },\n  \"enabled\": false,\n  \"pollIntervalSeconds\": 6559\n}",
+              "raw": "{\n  \"config\": {\n    \"key_0\": 6646\n  },\n  \"enabled\": false,\n  \"pollIntervalSeconds\": null,\n  \"key_0\": \"string\",\n  \"key_1\": 6321.912968996912\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2051,7 +2051,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "ea5dbd79-c129-0ff5-6c9e-ca337dda1ad9",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2093,7 +2093,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "ea5dbd79-c129-0ff5-6c9e-ca337dda1ad9",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2135,7 +2135,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "ea5dbd79-c129-0ff5-6c9e-ca337dda1ad9",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2177,7 +2177,7 @@
                 {
                   "disabled": false,
                   "type": "any",
-                  "value": "ea5dbd79-c129-0ff5-6c9e-ca337dda1ad9",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
                   "key": "id",
                   "description": "(Required) "
                 }
@@ -2796,7 +2796,7 @@
           "request": {
             "name": "List discovered Infra (with mapping status)",
             "description": {
-              "content": "Filterable by `provider` and `resourceType`. Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:\"component-mapping\"}`.",
+              "content": "Filterable by `provider`, `resourceType`, and `mapped` (true=only owned by a Component, false=only orphans). Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:\"component-mapping\"}`.",
               "type": "text/plain"
             },
             "url": {
@@ -2817,6 +2817,12 @@
                   "disabled": false,
                   "key": "resourceType",
                   "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "mapped",
+                  "value": "true",
+                  "description": "Filter by mapping status. Omit for both. true = only resources with at least one Component owner; false = only orphans (the Mapping agent's Pass 2 universe)."
                 },
                 {
                   "disabled": false,
@@ -2906,7 +2912,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"infraId\": \"7a15676f-0624-9e4a-919b-b0192f15e837\",\n  \"componentId\": \"5f42689b-a196-ed09-3408-3c09ce43c79c\"\n}",
+              "raw": "{\n  \"infraId\": \"db7c7a15-6fc4-6249-e4a6-19b1b0192f15\",\n  \"componentId\": \"37c55f42-9b2b-1968-d093-40883c09ce43\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2995,7 +3001,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ids\": [\n    \"16a6e244-13c8-1bc4-d65c-8c273915f4c4\",\n    \"9745ce87-e283-bf8c-05bb-33501af23299\"\n  ]\n}",
+              "raw": "{\n  \"ids\": [\n    \"26e016a6-444d-3c81-bc49-65ca8c273915\",\n    \"c4d79745-8771-2837-f8c7-5bbf33501af2\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3108,7 +3114,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"strategy\": \"azure-arc\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60\n}",
+              "raw": "{\n  \"strategy\": \"resource-graph\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60,\n  \"key_0\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -53,9 +53,10 @@ export class AppCloudClient {
   scanAll()                 { return this.request('POST', '/discovery/scan/all'); }
   getDiscoverySummary()     { return this.request('GET', '/discovery/summary'); }
   getResources(query = '')  { return this.request('GET', `/discovery/resources${query ? '?' + query : ''}`); }
-  getUnmappedResources()    {
-    // /discovery/resources doesn't have a mapped=false filter — fetch all and slice client-side.
-    return this.request('GET', '/discovery/resources').then(rows => rows.filter(r => !r.mapped));
+  getUnmappedResources(limit = 1000) {
+    // Server-side filter via ?mapped=false — keeps the LIMIT honest so we
+    // don't silently truncate the unmapped set on a large tenant.
+    return this.request('GET', `/discovery/resources?mapped=false&limit=${limit}`);
   }
   getSuggestions()           { return this.request('GET', '/discovery/suggest'); }
   linkInfra(infraId, componentId) {

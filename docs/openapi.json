@@ -4911,7 +4911,7 @@
         "tags": [
           "Discovery"
         ],
-        "description": "Filterable by `provider` and `resourceType`. Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:\"component-mapping\"}`.",
+        "description": "Filterable by `provider`, `resourceType`, and `mapped` (true=only owned by a Component, false=only orphans). Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:\"component-mapping\"}`.",
         "parameters": [
           {
             "schema": {
@@ -4933,6 +4933,15 @@
             "in": "query",
             "name": "resourceType",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "name": "mapped",
+            "required": false,
+            "description": "Filter by mapping status. Omit for both. true = only resources with at least one Component owner; false = only orphans (the Mapping agent's Pass 2 universe)."
           },
           {
             "schema": {
