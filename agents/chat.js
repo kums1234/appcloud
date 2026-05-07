@@ -96,9 +96,39 @@ async function loadConv(file) {
   console.log(`  loaded ${messages.length} messages from ${file}`);
 }
 
+// Build a cloudOverride from agents/.env so /ai/chat uses the same provider
+// the agent runner uses, even if the API server has no GEMINI_API_KEY /
+// ANTHROPIC_API_KEY etc. in its own environment. Without this the chat
+// route falls back to the cluster's Ollama, which on a cold pod times out.
+function cloudOverrideFromConfig() {
+  switch (config.aiProvider) {
+    case 'gemini':
+      return config.geminiApiKey ? { provider: 'gemini', apiKey: config.geminiApiKey, model: config.geminiModel } : null;
+    case 'anthropic':
+      return config.anthropicApiKey ? { provider: 'anthropic', apiKey: config.anthropicApiKey, model: config.claudeModel } : null;
+    case 'azure_openai':
+      return config.azureOpenAiKey ? {
+        provider:        'azure',
+        apiKey:          config.azureOpenAiKey,
+        azureEndpoint:   config.azureOpenAiEndpoint,
+        azureDeployment: config.azureOpenAiDeployment,
+      } : null;
+    // Groq isn't yet on the API's createCloudProviderFromOptions allowlist;
+    // chat falls back to whatever is configured server-side. The agent
+    // runner still uses Groq directly via OpenAI-compat — only the chat
+    // REPL is server-mediated.
+    default:
+      return null;
+  }
+}
+
 async function send(userInput) {
   messages.push({ role: 'user', content: userInput });
   const opts = useLocal ? { useLocal: true } : {};
+  if (!useLocal) {
+    const ov = cloudOverrideFromConfig();
+    if (ov) opts.cloudOverride = ov;
+  }
   let res;
   try {
     res = await api.chat(messages, opts);
