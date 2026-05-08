@@ -63,16 +63,13 @@ If your question starts with *"what depends on…"*, *"what would break if…"*,
 
 > The examples below use the demo tenant produced by `node seed.js` — every resource name is prefixed `[seed]`. On your own data, the prefix won't be there; everything else works the same.
 
-### 🛠️ Support — *"On-call: portal-api just paged"*
+### 🛠️ Support — *"On-call: User Portal just paged"*
 
-A page lands at 02:14. The runbook says "see if any deploys are in flight" but the deploy console is in a different tool. AppCloud's chat tells you what `portal-api` actually depends on so you know where to start looking.
+A page lands at 02:14. The runbook says "see if any deploys are in flight" but the deploy console is in a different tool. AppCloud's chat tells you what the impacted app actually depends on so you know where to start looking.
 
-```sh
-$ node agents/run.js chat
-you> what does [seed] portal-api depend on, and what depends on it?
-```
+![chat demo](demo/chat.gif)
 
-You get back the components it talks to (cross-app and intra-app), the infra it's deployed on, and the applications that would feel it if `portal-api` went away. **Not a wiki page someone forgot to update — a query against the live graph.**
+You get back the apps it talks to, the cross-app dependency counts, and an honest "no apps depend on this" when nothing does. **Not a wiki page someone forgot to update — a query against the live graph, with no hallucinated entities** (the chat refuses to invent dependencies that aren't on the wire).
 
 ### 🏗️ Platform — *"Pre-change review: upgrading prod-payment-rds"*
 
@@ -169,18 +166,17 @@ For real clusters: the same Kustomize bases + per-environment overlays target AK
 
 ---
 
-## What's in the box
+## What you can do with it
 
-| Surface | Where | What it does |
+| I want to… | Run | What you get back |
 |---|---|---|
-| **REST API** | `api/src/routes/*.js` | 85 endpoints — see [`docs/api-guide.md`](docs/api-guide.md) and [`docs/api-postman-collection.json`](docs/api-postman-collection.json) |
-| **Mapping agent** | `agents/agents/mapping.js` | Two-pass infra→component linking with naming-pattern inference for orphan resources |
-| **Blast-radius agent** | `agents/agents/blast-radius.js` | Plain-English impact analysis for "what if I change X?" |
-| **Discovery agent** | `agents/agents/discovery.js` | Drives the per-cloud scanners on demand or on a schedule |
-| **AI assistant chat** | `agents/chat.js` + `/ai/chat` | Conversational interface with live graph context injection |
-| **Multi-tenant control plane** | `api/src/routes/admin-tenants.js` | Per-tenant Postgres `search_path` isolation, super-admin scope for cross-tenant ops |
-| **Connector framework** | `api/src/connectors/` | Pluggable IaC, OTel, CMDB, cloud-account ingestors |
-| **Per-cloud coverage docs** | `docs/{azure,gcp,aws}-*-coverage.md` | What the primary scanner covers vs. what the supplements add |
+| **See what would break if I change X** | `node run.js blast-radius --subject "..."` | Plain-English impact summary, list of affected components and applications, risk classification (LOW / MEDIUM / HIGH), and the path of evidence connecting your change to each impact |
+| **Link up orphan cloud resources** | `node run.js map` | Two-pass run: high-confidence existing matches linked first (≥70 score), then new applications and components proposed for the rest from cloud tags + naming patterns. Every action is auditable |
+| **Pull a fresh inventory** | `node run.js discover` | Triggers `/discovery/scan/{aws,azure,gcp}` for every configured cloud account; reports counts by provider and resource type |
+| **Ask anything else** | `node run.js chat` | Interactive REPL backed by `/ai/chat`. Each question gets a fresh snapshot of apps, components, infra, and cross-app deps injected into context — replies are grounded in the live graph |
+| **Browse the data directly** | `curl /graph/topology`, `/applications`, `/infra/public/exposed`, `/discovery/resources?mapped=false` | Raw graph access — see [`docs/api-guide.md`](docs/api-guide.md) for the per-domain reference, or import [`docs/api-postman-collection.json`](docs/api-postman-collection.json) into Postman (111 requests, 13 folders) |
+| **Plug in a new ingest source** | drop a connector under `api/src/connectors/<kind>/<name>/` | Connectors share a small interface (IaC state backends, OpenTelemetry receivers, CMDB feeds, cloud-account scanners). The framework discovers them at startup |
+| **Run a real multi-tenant deployment** | `POST /admin/tenants` with super-admin scope | Per-tenant Postgres `search_path` isolation, per-tenant API keys via `POST /admin/api-keys`, audit log with tenant attribution, isolated Neo4j databases (planned) |
 
 ---
 
@@ -197,6 +193,21 @@ The agent runner speaks five providers, picked via `AI_PROVIDER` in `agents/.env
 | `azure_openai` | your deployment | When you already pay for Azure |
 
 The chat REPL forwards your provider creds per request via `cloudOverride`, so the cluster doesn't have to know your API key — your laptop does.
+
+---
+
+## Where the code lives (for contributors)
+
+| Path | What's there |
+|---|---|
+| `api/src/routes/` | 85 REST endpoints, one file per domain (applications, components, infra, graph, discovery, ai, admin-tenants, audit, …) |
+| `api/src/services/` | Auto-link, bootstrap, episode tracking, cmdb-assessment |
+| `api/src/connectors/` | Pluggable ingest framework (cloud, IaC, OTel, CMDB) |
+| `agents/agents/` | Mapping, blast-radius, discovery agents |
+| `agents/chat.js` | Interactive chat REPL |
+| `agents/lib/agent-runner.js` | Anthropic-tool-shape ↔ OpenAI-compat conversion; 5 LLM providers |
+| `docs/{azure,gcp,aws}-*-coverage.md` | Per-cloud scan coverage — what the primary query covers and what supplement layers add |
+| [`CLAUDE.md`](CLAUDE.md) | Graph conventions, edge property contract, scoring tables, why three stages |
 
 ---
 
