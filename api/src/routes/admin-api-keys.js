@@ -123,13 +123,23 @@ export default async function adminApiKeyRoutes(fastify) {
     const key_hash   = hashKey(plaintext)
     const key_prefix = prefixOf(plaintext)
 
+    // Phase 1d: api_keys.tenant_id is NOT NULL. Default to the issuer's
+    // tenant (the bootstrap admin key is tenant-bound to `default`, so
+    // operators get the obvious behaviour out of the box). Fall back to a
+    // subquery against control.tenants when the principal somehow has no
+    // tenantId — defensive; super-admin keys are also tenant-bound at
+    // bootstrap, but a request that authenticates without tenantId at all
+    // would otherwise NPE the INSERT.
+    const tenantId = req.principal?.tenantId || null
+
     let rows
     try {
       rows = await fastify.pg.query(`
-        INSERT INTO api_keys (name, key_hash, key_prefix, scopes, created_by, expires_at, is_bootstrap)
-        VALUES ($1, $2, $3, $4, $5, $6, false)
+        INSERT INTO api_keys (name, key_hash, key_prefix, scopes, created_by, expires_at, is_bootstrap, tenant_id)
+        VALUES ($1, $2, $3, $4, $5, $6, false,
+                COALESCE($7::uuid, (SELECT id FROM control.tenants WHERE slug = 'default')))
         RETURNING id, name, key_prefix, scopes, created_at, created_by, last_used_at, revoked_at, expires_at, is_bootstrap
-      `, [name, key_hash, key_prefix, normalised, req.principal?.name || 'unknown', parsedExpiresAt])
+      `, [name, key_hash, key_prefix, normalised, req.principal?.name || 'unknown', parsedExpiresAt, tenantId])
     } catch (err) {
       if (String(err.code) === '23505') {                    // unique_violation
         return reply.conflict(`api key name '${name}' already exists`)

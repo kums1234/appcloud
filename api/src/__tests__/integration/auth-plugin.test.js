@@ -175,9 +175,13 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
     // Insert a fresh hand-created key; verify it works, revoke it, wait
     // out the cache TTL, verify it's now 401.
     const fresh = generateKey()
+    // Phase 1d: api_keys.tenant_id is NOT NULL. The auth plugin's startup
+    // SQL seeds the `default` tenant; raw INSERTs from the test must
+    // FK to it explicitly.
     await pgClient.query(`
-      INSERT INTO api_keys (name, key_hash, key_prefix, scopes)
-      VALUES ('revocation-test-key', $1, $2, ARRAY['read'])
+      INSERT INTO api_keys (name, key_hash, key_prefix, scopes, tenant_id)
+      VALUES ('revocation-test-key', $1, $2, ARRAY['read'],
+              (SELECT id FROM control.tenants WHERE slug = 'default'))
     `, [hashKey(fresh), prefixOf(fresh)])
 
     // Wait for the cache to pick up the new row.
@@ -204,8 +208,9 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
   test('scope enforcement: read key cannot POST (403)', async () => {
     const readKey = generateKey()
     await pgClient.query(`
-      INSERT INTO api_keys (name, key_hash, key_prefix, scopes)
-      VALUES ('scope-read-test', $1, $2, ARRAY['read'])
+      INSERT INTO api_keys (name, key_hash, key_prefix, scopes, tenant_id)
+      VALUES ('scope-read-test', $1, $2, ARRAY['read'],
+              (SELECT id FROM control.tenants WHERE slug = 'default'))
     `, [hashKey(readKey), prefixOf(readKey)])
     await new Promise(r => setTimeout(r, 80))
 

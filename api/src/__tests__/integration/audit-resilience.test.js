@@ -27,14 +27,27 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
   let pgContainer, pgClient
   let machinery
   let pgUp = true                                  // toggled to simulate outage
+  let defaultTenantId                              // Phase 1d: required on every audit row
 
   beforeAll(async () => {
     ;({ container: pgContainer, client: pgClient } = await startPostgres())
+    // 13-tenants.sql seeds `control.tenants` with the `default` row;
+    // 17-audit-tenant-id.sql adds + tightens audit_log.tenant_id (NOT NULL,
+    // FK to control.tenants). buildAuditRow() rejects null tenantId post-Phase-1d.
     await applyPostgresInitFiles(pgClient, [
       '01-schema.sql',
       '10-api-keys.sql',
       '11-audit-evolution.sql',
+      '13-tenants.sql',
+      '17-audit-tenant-id.sql',
     ])
+
+    // Cache the seeded default tenant id once — every audit() call reuses it.
+    const tenantRow = await pgClient.query(
+      `SELECT id FROM control.tenants WHERE slug = 'default'`,
+    )
+    defaultTenantId = tenantRow.rows[0]?.id
+    if (!defaultTenantId) throw new Error('seeded default tenant missing — 13-tenants.sql failed?')
 
     // Wrap pgClient.query with a fault-injection toggle. The machinery
     // factory only sees runQuery — this mirrors how prod calls
@@ -59,12 +72,13 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
     pgUp = false
 
     // Three audits during the outage — all queue in the buffer.
+    // Each call passes (actor, action, type, id, name, metadata, diff, tenantId).
     await machinery.audit({ name: 'test-actor', keyId: null, scope: null },
-      'create', 'TestResource', 'r-buffered-1', 'r1')
+      'create', 'TestResource', 'r-buffered-1', 'r1', {}, null, defaultTenantId)
     await machinery.audit({ name: 'test-actor', keyId: null, scope: null },
-      'create', 'TestResource', 'r-buffered-2', 'r2')
+      'create', 'TestResource', 'r-buffered-2', 'r2', {}, null, defaultTenantId)
     await machinery.audit({ name: 'test-actor', keyId: null, scope: null },
-      'create', 'TestResource', 'r-buffered-3', 'r3')
+      'create', 'TestResource', 'r-buffered-3', 'r3', {}, null, defaultTenantId)
 
     expect(machinery.pending()).toBe(3)
 
@@ -79,7 +93,7 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
     // every entry FIFO.
     pgUp = true
     await machinery.audit({ name: 'test-actor', keyId: null, scope: null },
-      'create', 'TestResource', 'r-recovery', 'rec')
+      'create', 'TestResource', 'r-recovery', 'rec', {}, null, defaultTenantId)
 
     // The recovery audit() kicked off an async drain. Await it explicitly
     // here so the test isn't racing against the timer.
@@ -127,13 +141,13 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
       bufferMax: 1000,
     })
     await isolated.audit({ name: 'sys', keyId: null, scope: null },
-      'create', 'TestRow', 'poison-row-id', 'p')
+      'create', 'TestRow', 'poison-row-id', 'p', {}, null, defaultTenantId)
     // Poison row is now in the buffer (live INSERT failed).
     // Issue more audits — they should also queue (FIFO behind poison).
     await isolated.audit({ name: 'sys', keyId: null, scope: null },
-      'create', 'TestRow', 'good-row-1', 'g1')
+      'create', 'TestRow', 'good-row-1', 'g1', {}, null, defaultTenantId)
     await isolated.audit({ name: 'sys', keyId: null, scope: null },
-      'create', 'TestRow', 'good-row-2', 'g2')
+      'create', 'TestRow', 'good-row-2', 'g2', {}, null, defaultTenantId)
 
     // First drain: poison row attempts incremented to 1, bail.
     await isolated.drain()
@@ -154,12 +168,13 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
 
   test('audit retention deletes rows older than the cutoff', async () => {
     // Insert two old + one recent fixture row.
+    // Phase 1d: audit_log.tenant_id is NOT NULL — fixture rows must FK to a real tenant.
     await pgClient.query(`
-      INSERT INTO audit_log (actor, action, resource_type, resource_id, created_at) VALUES
-        ('test', 'retention-old',  'TestRow', 'old-1', now() - interval '90 days'),
-        ('test', 'retention-old',  'TestRow', 'old-2', now() - interval '60 days'),
-        ('test', 'retention-keep', 'TestRow', 'new-1', now() - interval '5 days')
-    `)
+      INSERT INTO audit_log (actor, action, resource_type, resource_id, created_at, tenant_id) VALUES
+        ('test', 'retention-old',  'TestRow', 'old-1', now() - interval '90 days', $1),
+        ('test', 'retention-old',  'TestRow', 'old-2', now() - interval '60 days', $1),
+        ('test', 'retention-keep', 'TestRow', 'new-1', now() - interval '5 days',  $1)
+    `, [defaultTenantId])
 
     // Inline the same CTE-batched DELETE the audit-cleanup plugin runs.
     const retentionDays = 30
