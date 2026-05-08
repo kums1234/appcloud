@@ -193,6 +193,7 @@ create_fn() {
     --runtime node \
     --runtime-version 20 \
     --functions-version 4 \
+    --disable-app-insights true \
     --tags \
       Project=appcloud-test \
       "appcloud-app=${app}" \

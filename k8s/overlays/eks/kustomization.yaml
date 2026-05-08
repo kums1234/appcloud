@@ -15,9 +15,6 @@ images:
   - name: appcloud-api
     newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/appcloud-api
     newTag: latest
-  - name: appcloud-ui
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/appcloud-ui
-    newTag: latest
 
 patches:
   # EKS gp3 StorageClass (provisioned by EBS CSI driver)

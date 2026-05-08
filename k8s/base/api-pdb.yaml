@@ -1,0 +1,16 @@
+# PodDisruptionBudget — keeps at least one API pod available during
+# voluntary disruptions (node drain, cluster autoscaler scale-down,
+# rolling upgrade). With replicas=2 in api-deployment.yaml, this
+# allows exactly one pod to be evicted at a time. Without a PDB,
+# kubectl drain takes both pods down simultaneously and the API has a
+# brief 5xx window during the rescheduling.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: appcloud
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api

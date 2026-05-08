@@ -1,0 +1,183 @@
+{
+  "totalRecords": 11,
+  "count": 11,
+  "data": [
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod",
+      "name": "rg-web-prod",
+      "type": "microsoft.resources/subscriptions/resourcegroups",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app", "env": "prod" },
+      "properties": { "provisioningState": "Succeeded" }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Network/virtualNetworks/vnet-web",
+      "name": "vnet-web",
+      "type": "microsoft.network/virtualnetworks",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app" },
+      "properties": {
+        "addressSpace": { "addressPrefixes": ["10.10.0.0/16"] },
+        "subnets": [
+          {
+            "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Network/virtualNetworks/vnet-web/subnets/subnet-web",
+            "name": "subnet-web",
+            "properties": { "addressPrefix": "10.10.1.0/24" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Network/networkInterfaces/nic-web",
+      "name": "nic-web",
+      "type": "microsoft.network/networkinterfaces",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app" },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "primary",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Network/virtualNetworks/vnet-web/subnets/subnet-web"
+              }
+            }
+          }
+        ],
+        "virtualMachine": {
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Compute/virtualMachines/vm-web"
+        }
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Compute/disks/disk-web",
+      "name": "disk-web",
+      "type": "microsoft.compute/disks",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app" },
+      "properties": {
+        "diskSizeGB": 32,
+        "diskState": "Unattached",
+        "creationData": { "createOption": "Empty" }
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Compute/virtualMachines/vm-web",
+      "name": "vm-web",
+      "type": "microsoft.compute/virtualmachines",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app", "env": "prod" },
+      "properties": {
+        "hardwareProfile": { "vmSize": "Standard_B1s" },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Network/networkInterfaces/nic-web"
+            }
+          ]
+        },
+        "storageProfile": {
+          "osDisk": {
+            "name": "vm-web-osdisk",
+            "managedDisk": {
+              "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Compute/disks/vm-web-osdisk"
+            }
+          },
+          "dataDisks": [
+            {
+              "lun": 0,
+              "name": "disk-web",
+              "managedDisk": {
+                "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Compute/disks/disk-web"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Web/serverfarms/asp-web",
+      "name": "asp-web",
+      "type": "microsoft.web/serverfarms",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app" },
+      "properties": {
+        "sku": { "name": "B1", "tier": "Basic" },
+        "kind": "linux"
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Web/sites/app-web-fixture",
+      "name": "app-web-fixture",
+      "type": "microsoft.web/sites",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-web-prod",
+      "tags": { "component": "web-app" },
+      "properties": {
+        "serverFarmId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Web/serverfarms/asp-web"
+      }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-batch",
+      "name": "rg-batch",
+      "type": "microsoft.resources/subscriptions/resourcegroups",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-batch",
+      "tags": {},
+      "properties": { "provisioningState": "Succeeded" }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-batch/providers/Microsoft.Storage/storageAccounts/stbatchfixture001",
+      "name": "stbatchfixture001",
+      "type": "microsoft.storage/storageaccounts",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-batch",
+      "tags": {},
+      "properties": {
+        "accessTier": "Hot",
+        "minimumTlsVersion": "TLS1_2"
+      },
+      "sku": { "name": "Standard_LRS", "tier": "Standard" }
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-batch/providers/Microsoft.Network/privateEndpoints/pe-batch-to-web",
+      "name": "pe-batch-to-web",
+      "type": "microsoft.network/privateendpoints",
+      "location": "eastus",
+      "subscriptionId": "00000000-0000-0000-0000-000000000000",
+      "resourceGroup": "rg-batch",
+      "tags": {},
+      "properties": {
+        "subnet": {
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-prod/providers/Microsoft.Network/virtualNetworks/vnet-web/subnets/subnet-web"
+        },
+        "privateLinkServiceConnections": [
+          {
+            "name": "psc-batch",
+            "properties": {
+              "privateLinkServiceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-batch/providers/Microsoft.Storage/storageAccounts/stbatchfixture001",
+              "groupIds": ["blob"]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "skipToken": null
+}

@@ -10,7 +10,6 @@ k8s/
 │   ├── neo4j-{deployment,service,pvc}.yaml
 │   ├── postgres-{deployment,service,pvc}.yaml
 │   ├── api-{deployment,service}.yaml
-│   ├── ui-{deployment,service}.yaml
 │   └── kustomization.yaml
 ├── overlays/
 │   ├── minikube/            # Local dev — builds images in-cluster
@@ -37,7 +36,8 @@ echo "neo4j"      > secrets/db_username.txt
 echo "CHANGE_ME"  > secrets/db_password.txt
 echo "appcloud"   > secrets/pg_username.txt
 echo "CHANGE_ME"  > secrets/pg_password.txt
-openssl rand -hex 64 > secrets/jwt_secret.txt
+openssl rand -hex 32 > secrets/appcloud_api_key.txt
+openssl rand -hex 32 > secrets/appcloud_encryption_key.txt
 ```
 
 Secrets are created as Kubernetes Secrets from these files by each deploy script.
@@ -57,7 +57,7 @@ chmod +x k8s/scripts/*.sh
 The script:
 1. Starts a minikube cluster (`appcloud` profile, 4 CPU / 6 GB RAM)
 2. Enables the nginx ingress addon
-3. Builds `appcloud-api` and `appcloud-ui` Docker images directly into minikube's Docker daemon
+3. Builds the `appcloud-api` Docker image directly into minikube's Docker daemon
 4. Creates Kubernetes Secrets from your `secrets/` files
 5. Applies the minikube overlay via `kubectl apply -k`
 6. Waits for all rollouts to complete
@@ -66,16 +66,15 @@ The script:
 **Access:**
 | Service | URL |
 |---------|-----|
-| UI | http://appcloud.local |
 | API health | http://appcloud.local/health |
+| API root | http://appcloud.local |
 | Neo4j Browser | `kubectl -n appcloud port-forward svc/neo4j 7474:7474` → http://localhost:7474 |
 
 **After code changes:**
 ```bash
 eval $(minikube docker-env --profile=appcloud)
 docker build -t appcloud-api:latest ./api
-docker build -t appcloud-ui:latest ./ui
-kubectl -n appcloud rollout restart deployment/api deployment/ui
+kubectl -n appcloud rollout restart deployment/api
 ```
 
 **Skip rebuild:**
@@ -190,10 +189,10 @@ chmod +x k8s/scripts/*.sh
 ```
 
 **Key differences from standard Kubernetes:**
-- Routes are used instead of Ingress (`route-ui.yaml`, `route-api.yaml`)
+- Routes are used instead of Ingress (`route-api.yaml`)
 - The script grants `anyuid` SCC to the default service account so Neo4j (uid 7474) and Postgres (uid 999) can start
 - Images are pushed to the OpenShift internal registry at `image-registry.openshift-image-registry.svc:5000`
-- Edit `k8s/overlays/openshift/route-ui.yaml` to set your cluster's apps domain
+- Edit `k8s/overlays/openshift/route-api.yaml` to set your cluster's apps domain
 
 ---
 
@@ -210,8 +209,10 @@ kubectl -n appcloud create secret generic appcloud-db-credentials \
 kubectl -n appcloud create secret generic appcloud-pg-credentials \
   --from-file=pg_username=secrets/pg_username.txt \
   --from-file=pg_password=secrets/pg_password.txt
-kubectl -n appcloud create secret generic appcloud-jwt-secret \
-  --from-file=jwt_secret=secrets/jwt_secret.txt
+kubectl -n appcloud create secret generic appcloud-api-key \
+  --from-file=appcloud_api_key=secrets/appcloud_api_key.txt
+kubectl -n appcloud create secret generic appcloud-encryption-key \
+  --from-file=appcloud_encryption_key=secrets/appcloud_encryption_key.txt
 
 # 2. Apply the overlay
 kubectl apply -k k8s/overlays/minikube     # or eks / aks / openshift
@@ -241,7 +242,7 @@ kubectl -n appcloud exec -it deploy/postgres -- \
   psql -U $(cat secrets/pg_username.txt) -d appcloud
 
 # Force restart all deployments
-kubectl -n appcloud rollout restart deployment/neo4j deployment/postgres deployment/api deployment/ui
+kubectl -n appcloud rollout restart deployment/neo4j deployment/postgres deployment/api
 
 # View kustomize output without applying
 kubectl kustomize k8s/overlays/minikube

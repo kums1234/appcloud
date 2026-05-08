@@ -3,129 +3,157 @@ import { AppCloudClient } from '../lib/api-client.js';
 
 const api = new AppCloudClient();
 
-const systemPrompt = `You are AppCloud's Blast Radius Agent — a specialized AI that analyzes the impact of infrastructure changes across the application topology.
+const systemPrompt = `You are AppCloud's Blast Radius Agent — a specialized AI that explains
+the impact of infrastructure or application changes across the dependency graph,
+in plain English, for engineers who don't want to read Cypher.
 
 Your job:
-1. Assess the current state of the infrastructure graph
-2. For any pending or recent changes, calculate their blast radius
-3. Identify high-risk changes that need special attention
-4. Analyze cross-application dependencies for cascade risks
-5. Provide actionable risk reports with approval recommendations
+1. Inspect the current graph for risks: internet-exposed infra, shared databases /
+   load balancers / queues with multiple component owners, applications without
+   tier set, fan-out hotspots in cross-app dependencies.
+2. Answer "what's the impact if X is changed?" for a specific Infra or
+   Application by walking the graph and naming every Component / Application
+   that would be affected.
+3. Produce HUMAN-READABLE OUTPUT — short paragraphs and bullets, not raw JSON.
+   Lead with a one-line summary ("Changing this affects N components across
+   M applications, including K Tier-1 apps."), then list affected items with
+   tier and environment, then call out any specific concerns (Tier-1 hits,
+   public exposure, single-point-of-failure shape).
 
-Risk assessment framework:
-- Risk Score 0-3: Low risk. Standard approval.
-- Risk Score 4-6: Medium risk. Team lead approval required.
-- Risk Score 7-9: High risk. VP/Director approval required.
-- Risk Score 10: Critical. CISO sign-off required for Tier-1 apps.
+Risk framing (use these words consistently):
+- LOW: 0 Tier-1 apps affected, 0 cross-app fan-out, no public-exposed infra in path
+- MEDIUM: any Tier-1 app affected OR cross-app fan-out OR shared infra
+- HIGH: Tier-1 apps + cross-app fan-out, OR public-exposed shared infra,
+  OR a single change touches >3 applications
 
-Key factors that increase risk:
-- Tier-1 applications affected
-- Multiple applications impacted (cross-app blast radius)
-- Changes to shared infrastructure (databases, load balancers, networking)
-- Single points of failure in the dependency chain
-- Production environment changes
+IMPORTANT — there is no scheduled-change registry on this branch:
+the /changes route was removed in the refocus. If the user asks about
+"scheduled changes" or "upcoming changes," answer plainly:
+  "AppCloud doesn't track scheduled changes yet — once the /changes
+  route lands, I'll project impact for each pending change. For now I can
+  only analyze the current graph or a hypothetical change you describe."
+Do NOT invent change records. Do NOT call tools you don't have.
 
-At the end, provide a structured summary in this format:
+At the end of every response, include a structured tail like:
 
 BLAST_RADIUS_RESULT:
-- Graph state: [apps, components, infra counts]
-- High-risk changes: [count and details]
-- Cross-app dependencies: [critical paths]
-- Risk recommendations: [actionable items]
-- Topology concerns: [single points of failure, etc.]`;
+- Subject: <what was analyzed>
+- Affected components: <count and names>
+- Affected applications: <count, with tier breakdown>
+- Risk: LOW | MEDIUM | HIGH
+- Specific concerns: <bullets, or "none">`;
 
 const tools = [
   {
     name: 'get_graph_summary',
-    description: 'Get a dashboard summary of the topology graph: counts of applications, components, infra nodes, changes, and users. Also includes components by type and infra by provider.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    description: 'Counts of applications, components, infra nodes by provider/type. Use first to know the size of what you are looking at.',
+    input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'get_topology',
-    description: 'Get the full application topology map showing all apps, their components, CONNECTS_TO relationships, and deployment mappings to infrastructure.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    name: 'list_applications',
+    description: 'List every Application with id, name, tier, environment, owner. Use to find the application id when the user names an app.',
+    input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'calculate_blast_radius',
-    description: 'Calculate the blast radius for a specific change. Returns directly modified nodes, directly affected applications, and indirectly affected applications (via deployment chains).',
+    name: 'list_infra',
+    description: 'List every Infra resource with id, name, provider, resource_type, region, public flag. Use to find the infra id when the user names a resource.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'get_infra_impact',
+    description: 'For a given Infra id, return every Component and Application that depends on it. This is the answer to "what breaks if I change this infra?" Applications are returned tier-first.',
     input_schema: {
       type: 'object',
       properties: {
-        changeId: { type: 'string', description: 'The ID of the change to analyze' },
+        infraId: { type: 'string', description: 'Infra UUID' },
       },
-      required: ['changeId'],
+      required: ['infraId'],
     },
   },
   {
-    name: 'preview_impact',
-    description: 'Preview the impact of hypothetical changes on specific target nodes (components or infra). Walks up to 4 hops upstream to find all affected components, applications, and teams. Returns a risk score.',
+    name: 'get_app_dependencies',
+    description: 'For a given Application id, return every other Application it depends on (via cross-app component connections). This is the answer to "if I change this app, who downstream cares?"',
     input_schema: {
       type: 'object',
       properties: {
-        targetIds: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of component or infrastructure IDs to analyze impact for',
-        },
+        appId: { type: 'string', description: 'Application UUID' },
       },
-      required: ['targetIds'],
+      required: ['appId'],
+    },
+  },
+  {
+    name: 'get_app_topology',
+    description: 'For a given Application id, return its components, internal connections, and deployed infra. Use to describe the surface area of an app before reasoning about a change to it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'Application UUID' },
+      },
+      required: ['appId'],
     },
   },
   {
     name: 'get_cross_app_dependencies',
-    description: 'Get all inter-application communication paths. Shows which apps depend on which other apps, through which components, with protocol and port details. Ordered by source tier (Tier-1 first).',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    description: 'Every cross-application component-to-component edge. Use to find fan-out hotspots: applications that many other applications depend on.',
+    input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'get_high_risk_changes',
-    description: 'List all approved changes with a risk score of 7 or higher. These are changes that may need additional review or CISO sign-off.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    name: 'get_public_exposed_infra',
+    description: 'Every Infra node flagged public:true plus the Component names that own each one. Use to surface internet-facing surface area as a risk-finding pass.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'get_shared_infra',
+    description: 'Every Infra node owned by more than one Component. Shared infra is a fan-out risk — a change there hits multiple components by definition.',
+    input_schema: { type: 'object', properties: {}, required: [] },
   },
 ];
 
 async function toolHandler(toolName, input) {
   switch (toolName) {
-    case 'get_graph_summary':
-      return await api.getGraphSummary();
-    case 'get_topology':
-      return await api.getTopology();
-    case 'calculate_blast_radius':
-      return await api.getBlastRadius(input.changeId);
-    case 'preview_impact':
-      return await api.previewImpact(input.targetIds);
-    case 'get_cross_app_dependencies':
-      return await api.getCrossAppDeps();
-    case 'get_high_risk_changes':
-      return await api.getHighRiskChanges();
-    default:
-      return `Unknown tool: ${toolName}`;
+    case 'get_graph_summary':         return await api.getGraphSummary();
+    case 'list_applications':         return await api.listApplications();
+    case 'list_infra':                return await api.listInfra();
+    case 'get_infra_impact':          return await api.getImpact(input.infraId);
+    case 'get_app_dependencies':      return await api.getAppDependencies(input.appId);
+    case 'get_app_topology':          return await api.getAppTopology(input.appId);
+    case 'get_cross_app_dependencies': return await api.getCrossAppDeps();
+    case 'get_public_exposed_infra':  return await api.getPublicExposed();
+    case 'get_shared_infra':          return await api.getSharedInfra();
+    default:                          return `Unknown tool: ${toolName}`;
   }
 }
 
-export async function runBlastRadiusAgent(context = '', changeId = null) {
+/**
+ * Run the Blast Radius Agent.
+ *
+ * @param {string} context  Optional upstream context (e.g., from the
+ *                          orchestrator's previous stage). When set, used
+ *                          as background; the agent still does its own
+ *                          risk pass.
+ * @param {string} subject  Optional natural-language subject, e.g.
+ *                          "what happens if I change the prod-payment-rds?"
+ *                          or "find risky things in the graph".
+ */
+export async function runBlastRadiusAgent(context = '', subject = '') {
   let userMessage;
-  if (changeId) {
-    userMessage = `Analyze the blast radius for change ID: ${changeId}. Calculate the impact, identify affected applications, and provide risk recommendations.`;
+  if (subject) {
+    userMessage =
+      `User asked: ${subject}\n\n` +
+      `Use the available tools to answer. Resolve names to ids via list_applications / list_infra ` +
+      `before calling get_infra_impact / get_app_dependencies. Answer in plain English with the ` +
+      `BLAST_RADIUS_RESULT tail.`;
   } else if (context) {
-    userMessage = `Previous context from Onboarding Agent:\n${context}\n\nNow analyze the infrastructure topology for risks. Check the graph state, look for high-risk changes, analyze cross-app dependencies, and identify potential blast radius concerns.`;
+    userMessage =
+      `Previous context from Onboarding Agent:\n${context}\n\n` +
+      `Now do a risk pass on the current graph: get_graph_summary, then check ` +
+      `get_public_exposed_infra, get_shared_infra, and get_cross_app_dependencies for hotspots. ` +
+      `Report findings in plain English with the BLAST_RADIUS_RESULT tail.`;
   } else {
-    userMessage = 'Analyze the infrastructure topology for risks. Get the graph summary, check for high-risk changes, analyze cross-app dependencies, and provide a risk report.';
+    userMessage =
+      `Do a risk pass on the current graph. Start with get_graph_summary, then look at ` +
+      `get_public_exposed_infra, get_shared_infra, and get_cross_app_dependencies. ` +
+      `Surface anything noteworthy in plain English with the BLAST_RADIUS_RESULT tail.`;
   }
 
   return runAgent({

@@ -1,13 +1,93 @@
 import { props } from '../utils/serialize.js'
+import { makeRouteHelpers } from '../utils/route-helpers.js'
+import { actorFromReq } from '../utils/audit.js'
+import {
+  ComponentSchema,
+  ComponentCreateBodySchema,
+  ComponentConnectionBodySchema,
+  ComponentDeployBodySchema,
+  IdParamSchema,
+  StandardErrorResponses,
+} from '../schemas/openapi.js'
+
+// ── Component taxonomy — single source of truth shared with the UI ──────────
+// The Applications + Components + Infra pages previously each carried copies
+// of these enums. GET /components/metadata exposes them so the UI hydrates
+// once and renders consistently. Adding a new component subtype here
+// surfaces in the UI without a React code change.
+const COMPONENT_TYPES = [
+  { id: 'api',    label: 'API',    color: '#38bdf8', icon: '⚡' },  // T.blue
+  { id: 'db',     label: 'DB',     color: '#f59e0b', icon: '▤' },  // T.amber
+  { id: 'worker', label: 'Worker', color: '#a78bfa', icon: '◐' },  // T.purple
+  { id: 'ui',     label: 'UI',     color: '#ef4444', icon: '◈' },  // T.red
+]
+
+const TIERS = [
+  { id: 1, label: 'Tier 1 — Mission critical', color: '#ef4444' },
+  { id: 2, label: 'Tier 2 — Business critical', color: '#f59e0b' },
+  { id: 3, label: 'Tier 3 — Important',         color: '#22c55e' },
+  { id: 4, label: 'Tier 4 — Non-critical',      color: '#6b7280' },
+]
+
+const ENVIRONMENTS = ['production', 'staging', 'dev']
+
+const AVAILABILITY_SLAS = [
+  { id: '99.999', label: '99.999% (five nines, < 5 min/yr downtime)' },
+  { id: '99.99',  label: '99.99% (four nines, < 53 min/yr)'           },
+  { id: '99.9',   label: '99.9% (three nines, < 8.8 hr/yr)'           },
+  { id: '99',     label: '99% (two nines, < 3.65 d/yr)'               },
+]
+
+const CONFIDENTIALITY = [
+  { id: 'public',       label: 'Public',       color: '#22c55e' },
+  { id: 'internal',     label: 'Internal',     color: '#38bdf8' },
+  { id: 'confidential', label: 'Confidential', color: '#f59e0b' },
+  { id: 'restricted',   label: 'Restricted',   color: '#ef4444' },
+]
 
 export default async function componentRoutes(fastify) {
   const { query, write } = fastify.neo4j
-  const auth = { preHandler: fastify.authenticate }
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  const { withAuth } = makeRouteHelpers(fastify)
+  // Phase 1d: audit() is now per-request via req.audit (curried with
+  // the resolved tenant_id). Each handler calls
+  // req.audit(...).catch(() => {}).
+  const actor = actorFromReq
+
+  // GET /components/metadata — taxonomy + enums for form builders
+  fastify.get('/metadata', {
+    schema: {
+      summary:     'Component taxonomy + enum metadata',
+      description: 'Single source of truth for component types, tiers, environments, availability SLAs, and confidentiality levels. UI consumers fetch this once and hydrate dropdowns.',
+      response: {
+        200: {
+          type: 'object', additionalProperties: true,
+          properties: {
+            componentTypes:   { type: 'array', items: { type: 'object', additionalProperties: true } },
+            tiers:            { type: 'array', items: { type: 'object', additionalProperties: true } },
+            environments:     { type: 'array', items: { type: 'string' } },
+            availabilitySlas: { type: 'array', items: { type: 'object', additionalProperties: true } },
+            confidentiality:  { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
+        },
+      },
+    },
+  }, async () => ({
+    componentTypes:   COMPONENT_TYPES,
+    tiers:            TIERS,
+    environments:     ENVIRONMENTS,
+    availabilitySlas: AVAILABILITY_SLAS,
+    confidentiality:  CONFIDENTIALITY,
+  }))
 
   // GET /components
-  fastify.get('/', async (req) => {
+  fastify.get('/', {
+    schema: {
+      summary:     'List Components',
+      description: 'Returns every Component with its containing Application (when one exists). Filterable via the `type` query (api / db / worker / ui).',
+      querystring: { type: 'object', properties: { type: { type: 'string', description: 'Optional filter on Component type' } } },
+      response:    { 200: { type: 'array', items: ComponentSchema } },
+    },
+  }, async (req) => {
     const { type } = req.query
     const records = await query(`
       MATCH (c:Component)
@@ -28,11 +108,18 @@ export default async function componentRoutes(fastify) {
   })
 
   // GET /components/:id
-  fastify.get('/:id', async (req, reply) => {
+  fastify.get('/:id', {
+    schema: {
+      summary:     'Get one Component',
+      description: 'Returns the Component, its parent Application (or null), and the Infra resources it owns via `:CONNECTS_TO {via:"component-mapping"}`.',
+      params:      IdParamSchema,
+      response:    { 200: ComponentSchema, 404: StandardErrorResponses[404] },
+    },
+  }, async (req, reply) => {
     const records = await query(`
       MATCH (c:Component {id: $id})
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
-      OPTIONAL MATCH (c)-[:DEPLOYED_ON]->(i:Infra)
+      OPTIONAL MATCH (c)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       RETURN c, a, collect(DISTINCT i) AS infra
     `, { id: req.params.id })
     if (!records.length) return reply.notFound('Component not found')
@@ -46,7 +133,14 @@ export default async function componentRoutes(fastify) {
   })
 
   // POST /components
-  fastify.post('/', { ...auth }, async (req, reply) => {
+  fastify.post('/', withAuth({
+    schema: {
+      summary:     'Create a Component',
+      description: 'Creates a Component node, optionally attaching it to an existing Application via `:CONTAINS`. Either `applicationId` or `appId` works (legacy alias).',
+      body:        ComponentCreateBodySchema,
+      response:    { 201: ComponentSchema },
+    },
+  }), async (req, reply) => {
     const { name, type, runtime } = req.body
     // Accept both applicationId (sent by ComponentForm) and appId
     const appId = req.body.appId || req.body.applicationId || null
@@ -60,14 +154,22 @@ export default async function componentRoutes(fastify) {
       RETURN c
     `, { name, type, runtime: runtime || null, appId })
     const result = props(records[0].get('c'))
-    audit(actor(req), 'create', 'Component', result.id, result.name,
-      { type: result.type, runtime: result.runtime, appId })
+    req.audit(actor(req), 'create', 'Component', result.id, result.name,
+      { type: result.type, runtime: result.runtime, appId }).catch(() => {})
     reply.code(201)
     return result
   })
 
   // PATCH /components/:id — FIX 4: added auth guard
-  fastify.patch('/:id', { ...auth }, async (req, reply) => {
+  fastify.patch('/:id', withAuth({
+    schema: {
+      summary:     'Update a Component',
+      description: 'Partial update on `name` / `type` / `runtime`. Other fields preserved.',
+      params:      IdParamSchema,
+      body:        { type: 'object', additionalProperties: true, properties: { name: { type: 'string' }, type: { type: 'string' }, runtime: { type: ['string', 'null'] } } },
+      response:    { 200: ComponentSchema, 404: StandardErrorResponses[404] },
+    },
+  }), async (req, reply) => {
     const { name, type, runtime } = req.body
     const records = await write(`
       MATCH (c:Component {id: $id})
@@ -78,46 +180,87 @@ export default async function componentRoutes(fastify) {
     `, { id: req.params.id, name, type, runtime })
     if (!records.length) return reply.notFound('Component not found')
     const result = props(records[0].get('c'))
-    audit(actor(req), 'update', 'Component', result.id, result.name,
-      { changes: req.body })
+    req.audit(actor(req), 'update', 'Component', result.id, result.name,
+      { changes: req.body }).catch(() => {})
     return result
   })
 
   // DELETE /components/:id — FIX 4: added auth guard
-  fastify.delete('/:id', { ...auth }, async (req, reply) => {
+  fastify.delete('/:id', withAuth({
+    schema: {
+      summary:     'Delete a Component',
+      description: 'DETACH-delete: removes every relationship the Component participates in (including ownership and Component↔Component connections).',
+      params:      IdParamSchema,
+      response:    { 204: { type: 'null' }, 404: StandardErrorResponses[404] },
+    },
+  }), async (req, reply) => {
     const pre = await query(
       `MATCH (c:Component {id:$id}) RETURN c.name AS name`, { id: req.params.id }
     )
     if (!pre.length) return reply.notFound('Component not found')
     const name = pre[0].get('name') || req.params.id
     await write(`MATCH (c:Component {id: $id}) DETACH DELETE c`, { id: req.params.id })
-    audit(actor(req), 'delete', 'Component', req.params.id, name)
+    req.audit(actor(req), 'delete', 'Component', req.params.id, name).catch(() => {})
     reply.code(204)
   })
 
   // POST /components/:id/connections — FIX 4: added auth guard
-  fastify.post('/:id/connections', { ...auth }, async (req, reply) => {
+  fastify.post('/:id/connections', withAuth({
+    schema: {
+      summary:     'Connect this Component to another (Component → Component edge)',
+      description: 'Idempotently MERGEs a `:CONNECTS_TO {protocol, port}` edge from this Component to the target. No `via` is set — the endpoint labels (`:Component`→`:Component`) distinguish it from infra-side edges.',
+      params:      IdParamSchema,
+      body:        ComponentConnectionBodySchema,
+      response:    { 201: { type: 'object', properties: { connected: { type: 'boolean' } } } },
+    },
+  }), async (req, reply) => {
     const { targetId, protocol, port } = req.body
+    // Component-Component edge — uses `via: 'component-link'` (not a
+    // structural via like `subnet`) to distinguish from infra-side
+    // edges. The four required CONNECTS_TO contract properties
+    // (source, via, confidence, evidence) ride along per CLAUDE.md.
+    const evidence = `manual: ${protocol || 'unknown'}` + (port ? `/${port}` : '')
     await write(`
       MATCH (c1:Component {id: $id}), (c2:Component {id: $targetId})
-      MERGE (c1)-[r:CONNECTS_TO]->(c2)
+      MERGE (c1)-[r:CONNECTS_TO { source: 'manual-link', via: 'component-link' }]->(c2)
+      ON CREATE SET r.discovered_at = datetime(),
+                    r.confidence    = 100,
+                    r.evidence      = $evidence
+      ON MATCH  SET r.last_seen     = datetime(),
+                    r.confidence    = 100,
+                    r.evidence      = $evidence
       SET r.protocol = $protocol, r.port = $port
-    `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null })
-    audit(actor(req), 'connect', 'Component', req.params.id, req.params.id,
-      { targetId, protocol, port })
+    `, { id: req.params.id, targetId, protocol, port: port ? parseInt(port) : null, evidence })
+    req.audit(actor(req), 'connect', 'Component', req.params.id, req.params.id,
+      { targetId, protocol, port }).catch(() => {})
     reply.code(201)
     return { connected: true }
   })
 
   // POST /components/:id/deploy — FIX 4: added auth guard
-  fastify.post('/:id/deploy', { ...auth }, async (req, reply) => {
+  fastify.post('/:id/deploy', withAuth({
+    schema: {
+      summary:     'Deploy a Component onto an Infra (manual ownership)',
+      description: 'Idempotently MERGEs a `:CONNECTS_TO {via:"component-mapping", source:"manual-deploy", confidence:100}` edge from the Component to the Infra. Use this to record human-confirmed ownership.',
+      params:      IdParamSchema,
+      body:        ComponentDeployBodySchema,
+      response:    { 201: { type: 'object', properties: { deployed: { type: 'boolean' } } } },
+    },
+  }), async (req, reply) => {
     const { infraId } = req.body
     await write(`
       MATCH (c:Component {id: $id}), (i:Infra {id: $infraId})
-      MERGE (c)-[:DEPLOYED_ON]->(i)
+      MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+      ON CREATE SET rel.discovered_at = datetime(),
+                    rel.source        = 'manual-deploy',
+                    rel.confidence    = 100,
+                    rel.evidence      = 'manual deploy via /components/:id/deploy'
+      ON MATCH  SET rel.last_seen     = datetime(),
+                    rel.source        = 'manual-deploy',
+                    rel.confidence    = 100
     `, { id: req.params.id, infraId })
-    audit(actor(req), 'deploy', 'Component', req.params.id, req.params.id,
-      { infraId })
+    req.audit(actor(req), 'deploy', 'Component', req.params.id, req.params.id,
+      { infraId }).catch(() => {})
     reply.code(201)
     return { deployed: true }
   })

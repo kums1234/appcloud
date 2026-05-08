@@ -37,7 +37,7 @@ aws ecr get-login-password --region "$AWS_REGION" | \
   docker login --username AWS --password-stdin "$ECR_BASE"
 
 # ── Ensure ECR repos exist ─────────────────────────────────────────────────────
-for repo in appcloud-api appcloud-ui; do
+for repo in appcloud-api; do
   aws ecr describe-repositories --repository-names "$repo" --region "$AWS_REGION" &>/dev/null || \
     aws ecr create-repository --repository-name "$repo" --region "$AWS_REGION" | jq -r '.repository.repositoryUri'
   echo "  ✓ ECR repo: $ECR_BASE/$repo"
@@ -45,7 +45,7 @@ done
 
 # ── Build and push ─────────────────────────────────────────────────────────────
 if [[ "$SKIP_BUILD" == "false" ]]; then
-  for svc in api ui; do
+  for svc in api; do
     echo "► Building and pushing appcloud-$svc..."
     docker build -t "$ECR_BASE/appcloud-$svc:latest" "$ROOT_DIR/$svc"
     docker push "$ECR_BASE/appcloud-$svc:latest"
@@ -75,9 +75,13 @@ kubectl -n appcloud create secret generic appcloud-pg-credentials \
   --from-file=pg_username="$SECRETS_DIR/pg_username.txt" \
   --from-file=pg_password="$SECRETS_DIR/pg_password.txt"
 
-kubectl -n appcloud delete secret appcloud-jwt-secret 2>/dev/null || true
-kubectl -n appcloud create secret generic appcloud-jwt-secret \
-  --from-file=jwt_secret="$SECRETS_DIR/jwt_secret.txt"
+kubectl -n appcloud delete secret appcloud-api-key 2>/dev/null || true
+kubectl -n appcloud create secret generic appcloud-api-key \
+  --from-file=appcloud_api_key="$SECRETS_DIR/appcloud_api_key.txt"
+
+kubectl -n appcloud delete secret appcloud-encryption-key 2>/dev/null || true
+kubectl -n appcloud create secret generic appcloud-encryption-key \
+  --from-file=appcloud_encryption_key="$SECRETS_DIR/appcloud_encryption_key.txt"
 
 # ── Deploy ─────────────────────────────────────────────────────────────────────
 echo "► Applying kustomize overlay (eks)..."
@@ -87,7 +91,6 @@ echo "► Waiting for rollouts..."
 kubectl -n appcloud rollout status deployment/neo4j   --timeout=300s
 kubectl -n appcloud rollout status deployment/postgres --timeout=180s
 kubectl -n appcloud rollout status deployment/api      --timeout=180s
-kubectl -n appcloud rollout status deployment/ui       --timeout=180s
 
 # ── Print ALB hostname ─────────────────────────────────────────────────────────
 echo ""

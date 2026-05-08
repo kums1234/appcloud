@@ -14,10 +14,25 @@
 
 import { props, serialize } from '../utils/serialize.js'
 import { encryptConfig, decryptConfig } from '../utils/encrypt.js'
+import { actorFromReq } from '../utils/audit.js'
 import { bootstrapDiscovery } from './discovery.bootstrap.js'
 import { bootstrapSuggestFallback } from './discovery.suggest.patch.js'
+import { startEpisode, finishEpisode } from '../services/episodes.js'
 import { runAutoCreateIfEnabled } from '../plugins/scheduler.auto-create.patch.js'
-import { enrichAzureRelationships } from './discovery.azure.enrich.js'
+import {
+  ScanResponseSchema,
+  ScanBreakdownSchema,
+  SuggestApplyAllBodySchema,
+  StandardErrorResponses,
+  IdParamSchema,
+  InfraSchema,
+} from '../schemas/openapi.js'
+import { supplementAzureDiscovery } from './discovery.azure.supplement.js'
+import { scanAzure as scanAzureViaResourceGraph } from './discovery.azure.js'
+import { scanGCP as scanGCPViaCloudAssetInventory } from './discovery.gcp.js'
+import { supplementGCPDiscovery } from './discovery.gcp.supplement.js'
+import { scanAWS as scanAWSViaConfigAggregator } from './discovery.aws.js'
+import { supplementAWSDiscovery } from './discovery.aws.supplement.js'
 import { getLabelsForType, getPromotedFields, buildLabelSetClause, INFRA_ONLY_TYPES, PLATFORM_TYPES, hasExplicitAppTag } from './discovery.schema.js'
 
 // ─── Azure Linking Strategies ────────────────────────────────────────────────
@@ -127,13 +142,6 @@ async function awsPages(paginator) {
   return all
 }
 
-/** Pull all items from an Azure PagedAsyncIterableIterator */
-async function azureList(iter) {
-  const all = []
-  for await (const item of iter) all.push(item)
-  return all
-}
-
 /** Upsert an Infra node into Neo4j — returns the node id.
  *
  *  Schema evolution (additive, backward-compatible):
@@ -142,8 +150,18 @@ async function azureList(iter) {
  *  - Typed labels — e.g. :AzureVM:ComputeInstance added alongside :Infra
  *  - Promoted fields — key raw.* values copied to top-level properties
  */
-async function upsertInfra(write, fields) {
-  const incomingTagsStr = JSON.stringify(fields.tags || {})
+// Stringify-once helper for hot-path scanner fields. Skips re-stringify
+// when the value is already a string (callers occasionally pass
+// pre-serialised JSON straight through). At 100k resources/scan, this
+// avoids ~200k redundant JSON.stringify calls per pass.
+function stringifyOnce(v) {
+  if (typeof v === 'string') return v
+  if (v == null)             return 'null'
+  return JSON.stringify(v)
+}
+
+export async function upsertInfra(write, fields) {
+  const incomingTagsStr = stringifyOnce(fields.tags || {})
   const scanEpoch       = fields.scanEpoch || Date.now()
   const rawObj          = fields.raw || {}
   const promoted        = getPromotedFields(fields.provider, rawObj)
@@ -166,7 +184,7 @@ async function upsertInfra(write, fields) {
     status:       fields.status      || 'unknown',
     public:       fields.public      ?? false,
     tags:         incomingTagsStr,
-    raw:          JSON.stringify(rawObj),
+    raw:          stringifyOnce(rawObj),
     scanEpoch,
     ...promotedParams,
   }
@@ -240,11 +258,31 @@ async function upsertInfra(write, fields) {
  *  - provider matches the scanned provider
  *  - lastupdated < scanEpoch (not touched during this scan run)
  *
- * Nodes with existing DEPLOYED_ON relationships are marked stale but NOT deleted
+ * Nodes with an owning Component (a :CONNECTS_TO {via:'component-mapping'} edge) are marked stale but NOT deleted
  * (they may still be relevant for mapping review).
  */
-async function cleanupStaleNodes(write, query, log, provider, scanEpoch) {
-  const stats = { removed: 0, markedStale: 0, errors: [] }
+async function cleanupStaleNodes(write, query, log, provider, scanEpoch, scanStats = null) {
+  const stats = { removed: 0, markedStale: 0, skipped: false, errors: [] }
+
+  // Errored-scan guard. If the scan returned zero recognised resources and
+  // accumulated errors, every existing Infra for this provider would look
+  // stale (because nothing got a fresh `lastupdated`). Skip cleanup so a
+  // single bad-credentials run doesn't mark the whole graph stale.
+  if (scanStats) {
+    const totalNodes = Object.entries(scanStats)
+      .filter(([k]) => !['edges', 'errors', 'skipped', 'scanEpoch'].includes(k))
+      .reduce((s, [, v]) => s + (typeof v === 'number' ? v : 0), 0)
+    const errorCount = Array.isArray(scanStats.errors) ? scanStats.errors.length : 0
+    if (totalNodes === 0 && errorCount > 0) {
+      log.warn?.(
+        `[Stale Cleanup] ${provider}: skipped — scan returned 0 nodes with ${errorCount} error(s); ` +
+        `cleanup would mark every existing ${provider} node stale`
+      )
+      stats.skipped = true
+      return stats
+    }
+  }
+
   try {
     // Delete unmapped stale nodes
     const delResult = await write(`
@@ -253,7 +291,7 @@ async function cleanupStaleNodes(write, query, log, provider, scanEpoch) {
         AND i.provider = $provider
         AND i.lastupdated IS NOT NULL
         AND i.lastupdated < $scanEpoch
-        AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+        AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       DETACH DELETE i
       RETURN count(i) AS removed
     `, { provider, scanEpoch })
@@ -266,7 +304,7 @@ async function cleanupStaleNodes(write, query, log, provider, scanEpoch) {
         AND i.provider = $provider
         AND i.lastupdated IS NOT NULL
         AND i.lastupdated < $scanEpoch
-        AND (:Component)-[:DEPLOYED_ON]->(i)
+        AND (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       SET i.stale = true
       RETURN count(i) AS marked
     `, { provider, scanEpoch })
@@ -283,773 +321,35 @@ async function cleanupStaleNodes(write, query, log, provider, scanEpoch) {
 }
 
 // ─── AWS Scanner ──────────────────────────────────────────────────────────────
+//
+// Delegates to the Config-aggregator scanner in discovery.aws.js. The old
+// per-service SDK loops (ec2, rds, lambda, eks, ecs, elb-v2, elasticache —
+// 7 services × N regions) have been replaced by a single
+// SelectAggregateResourceConfig query plus structural edge emission. See
+// docs/aws-config-aggregator-coverage.md for the field audit and the
+// Config aggregator prerequisites.
 
-async function scanAWS({ credentials, regions, write, log, scanEpoch }) {
-  scanEpoch = scanEpoch || Date.now()
-  const {
-    EC2Client, DescribeInstancesCommand,
-    paginateDescribeInstances,
-  } = await import('@aws-sdk/client-ec2')
-  const {
-    RDSClient, paginateDescribeDBInstances,
-  } = await import('@aws-sdk/client-rds')
-  const {
-    LambdaClient, paginateListFunctions,
-  } = await import('@aws-sdk/client-lambda')
-  const {
-    EKSClient, ListClustersCommand, DescribeClusterCommand,
-  } = await import('@aws-sdk/client-eks')
-  const {
-    ECSClient, ListClustersCommand: ECSListClusters,
-    DescribeClustersCommand: ECSDescribeClusters,
-  } = await import('@aws-sdk/client-ecs')
-  const {
-    ElasticLoadBalancingV2Client, paginateDescribeLoadBalancers,
-  } = await import('@aws-sdk/client-elastic-load-balancing-v2')
-  const {
-    ElastiCacheClient, paginateDescribeCacheClusters,
-  } = await import('@aws-sdk/client-elasticache')
-
-  const stats = {
-    ec2: 0, rds: 0, lambda: 0, eks: 0,
-    ecs: 0, alb: 0, elasticache: 0, errors: [], skipped: [],
-    scanEpoch,
-  }
-
-  // Inject consistent scanEpoch into all upserts within this scan run
-  const upsert = (fields) => upsertInfra(write, { ...fields, scanEpoch })
-
-  // Classify LocalStack Pro-gate errors as skipped rather than errors
-  const isProError = (e) =>
-    e.message?.includes('not yet implemented or pro feature') ||
-    e.message?.includes('InternalFailure') && e.message?.includes('pro feature')
-
-  const handleScanError = (label, e) => {
-    if (isProError(e)) {
-      stats.skipped.push(`${label}: not available (LocalStack Pro required)`)
-    } else {
-      stats.errors.push(`${label}: ${e.message}`)
-    }
-  }
-  const creds = credentials ? {
-    accessKeyId:     credentials.accessKeyId,
-    secretAccessKey: credentials.secretAccessKey,
-    sessionToken:    credentials.sessionToken,
-  } : undefined  // falls back to env / instance profile / ~/.aws
-
-  // endpoint override — used for LocalStack and other AWS-compatible APIs
-  const endpointOverride = process.env.AWS_ENDPOINT_URL || undefined
-
-  for (const region of regions) {
-    const cfg = {
-      region,
-      ...(creds          ? { credentials: creds }              : {}),
-      ...(endpointOverride ? { endpoint: endpointOverride,
-                               forcePathStyle: true }           : {}),
-    }
-    log.info(`[AWS] scanning region ${region}`)
-
-    // ── EC2 instances ─────────────────────────────────────────────────────
-    try {
-      const ec2 = new EC2Client(cfg)
-      for await (const page of paginateDescribeInstances({ client: ec2 }, {})) {
-        for (const reservation of page.Reservations || []) {
-          for (const inst of reservation.Instances || []) {
-            if (inst.State?.Name === 'terminated') continue
-            const name = awsName(inst.Tags, inst.InstanceId)
-            await upsert({
-              cloudId:      inst.InstanceId,
-              name,
-              provider:     'aws',
-              resourceType: 'ec2_instance',
-              region,
-              status:       inst.State?.Name || 'unknown',
-              public:       !!inst.PublicIpAddress,
-              tags:         awsTags(inst.Tags),
-              raw: {
-                instanceType:    inst.InstanceType,
-                imageId:         inst.ImageId,
-                launchTime:      inst.LaunchTime,
-                privateIp:       inst.PrivateIpAddress,
-                publicIp:        inst.PublicIpAddress,
-                vpcId:           inst.VpcId,
-                subnetId:        inst.SubnetId,
-                availabilityZone: inst.Placement?.AvailabilityZone,
-                platform:        inst.Platform || 'linux',
-                architecture:    inst.Architecture,
-                iamProfile:      inst.IamInstanceProfile?.Arn,
-              },
-            })
-            stats.ec2++
-          }
-        }
-      }
-    } catch (e) { handleScanError("EC2/${region}", e) }
-
-    // ── RDS instances ─────────────────────────────────────────────────────
-    try {
-      const rds = new RDSClient(cfg)
-      for await (const page of paginateDescribeDBInstances({ client: rds }, {})) {
-        for (const db of page.DBInstances || []) {
-          await upsert({
-            cloudId:      db.DBInstanceArn,
-            name:         db.DBInstanceIdentifier,
-            provider:     'aws',
-            resourceType: 'rds_instance',
-            region,
-            status:       db.DBInstanceStatus,
-            public:       db.PubliclyAccessible,
-            tags:         awsTags(db.TagList),
-            raw: {
-              engine:            db.Engine,
-              engineVersion:     db.EngineVersion,
-              instanceClass:     db.DBInstanceClass,
-              multiAZ:           db.MultiAZ,
-              storageType:       db.StorageType,
-              allocatedStorage:  db.AllocatedStorage,
-              endpoint:          db.Endpoint?.Address,
-              port:              db.Endpoint?.Port,
-              vpcId:             db.DBSubnetGroup?.VpcId,
-              autoMinorVersionUpgrade: db.AutoMinorVersionUpgrade,
-            },
-          })
-          stats.rds++
-        }
-      }
-    } catch (e) { handleScanError("RDS/${region}", e) }
-
-    // ── Lambda functions ──────────────────────────────────────────────────
-    try {
-      const lambda = new LambdaClient(cfg)
-      for await (const page of paginateListFunctions({ client: lambda }, {})) {
-        for (const fn of page.Functions || []) {
-          await upsert({
-            cloudId:      fn.FunctionArn,
-            name:         fn.FunctionName,
-            provider:     'aws',
-            resourceType: 'function',
-            region,
-            status:       'active',
-            public:       false,
-            tags:         {},
-            raw: {
-              runtime:     fn.Runtime,
-              handler:     fn.Handler,
-              memorySize:  fn.MemorySize,
-              timeout:     fn.Timeout,
-              codeSize:    fn.CodeSize,
-              description: fn.Description,
-              lastModified: fn.LastModified,
-              role:        fn.Role,
-            },
-          })
-          stats.lambda++
-        }
-      }
-    } catch (e) { handleScanError("Lambda/${region}", e) }
-
-    // ── EKS clusters ─────────────────────────────────────────────────────
-    try {
-      const eks = new EKSClient(cfg)
-      const listRes  = await eks.send(new ListClustersCommand({}))
-      for (const clusterName of listRes.clusters || []) {
-        const detail = await eks.send(new DescribeClusterCommand({ name: clusterName }))
-        const c = detail.cluster
-        await upsert({
-          cloudId:      c.arn,
-          name:         c.name,
-          provider:     'aws',
-          resourceType: 'eks_cluster',
-          region,
-          status:       c.status,
-          public:       c.resourcesVpcConfig?.endpointPublicAccess ?? false,
-          tags:         c.tags || {},
-          raw: {
-            version:              c.version,
-            endpoint:             c.endpoint,
-            roleArn:              c.roleArn,
-            vpcId:                c.resourcesVpcConfig?.vpcId,
-            subnetIds:            c.resourcesVpcConfig?.subnetIds,
-            securityGroupIds:     c.resourcesVpcConfig?.clusterSecurityGroupId,
-            endpointPublicAccess: c.resourcesVpcConfig?.endpointPublicAccess,
-            logging:              c.logging?.clusterLogging?.map(l => l.types).flat(),
-          },
-        })
-        stats.eks++
-      }
-    } catch (e) { handleScanError("EKS/${region}", e) }
-
-    // ── ECS clusters ─────────────────────────────────────────────────────
-    try {
-      const ecs  = new ECSClient(cfg)
-      const list = await ecs.send(new ECSListClusters({}))
-      if (list.clusterArns?.length) {
-        const detail = await ecs.send(
-          new ECSDescribeClusters({ clusters: list.clusterArns })
-        )
-        for (const c of detail.clusters || []) {
-          await upsert({
-            cloudId:      c.clusterArn,
-            name:         c.clusterName,
-            provider:     'aws',
-            resourceType: 'ecs_cluster',
-            region,
-            status:       c.status,
-            public:       false,
-            tags:         awsTags(c.tags),
-            raw: {
-              runningTasksCount:               c.runningTasksCount,
-              activeServicesCount:             c.activeServicesCount,
-              registeredContainerInstancesCount: c.registeredContainerInstancesCount,
-              capacityProviders:               c.capacityProviders,
-            },
-          })
-          stats.ecs++
-        }
-      }
-    } catch (e) { handleScanError("ECS/${region}", e) }
-
-    // ── ALB / NLB ─────────────────────────────────────────────────────────
-    try {
-      const elb = new ElasticLoadBalancingV2Client(cfg)
-      for await (const page of paginateDescribeLoadBalancers({ client: elb }, {})) {
-        for (const lb of page.LoadBalancers || []) {
-          await upsert({
-            cloudId:      lb.LoadBalancerArn,
-            name:         lb.LoadBalancerName,
-            provider:     'aws',
-            resourceType: 'load_balancer',
-            region,
-            status:       lb.State?.Code || 'unknown',
-            public:       lb.Scheme === 'internet-facing',
-            tags:         {},
-            raw: {
-              type:             lb.Type,   // application | network | gateway
-              scheme:           lb.Scheme,
-              dnsName:          lb.DNSName,
-              vpcId:            lb.VpcId,
-              ipAddressType:    lb.IpAddressType,
-              availabilityZones: lb.AvailabilityZones?.map(z => z.ZoneName),
-            },
-          })
-          stats.alb++
-        }
-      }
-    } catch (e) { handleScanError("ALB/${region}", e) }
-
-    // ── ElastiCache clusters ──────────────────────────────────────────────
-    try {
-      const ec = new ElastiCacheClient(cfg)
-      for await (const page of paginateDescribeCacheClusters({ client: ec }, {})) {
-        for (const cluster of page.CacheClusters || []) {
-          await upsert({
-            cloudId:      cluster.CacheClusterId,
-            name:         cluster.CacheClusterId,
-            provider:     'aws',
-            resourceType: 'elasticache',
-            region,
-            status:       cluster.CacheClusterStatus,
-            public:       false,
-            tags:         awsTags(cluster.TagList),
-            raw: {
-              engine:           cluster.Engine,
-              engineVersion:    cluster.EngineVersion,
-              cacheNodeType:    cluster.CacheNodeType,
-              numCacheNodes:    cluster.NumCacheNodes,
-              preferredAZ:      cluster.PreferredAvailabilityZone,
-              endpoint:         cluster.ConfigurationEndpoint?.Address,
-            },
-          })
-          stats.elasticache++
-        }
-      }
-    } catch (e) { handleScanError("ElastiCache/${region}", e) }
-  }
-
-  return stats
-}
+export const scanAWS = scanAWSViaConfigAggregator
 
 // ─── Azure Scanner ────────────────────────────────────────────────────────────
+//
+// Delegates to the Azure Resource Graph scanner in discovery.azure.js. The
+// old per-type SDK loops (compute, containerservice, sql, appservice,
+// network, rediscache, arm-resources) have been replaced by a single ARG
+// paginated query plus structural edge emission. See
+// docs/azure-resource-graph-coverage.md for the field-by-field audit.
 
-async function scanAzure({ credentials, subscriptionId, write, log, scanEpoch }) {
-  scanEpoch = scanEpoch || Date.now()
-  const { DefaultAzureCredential, ClientSecretCredential } = await import('@azure/identity')
-  const { ComputeManagementClient }      = await import('@azure/arm-compute')
-  const { ContainerServiceClient }       = await import('@azure/arm-containerservice')
-  const { SqlManagementClient }          = await import('@azure/arm-sql')
-  const { WebSiteManagementClient }      = await import('@azure/arm-appservice')
-  const { NetworkManagementClient }      = await import('@azure/arm-network')
-  const { RedisManagementClient }        = await import('@azure/arm-rediscache')
-
-
-  const subId = subscriptionId || process.env.AZURE_SUBSCRIPTION_ID
-  if (!subId) throw new Error('subscriptionId is required for Azure discovery')
-
-  // Build credential.
-  // ClientSecretCredential REQUIRES tenantId — 'common' does not work for
-  // service principals. If tenantId is missing, resolve it from the subscription
-  // by calling the ARM unauthenticated metadata endpoint.
-  let cred
-  if (credentials?.clientId && credentials?.clientSecret) {
-    let tenantId = credentials.tenantId
-
-    if (!tenantId) {
-      // Auto-resolve tenantId from subscription metadata (no auth needed)
-      try {
-        const metaUrl = `https://management.azure.com/subscriptions/${subId}?api-version=2022-12-01`
-        const metaRes = await fetch(metaUrl)
-        // ARM returns 401 with WWW-Authenticate header containing the tenantId
-        const wwwAuth = metaRes.headers.get('www-authenticate') || ''
-        const match = wwwAuth.match(/authorization_uri="[^"]*\/([0-9a-f-]{36})/)
-        if (match) {
-          tenantId = match[1]
-          log.info(`[Azure] Resolved tenantId: ${tenantId}`)
-        }
-      } catch (e) {
-        log.warn(`[Azure] Could not auto-resolve tenantId: ${e.message}`)
-      }
-    }
-
-    if (!tenantId) {
-      throw new Error(
-        'tenantId is required for Azure service principal authentication. ' +
-        'Add it to your Azure account configuration in Integrations.'
-      )
-    }
-
-    cred = new ClientSecretCredential(tenantId, credentials.clientId, credentials.clientSecret)
-  } else {
-    cred = new DefaultAzureCredential()
-  }
-
-  const stats = { vms: 0, aks: 0, sql: 0, appService: 0, redis: 0, vnet: 0, errors: [], skipped: [], scanEpoch }
-
-  const upsert = (fields) => upsertInfra(write, { ...fields, scanEpoch })
-
-  const isProError = (e) =>
-    e.message?.includes('not yet implemented or pro feature') ||
-    e.code === 'AuthorizationFailed'
-
-  const handleScanError = (label, e) => {
-    if (isProError(e)) {
-      stats.skipped.push(`${label}: insufficient permissions or not available`)
-    } else {
-      stats.errors.push(`${label}: ${e.message}`)
-    }
-  }
-
-  // ── Virtual Machines ──────────────────────────────────────────────────
-  try {
-    const compute = new ComputeManagementClient(cred, subId)
-    for await (const vm of compute.virtualMachines.listAll()) {
-      const region = vm.location
-      const rg = vm.id?.split('/')[4] || ''
-      await upsert({
-        cloudId:      vm.id,
-        name:         vm.name,
-        provider:     'azure',
-        resourceType: 'vm',
-        region,
-        status:       vm.provisioningState || 'unknown',
-        public:       false,  // VMs are not directly public by default
-        tags:         vm.tags || {},
-        raw: {
-          vmSize:            vm.hardwareProfile?.vmSize,
-          osType:            vm.storageProfile?.osDisk?.osType,
-          imagePublisher:    vm.storageProfile?.imageReference?.publisher,
-          imageOffer:        vm.storageProfile?.imageReference?.offer,
-          imageSku:          vm.storageProfile?.imageReference?.sku,
-          resourceGroup:     rg,
-          availabilityZones: vm.zones,
-          adminUsername:     vm.osProfile?.adminUsername,
-        },
-      })
-      stats.vms++
-    }
-  } catch (e) { handleScanError("AzureVMs", e) }
-
-  // ── AKS clusters ──────────────────────────────────────────────────────
-  try {
-    const aks = new ContainerServiceClient(cred, subId)
-    for await (const cluster of aks.managedClusters.list()) {
-      await upsert({
-        cloudId:      cluster.id,
-        name:         cluster.name,
-        provider:     'azure',
-        resourceType: 'aks_cluster',
-        region:       cluster.location,
-        status:       cluster.provisioningState || 'unknown',
-        public:       !cluster.apiServerAccessProfile?.enablePrivateCluster,
-        tags:         cluster.tags || {},
-        raw: {
-          kubernetesVersion:  cluster.kubernetesVersion,
-          nodeCount:          cluster.agentPoolProfiles?.reduce((s, p) => s + (p.count || 0), 0),
-          nodeVmSize:         cluster.agentPoolProfiles?.[0]?.vmSize,
-          dnsPrefix:          cluster.dnsPrefix,
-          fqdn:               cluster.fqdn,
-          networkPlugin:      cluster.networkProfile?.networkPlugin,
-          enableRBAC:         cluster.enableRBAC,
-          resourceGroup:      cluster.id?.split('/')[4] || '',
-          vnetSubnetId:       cluster.agentPoolProfiles?.[0]?.vnetSubnetID || '',
-        },
-      })
-      stats.aks++
-    }
-  } catch (e) { handleScanError("AzureAKS", e) }
-
-  // ── SQL Servers + Databases ───────────────────────────────────────────
-  try {
-    const sql = new SqlManagementClient(cred, subId)
-    for await (const server of sql.servers.list()) {
-      await upsert({
-        cloudId:      server.id,
-        name:         server.name,
-        provider:     'azure',
-        resourceType: 'sql_server',
-        region:       server.location,
-        status:       server.state || 'unknown',
-        public:       server.publicNetworkAccess === 'Enabled',
-        tags:         server.tags || {},
-        raw: {
-          version:              server.version,
-          administratorLogin:   server.administratorLogin,
-          fullyQualifiedDomainName: server.fullyQualifiedDomainName,
-          publicNetworkAccess:  server.publicNetworkAccess,
-          minimalTlsVersion:    server.minimalTlsVersion,
-          resourceGroup:        server.id?.split('/')[4] || '',
-        },
-      })
-      stats.sql++
-    }
-  } catch (e) { handleScanError("AzureSQL", e) }
-
-  // ── App Services ──────────────────────────────────────────────────────
-  try {
-    const web = new WebSiteManagementClient(cred, subId)
-    for await (const app of web.webApps.list()) {
-      await upsert({
-        cloudId:      app.id,
-        name:         app.name,
-        provider:     'azure',
-        resourceType: 'app_service',
-        region:       app.location,
-        status:       app.state || 'unknown',
-        public:       true,  // App Services are typically internet-facing
-        tags:         app.tags || {},
-        raw: {
-          kind:              app.kind,
-          defaultHostName:   app.defaultHostName,
-          httpsOnly:         app.httpsOnly,
-          serverFarmId:      app.serverFarmId,
-          outboundIpAddresses: app.outboundIpAddresses,
-          clientAffinityEnabled: app.clientAffinityEnabled,
-          enabled:           app.enabled,
-          resourceGroup:     app.id?.split('/')[4] || '',
-          vnetSubnetId:      app.virtualNetworkSubnetId || '',
-        },
-      })
-      stats.appService++
-    }
-  } catch (e) { handleScanError("AzureAppService", e) }
-
-  // ── Redis Caches ──────────────────────────────────────────────────────
-  // @azure/arm-rediscache v8: no listAll() — iterate per resource group
-  try {
-    const redis = new RedisManagementClient(cred, subId)
-    const { ResourceManagementClient } = await import('@azure/arm-resources')
-    const rgClient = new ResourceManagementClient(cred, subId)
-    for await (const rg of rgClient.resourceGroups.list()) {
-      for await (const cache of redis.redis.listByResourceGroup(rg.name)) {
-        await upsert({
-          cloudId:      cache.id,
-          name:         cache.name,
-          provider:     'azure',
-          resourceType: 'redis',
-          region:       cache.location,
-          status:       cache.provisioningState || 'unknown',
-          public:       cache.publicNetworkAccess === 'Enabled',
-          tags:         cache.tags || {},
-          raw: {
-            sku:               `${cache.sku?.name} ${cache.sku?.family}${cache.sku?.capacity}`,
-            hostName:          cache.hostName,
-            port:              cache.port,
-            sslPort:           cache.sslPort,
-            redisVersion:      cache.redisVersion,
-            minimumTlsVersion: cache.minimumTlsVersion,
-            enableNonSslPort:  cache.enableNonSslPort,
-            resourceGroup:     cache.id?.split('/')[4] || '',
-            subnetId:          cache.subnetId || '',
-          },
-        })
-        stats.redis++
-      }
-    }
-  } catch (e) { handleScanError("AzureRedis", e) }
-
-  // ── Virtual Networks ──────────────────────────────────────────────────
-  try {
-    const network = new NetworkManagementClient(cred, subId)
-    for await (const vnet of network.virtualNetworks.listAll()) {
-      await upsert({
-        cloudId:      vnet.id,
-        name:         vnet.name,
-        provider:     'azure',
-        resourceType: 'vnet',
-        region:       vnet.location,
-        status:       vnet.provisioningState || 'unknown',
-        public:       false,
-        tags:         vnet.tags || {},
-        raw: {
-          addressSpace:    vnet.addressSpace?.addressPrefixes,
-          subnetCount:     vnet.subnets?.length || 0,
-          dnsServers:      vnet.dhcpOptions?.dnsServers,
-          enableDdosProtection: vnet.enableDdosProtection,
-          resourceGroup:   vnet.id?.split('/')[4] || '',
-          subnets:         (vnet.subnets || []).map(s => ({ id: s.id, name: s.name, prefix: s.properties?.addressPrefix })),
-        },
-      })
-      stats.vnet++
-    }
-  } catch (e) { handleScanError("AzureVNet", e) }
-
-
-  // ── Generic ARM resource scanner ─────────────────────────────────────
-  // Uses @azure/arm-resources (already a dependency) to list ALL resource
-  // types in the subscription. This picks up Application Insights, Storage
-  // Accounts, Service Bus, Key Vaults and anything else — with full tags.
-  // This avoids needing separate SDK packages for each resource type.
-  try {
-    const { ResourceManagementClient: GenericRMC } = await import('@azure/arm-resources')
-    const genericClient = new GenericRMC(cred, subId)
-
-    // Resource type → AppCloud resourceType mapping
-    const ARM_TYPE_MAP = {
-      'microsoft.insights/components':              'app_insights',
-      'microsoft.storage/storageaccounts':          'storage_account',
-      'microsoft.servicebus/namespaces':            'service_bus',
-      'microsoft.keyvault/vaults':                  'key_vault',
-      'microsoft.web/sites':                        'app_service',
-      'microsoft.web/serverfarms':                  'app_service_plan',
-      'microsoft.containerservice/managedclusters': 'aks_cluster',
-      'microsoft.sql/servers':                      'sql_server',
-      'microsoft.dbforpostgresql/servers':          'postgresql',
-      'microsoft.dbformysql/servers':               'mysql',
-      'microsoft.cache/redis':                      'redis',
-      'microsoft.network/virtualnetworks':          'vnet',
-      'microsoft.compute/virtualmachines':          'vm',
-      'microsoft.logic/workflows':                  'logic_app',
-      'microsoft.eventgrid/topics':                 'event_grid',
-      'microsoft.eventhub/namespaces':              'event_hub',
-      'microsoft.cdn/profiles':                     'cdn',
-      'microsoft.apimanagement/service':            'api_management',
-    }
-
-    for await (const resource of genericClient.resources.list()) {
-      const armType = resource.type?.toLowerCase() || ''
-      const resourceType = ARM_TYPE_MAP[armType]
-
-      // Skip types we handle with dedicated scanners (VMs, AKS, SQL already scanned above)
-      // and types we don't recognise
-      const alreadyScanned = [
-        'microsoft.compute/virtualmachines',
-        'microsoft.containerservice/managedclusters',
-        'microsoft.sql/servers',
-        'microsoft.web/sites',
-        'microsoft.cache/redis',
-        'microsoft.network/virtualnetworks',
-      ]
-      if (!resourceType || alreadyScanned.includes(armType)) continue
-
-      await upsert({
-        cloudId:      resource.id,
-        name:         resource.name,
-        provider:     'azure',
-        resourceType,
-        region:       resource.location || 'global',
-        status:       resource.provisioningState || 'unknown',
-        public:       false,
-        tags:         resource.tags || {},
-        raw: {
-          type:          resource.type,
-          kind:          resource.kind,
-          sku:           resource.sku?.name,
-          identity:      resource.identity?.type,
-          resourceGroup: resource.id?.split('/')[4] || '',
-        },
-      })
-
-      // Count by type
-      const countKey = resourceType.replace(/_/g, '') + 'Count'
-      stats[countKey] = (stats[countKey] || 0) + 1
-    }
-    log.info(`[Azure] Generic ARM scan complete`)
-  } catch (e) { handleScanError('AzureGenericResources', e) }
-
-  return stats
-}
+export const scanAzure = scanAzureViaResourceGraph
 
 // ─── GCP Scanner ──────────────────────────────────────────────────────────────
+//
+// Delegates to the Cloud Asset Inventory scanner in discovery.gcp.js. The
+// old per-product SDK loops (compute, container, googleapis sqladmin/run)
+// have been replaced by a single CAI listAssets call plus structural edge
+// emission. See docs/gcp-cloud-asset-coverage.md for the field-by-field
+// audit.
 
-async function scanGCP({ credentials, projectId, write, log, scanEpoch }) {
-  scanEpoch = scanEpoch || Date.now()
-  const { InstancesClient, ZonesClient } = await import('@google-cloud/compute')
-  const { ClusterManagerClient }         = await import('@google-cloud/container')
-  const { google }                       = await import('googleapis')
-
-  const project = projectId || process.env.GCP_PROJECT_ID
-  if (!project) throw new Error('GCP_PROJECT_ID is required for GCP discovery')
-
-  // GCP auth: use credentials JSON if provided, else Application Default Credentials
-  const authOpts = credentials?.client_email
-    ? { credentials }
-    : {}
-
-  const stats = { instances: 0, gke: 0, sql: 0, cloudRun: 0, errors: [], scanEpoch }
-
-  const upsert = (fields) => upsertInfra(write, { ...fields, scanEpoch })
-
-  // ── Compute Engine instances — aggregatedList across all zones ────────
-  try {
-    const instancesClient = new InstancesClient(authOpts)
-    // aggregatedList returns {zoneName: {instances: []}} across all zones
-    const aggReq = instancesClient.aggregatedListAsync({ project })
-    for await (const [zone, zoneData] of aggReq) {
-      for (const inst of zoneData.instances || []) {
-        if (inst.status === 'TERMINATED') continue
-        const region = zone.replace('zones/', '').replace(/-[a-z]$/, '')  // us-central1-a → us-central1
-        const externalIp = inst.networkInterfaces?.[0]?.accessConfigs?.[0]?.natIP
-        await upsert({
-          cloudId:      inst.selfLink,
-          name:         inst.name,
-          provider:     'gcp',
-          resourceType: 'compute_instance',
-          region,
-          status:       inst.status?.toLowerCase() || 'unknown',
-          public:       !!externalIp,
-          tags:         inst.labels || {},
-          raw: {
-            machineType:  inst.machineType?.split('/').pop(),
-            zone:         zone.replace('zones/', ''),
-            internalIp:   inst.networkInterfaces?.[0]?.networkIP,
-            externalIp,
-            diskCount:    inst.disks?.length || 0,
-            serviceAccount: inst.serviceAccounts?.[0]?.email,
-            preemptible:  inst.scheduling?.preemptible,
-            creationTimestamp: inst.creationTimestamp,
-          },
-        })
-        stats.instances++
-      }
-    }
-  } catch (e) { stats.errors.push(`GCPCompute: ${e.message}`) }
-
-  // ── GKE clusters ─────────────────────────────────────────────────────
-  try {
-    const gke = new ClusterManagerClient(authOpts)
-    // listClusters for all zones: parent = 'projects/{project}/locations/-'
-    const [response] = await gke.listClusters({ parent: `projects/${project}/locations/-` })
-    for (const cluster of response.clusters || []) {
-      await upsert({
-        cloudId:      cluster.selfLink || `gke/${project}/${cluster.name}`,
-        name:         cluster.name,
-        provider:     'gcp',
-        resourceType: 'gke_cluster',
-        region:       cluster.location,
-        status:       cluster.status?.toString().toLowerCase() || 'unknown',
-        public:       !cluster.privateClusterConfig?.enablePrivateEndpoint,
-        tags:         cluster.resourceLabels || {},
-        raw: {
-          initialClusterVersion: cluster.initialClusterVersion,
-          currentMasterVersion:  cluster.currentMasterVersion,
-          nodeCount:             cluster.currentNodeCount,
-          endpoint:              cluster.endpoint,
-          network:               cluster.network,
-          subnetwork:            cluster.subnetwork,
-          loggingService:        cluster.loggingService,
-          monitoringService:     cluster.monitoringService,
-          autopilot:             !!cluster.autopilot?.enabled,
-        },
-      })
-      stats.gke++
-    }
-  } catch (e) { stats.errors.push(`GCPGKE: ${e.message}`) }
-
-  // ── Cloud SQL instances — via googleapis (sqladmin v1) ────────────────
-  // @google-cloud/sql doesn't exist as a standalone client; use googleapis
-  try {
-    const auth = new google.auth.GoogleAuth({
-      ...(credentials?.client_email ? { credentials } : {}),
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    })
-    const sqladmin = google.sqladmin({ version: 'v1', auth })
-    const res = await sqladmin.instances.list({ project })
-    for (const db of res.data.items || []) {
-      const region = db.region || db.gceZone?.replace(/-[a-z]$/, '') || ''
-      await upsert({
-        cloudId:      db.selfLink || `cloudsql/${project}/${db.name}`,
-        name:         db.name,
-        provider:     'gcp',
-        resourceType: 'cloud_sql',
-        region,
-        status:       db.state?.toLowerCase() || 'unknown',
-        public:       (db.ipAddresses || []).some(ip => ip.type === 'PRIMARY'),
-        tags:         db.userLabels || {},
-        raw: {
-          databaseVersion:  db.databaseVersion,
-          tier:             db.settings?.tier,
-          dataDiskSizeGb:   db.settings?.dataDiskSizeGb,
-          backupEnabled:    db.settings?.backupConfiguration?.enabled,
-          maintenanceWindow: db.settings?.maintenanceWindow,
-          ipAddress:        db.ipAddresses?.find(ip => ip.type === 'PRIMARY')?.ipAddress,
-          availabilityType: db.settings?.availabilityType,
-        },
-      })
-      stats.sql++
-    }
-  } catch (e) { stats.errors.push(`GCPCloudSQL: ${e.message}`) }
-
-  // ── Cloud Run services — via googleapis (run v2) ───────────────────────
-  try {
-    const auth = new google.auth.GoogleAuth({
-      ...(credentials?.client_email ? { credentials } : {}),
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    })
-    const run = google.run({ version: 'v2', auth })
-    // list across all locations
-    const locRes = await run.projects.locations.list({ name: `projects/${project}` })
-    for (const loc of locRes.data.locations || []) {
-      try {
-        const svcRes = await run.projects.locations.services.list({
-          parent: `projects/${project}/locations/${loc.locationId}`,
-        })
-        for (const svc of svcRes.data.services || []) {
-          await upsert({
-            cloudId:      svc.name,
-            name:         svc.name?.split('/').pop(),
-            provider:     'gcp',
-            resourceType: 'cloud_run',
-            region:       loc.locationId,
-            status:       svc.terminalCondition?.state?.toLowerCase() || 'unknown',
-            public:       svc.ingress === 'INGRESS_TRAFFIC_ALL',
-            tags:         svc.labels || {},
-            raw: {
-              uri:            svc.uri,
-              creator:        svc.creator,
-              lastModifier:   svc.lastModifier,
-              containers:     svc.template?.containers?.map(c => c.image),
-              minInstances:   svc.template?.scaling?.minInstanceCount,
-              maxInstances:   svc.template?.scaling?.maxInstanceCount,
-              ingress:        svc.ingress,
-            },
-          })
-          stats.cloudRun++
-        }
-      } catch (_) { /* skip inaccessible locations */ }
-    }
-  } catch (e) { stats.errors.push(`GCPCloudRun: ${e.message}`) }
-
-  return stats
-}
+export const scanGCP = scanGCPViaCloudAssetInventory
 
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
@@ -1078,82 +378,13 @@ export default async function discoveryRoutes(fastify) {
     }))
   }
   const { write, query } = fastify.neo4j
-  const audit = (...a) => fastify.pg.audit(...a).catch(() => {})
-  const actor = (req) => req.user?.name || req.user?.id || 'system'
+  // Phase 1d: audit() is now per-request via req.audit. Each call site
+  // uses req.audit(...).catch(() => {}).
+  const actor = actorFromReq
 
-  // ── GET /discovery/accounts — proxy to Postgres cloud accounts ────────
-  // Kept for backwards compatibility — returns same shape as before
-  fastify.get('/accounts', async (req, reply) => {
-    if (!fastify.pg.pool) return []
-    const rows = await fastify.pg.query(
-      `SELECT id, provider, name, config, enabled,
-              last_scan_at, last_scan_status, last_scan_total
-       FROM cloud_accounts WHERE enabled = true ORDER BY provider, name`
-    )
-    return rows.map(row => ({
-      id:       row.id,
-      provider: row.provider,
-      name:     row.name,
-      enabled:  row.enabled,
-      config:   decryptConfig(row.config || {}),
-      last_scan_at:     row.last_scan_at,
-      last_scan_status: row.last_scan_status,
-    }))
-  })
-
-  // ── POST /discovery/accounts — save cloud account to Postgres ──────────
-  // Backwards-compatible shim — delegates to the cloud accounts table
-  fastify.post('/accounts', async (req, reply) => {
-    const { name, provider, config = {} } = req.body
-    if (!name || !provider) return reply.badRequest('name and provider are required')
-    if (!['aws','azure','gcp'].includes(provider))
-      return reply.badRequest('provider must be aws, azure, or gcp')
-
-    const encryptedConfig = encryptConfig({ ...config })
-
-    if (fastify.pg.pool) {
-      const rows = await fastify.pg.query(
-        `INSERT INTO cloud_accounts (provider, name, config, enabled)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT (provider, name) DO UPDATE
-           SET config = EXCLUDED.config, updated_at = now()
-         RETURNING id, provider, name, enabled, created_at`,
-        [provider, name, JSON.stringify(encryptedConfig)]
-      )
-      const row = rows[0]
-      audit(actor(req), 'create', 'CloudAccount', row.id, `${provider}:${name}`, { provider })
-      reply.code(201)
-      return { ...row, config: decryptConfig(encryptedConfig) }
-    }
-
-    // Fallback to Neo4j if Postgres unavailable
-    const records = await write(`
-      MERGE (a:CloudAccount { id: $id })
-      SET a.name = $name, a.provider = $provider,
-          a.config = $config, a.updatedAt = datetime()
-      RETURN a
-    `, { id: `${provider}:${name}`, name, provider, config: JSON.stringify(encryptedConfig) })
-    const acct = props(records[0].get('a'))
-    reply.code(201)
-    return acct
-  })
-
-  // ── DELETE /discovery/accounts/:id ────────────────────────────────────
-  fastify.delete('/accounts/:id', async (req, reply) => {
-    if (fastify.pg.pool) {
-      const rows = await fastify.pg.query(
-        `SELECT provider, name FROM cloud_accounts WHERE id = $1`, [req.params.id]
-      )
-      if (!rows.length) return reply.notFound('Account not found')
-      await fastify.pg.query(`DELETE FROM cloud_accounts WHERE id = $1`, [req.params.id])
-      audit(actor(req), 'delete', 'CloudAccount', req.params.id,
-        `${rows[0].provider}:${rows[0].name}`, {})
-    } else {
-      await write(`MATCH (a:CloudAccount {id:$id}) DELETE a`, { id: req.params.id })
-    }
-    reply.code(204)
-  })
-
+  // Cloud-account CRUD lives in `routes/integrations-cloud.js` under
+  // `/integrations/cloud`. Discovery is a *consumer* of those records —
+  // see the `loadAccounts` helper below — and never owns them.
 
   // ── Helper: load all enabled accounts for a provider from Postgres ──────
   const loadAccounts = async (provider) => {
@@ -1181,7 +412,25 @@ export default async function discoveryRoutes(fastify) {
   // ── POST /discovery/scan/aws ──────────────────────────────────────────────
   // Scans all configured AWS accounts from Postgres, or uses credentials
   // from the request body for a one-off scan.
-  fastify.post('/scan/aws', async (req, reply) => {
+  fastify.post('/scan/aws', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
+    schema: {
+      summary:     'Scan AWS via Config aggregator',
+      description: 'Pages every aggregated resource via `SelectAggregateResourceConfig` and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied credentials; without one, scans every enabled AWS account from `/integrations/cloud`. Requires `aggregatorName` + `aggregatorRegion` (or `AWS_CONFIG_AGGREGATOR_NAME` env var). See [docs/aws-config-aggregator-coverage.md](../docs/aws-config-aggregator-coverage.md).',
+      body: { type: 'object', additionalProperties: true, properties: {
+        regions:    { type: 'array', items: { type: 'string' } },
+        accountId:  { type: 'string', description: 'When set, only scan this configured account' },
+        credentials: { type: 'object', additionalProperties: true, properties: {
+          accessKeyId:      { type: 'string' },
+          secretAccessKey:  { type: 'string' },
+          sessionToken:     { type: 'string' },
+          aggregatorName:   { type: 'string' },
+          aggregatorRegion: { type: 'string' },
+        } },
+      } },
+      response: { 200: ScanResponseSchema, 400: StandardErrorResponses[400], 500: StandardErrorResponses[500] },
+    },
+  }, async (req, reply) => {
     const { regions = ['us-east-1'], credentials, accountId } = req.body || {}
     const startedAt = Date.now()
 
@@ -1198,10 +447,10 @@ export default async function discoveryRoutes(fastify) {
       } catch (err) {
         return reply.internalServerError(`AWS scan failed: ${err.message}`)
       }
-      const stale = await cleanupStaleNodes(write, query, fastify.log, 'aws', scanEpoch)
+      const stale = await cleanupStaleNodes(write, query, fastify.log, 'aws', scanEpoch, stats)
       const duration = Date.now() - startedAt
-      const total = Object.entries(stats).filter(([k]) => !['errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
-      audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { regions, total, duration, breakdown: stats })
+      const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
+      req.audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { regions, total, duration, breakdown: stats }).catch(() => {})
       return { provider: 'aws', accounts: 1, regions, duration, total, breakdown: stats, stale, completedAt: new Date().toISOString() }
     }
 
@@ -1218,7 +467,7 @@ export default async function discoveryRoutes(fastify) {
       const scanRegions = cfg.regions ? cfg.regions.split(',').map(r => r.trim()) : regions
       try {
         const stats = await scanAWS({ credentials: creds, regions: scanRegions, write, log: fastify.log, scanEpoch })
-        const total = Object.entries(stats).filter(([k]) => !['errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
+        const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
         await updateScanResult(account.id, 'success', total, null)
         allResults.push({ account: account.name, regions: scanRegions, total, breakdown: stats })
       } catch (err) {
@@ -1227,20 +476,41 @@ export default async function discoveryRoutes(fastify) {
       }
     }
 
-    const stale = await cleanupStaleNodes(write, query, fastify.log, 'aws', scanEpoch)
+    // Multi-account scan: per-account `stats` is per-iteration. The
+    // cleanup guard is for the all-error/zero-node case, which can't
+    // happen here unless every account errored — and even then a single
+    // partial-success means some nodes got refreshed. Pass null so the
+    // guard is a no-op for multi-account loops.
+    const stale = await cleanupStaleNodes(write, query, fastify.log, 'aws', scanEpoch, null)
     let bootstrap = null
     try { bootstrap = await bootstrapDiscovery(fastify) } catch {}
 
     const duration = Date.now() - startedAt
     const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
-    audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { accounts: toScan.length, grandTotal, duration })
+    req.audit(actor(req), 'scan', 'CloudAccount', 'aws', 'AWS', { accounts: toScan.length, grandTotal, duration }).catch(() => {})
     return { provider: 'aws', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
   // ── POST /discovery/scan/azure ────────────────────────────────────────
   // Scans all configured Azure subscriptions from Postgres, or uses
   // credentials from the request body for a one-off scan.
-  fastify.post('/scan/azure', async (req, reply) => {
+  fastify.post('/scan/azure', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
+    schema: {
+      summary:     'Scan Azure via Resource Graph',
+      description: 'Pages a single ARG KQL query and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied subscription/credentials; without one, scans every enabled Azure account from `/integrations/cloud`. See [docs/azure-resource-graph-coverage.md](../docs/azure-resource-graph-coverage.md).',
+      body: { type: 'object', additionalProperties: true, properties: {
+        subscriptionId: { type: 'string' },
+        accountId:      { type: 'string' },
+        credentials:    { type: 'object', additionalProperties: true, properties: {
+          tenantId:     { type: 'string' },
+          clientId:     { type: 'string' },
+          clientSecret: { type: 'string' },
+        } },
+      } },
+      response: { 200: ScanResponseSchema, 500: StandardErrorResponses[500] },
+    },
+  }, async (req, reply) => {
     const { subscriptionId, credentials, accountId } = req.body || {}
     const startedAt = Date.now()
 
@@ -1257,26 +527,11 @@ export default async function discoveryRoutes(fastify) {
       } catch (err) {
         return reply.internalServerError(`Azure scan failed: ${err.message}`)
       }
-      const stale = await cleanupStaleNodes(write, query, fastify.log, 'azure', scanEpoch)
-      // Auto-enrich structural relationships
-      let enrichment = null
-      try {
-        const cred = credentials
-          ? await azureCredential({ tenantId: credentials.tenantId, clientId: credentials.clientId, clientSecret: credentials.clientSecret })
-          : await azureCredential({})
-        if (subscriptionId) {
-          enrichment = await enrichAzureRelationships({
-            cred, subId: subscriptionId, write, query, log: fastify.log,
-            layers: ['resource-graph'], autoLink: false,
-          })
-        }
-      } catch (err) {
-        fastify.log.warn(`[Auto-enrich] ${err.message}`)
-      }
+      const stale = await cleanupStaleNodes(write, query, fastify.log, 'azure', scanEpoch, stats)
       const duration = Date.now() - startedAt
-      const total = Object.entries(stats).filter(([k]) => !['errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
-      audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { subscriptionId, total, duration, breakdown: stats })
-      return { provider: 'azure', accounts: 1, subscriptionId, duration, total, breakdown: stats, stale, enrichment, completedAt: new Date().toISOString() }
+      const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
+      req.audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { subscriptionId, total, duration, breakdown: stats }).catch(() => {})
+      return { provider: 'azure', accounts: 1, subscriptionId, duration, total, breakdown: stats, stale, completedAt: new Date().toISOString() }
     }
 
     // Scan all configured subscriptions (or a specific one if accountId provided)
@@ -1292,7 +547,7 @@ export default async function discoveryRoutes(fastify) {
       const subId = cfg.subscriptionId || subscriptionId
       try {
         const stats = await scanAzure({ credentials: creds, subscriptionId: subId, write, log: fastify.log, scanEpoch })
-        const total = Object.entries(stats).filter(([k]) => !['errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
+        const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
         await updateScanResult(account.id, 'success', total, null)
         allResults.push({ account: account.name, subscriptionId: subId, total, breakdown: stats })
       } catch (err) {
@@ -1301,28 +556,7 @@ export default async function discoveryRoutes(fastify) {
       }
     }
 
-    const stale = await cleanupStaleNodes(write, query, fastify.log, 'azure', scanEpoch)
-
-    // Auto-enrich structural relationships after Azure scan.
-    // Runs Resource Graph layer only (single KQL query, Reader role) to discover
-    // VM→NIC→Subnet→VNet, AKS→subnet, App Service→Plan, etc.
-    // This enables the suggest engine to link infra-only resources (VNets, subnets)
-    // to the correct application via structural co-location.
-    let enrichment = null
-    try {
-      const firstAccount = toScan[0]?.config || {}
-      const cred = await azureCredential(firstAccount)
-      const subId = firstAccount.subscriptionId
-      if (cred && subId) {
-        enrichment = await enrichAzureRelationships({
-          cred, subId, write, query, log: fastify.log,
-          layers: ['resource-graph'],
-          autoLink: false,
-        })
-      }
-    } catch (err) {
-      fastify.log.warn(`[Auto-enrich] ${err.message}`)
-    }
+    const stale = await cleanupStaleNodes(write, query, fastify.log, 'azure', scanEpoch, null)
 
     // Auto-bootstrap after Azure scan
     let bootstrap = null
@@ -1330,14 +564,27 @@ export default async function discoveryRoutes(fastify) {
 
     const duration = Date.now() - startedAt
     const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
-    audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { accounts: toScan.length, grandTotal, duration })
-    return { provider: 'azure', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, enrichment, bootstrap, completedAt: new Date().toISOString() }
+    req.audit(actor(req), 'scan', 'CloudAccount', 'azure', 'Azure', { accounts: toScan.length, grandTotal, duration }).catch(() => {})
+    return { provider: 'azure', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
   // ── POST /discovery/scan/gcp ──────────────────────────────────────────
   // Scans all configured GCP projects from Postgres, or uses credentials
   // from the request body for a one-off scan.
-  fastify.post('/scan/gcp', async (req, reply) => {
+  fastify.post('/scan/gcp', {
+    config: { rateLimit: { max: 2, timeWindow: '1 minute' } }, // cloud-API cost guard
+    schema: {
+      summary:     'Scan GCP via Cloud Asset Inventory',
+      description: 'Pages `cloudasset.assets.listAssets` for the project and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan; without one, scans every enabled GCP account from `/integrations/cloud`. See [docs/gcp-cloud-asset-coverage.md](../docs/gcp-cloud-asset-coverage.md).',
+      body: { type: 'object', additionalProperties: true, properties: {
+        projectId:   { type: 'string' },
+        accountId:   { type: 'string' },
+        credentials: { type: 'object', additionalProperties: true,
+          description: 'GCP service-account JSON contents (client_email, private_key, …)' },
+      } },
+      response: { 200: ScanResponseSchema, 500: StandardErrorResponses[500] },
+    },
+  }, async (req, reply) => {
     const { projectId, credentials, accountId } = req.body || {}
     const startedAt = Date.now()
 
@@ -1353,10 +600,10 @@ export default async function discoveryRoutes(fastify) {
       } catch (err) {
         return reply.internalServerError(`GCP scan failed: ${err.message}`)
       }
-      const stale = await cleanupStaleNodes(write, query, fastify.log, 'gcp', scanEpoch)
+      const stale = await cleanupStaleNodes(write, query, fastify.log, 'gcp', scanEpoch, stats)
       const duration = Date.now() - startedAt
-      const total = Object.entries(stats).filter(([k]) => !['errors','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
-      audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { projectId, total, duration, breakdown: stats })
+      const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
+      req.audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { projectId, total, duration, breakdown: stats }).catch(() => {})
       return { provider: 'gcp', accounts: 1, projectId, duration, total, breakdown: stats, stale, completedAt: new Date().toISOString() }
     }
 
@@ -1374,7 +621,7 @@ export default async function discoveryRoutes(fastify) {
       const proj = cfg.projectId || projectId
       try {
         const stats = await scanGCP({ credentials: creds, projectId: proj, write, log: fastify.log, scanEpoch })
-        const total = Object.entries(stats).filter(([k]) => !['errors','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
+        const total = Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0)
         await updateScanResult(account.id, 'success', total, null)
         allResults.push({ account: account.name, projectId: proj, total, breakdown: stats })
       } catch (err) {
@@ -1383,20 +630,37 @@ export default async function discoveryRoutes(fastify) {
       }
     }
 
-    const stale = await cleanupStaleNodes(write, query, fastify.log, 'gcp', scanEpoch)
+    const stale = await cleanupStaleNodes(write, query, fastify.log, 'gcp', scanEpoch, null)
     let bootstrap = null
     try { bootstrap = await bootstrapDiscovery(fastify) } catch {}
 
     const duration = Date.now() - startedAt
     const grandTotal = allResults.reduce((s, r) => s + (r.total || 0), 0)
-    audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { accounts: toScan.length, grandTotal, duration })
+    req.audit(actor(req), 'scan', 'CloudAccount', 'gcp', 'GCP', { accounts: toScan.length, grandTotal, duration }).catch(() => {})
     return { provider: 'gcp', accounts: toScan.length, duration, total: grandTotal, results: allResults, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
   // ── POST /discovery/scan/all — scan all configured cloud accounts ──────
   // Loads accounts from Postgres and runs the per-provider scanners.
   // Accepts optional body overrides but works with no body at all.
-  fastify.post('/scan/all', async (req, reply) => {
+  fastify.post('/scan/all', {
+    config: { rateLimit: { max: 1, timeWindow: '5 minutes' } }, // most expensive — fan-out across providers
+    schema: {
+      summary:     'Scan every configured cloud account in parallel',
+      description: 'Fans out to `scanAWS` / `scanAzure` / `scanGCP` for every enabled account configured at `/integrations/cloud`. Bootstrap runs once at the end; cleanup is per-provider. The single response covers all three clouds with per-account breakdowns under `results.<provider>[]`.',
+      response: {
+        200: { type: 'object', additionalProperties: true, properties: {
+          duration: { type: 'integer' }, total: { type: 'integer' },
+          providers:   { type: 'array', items: { type: 'string' } },
+          results:     { type: 'object', additionalProperties: true },
+          errors:      { type: 'object', additionalProperties: true },
+          stale:       { type: 'object', additionalProperties: true },
+          bootstrap:   { type: ['object', 'null'], additionalProperties: true },
+          completedAt: { type: 'string', format: 'date-time' },
+        } },
+      },
+    },
+  }, async (req, reply) => {
     const startedAt  = Date.now()
     const scanEpoch  = startedAt
     const accounts   = await Promise.all([
@@ -1406,6 +670,11 @@ export default async function discoveryRoutes(fastify) {
     if (!accounts.length) {
       return reply.badRequest('No cloud accounts configured. Add accounts via Integrations first.')
     }
+
+    // One episode spans the whole scan+enrich+bootstrap pipeline so edges
+    // produced by any stage share a single provenance id.
+    const episode = await startEpisode(fastify.neo4j, 'discovery.scan.all').catch(() => null)
+    const episodeId = episode?.uuid || null
 
     const results    = {}
     const errors     = {}
@@ -1430,7 +699,7 @@ export default async function discoveryRoutes(fastify) {
           if (cfg.serviceAccount) { try { creds = JSON.parse(cfg.serviceAccount) } catch {} }
           stats = await scanGCP({ credentials: creds, projectId: cfg.projectId, write, log: fastify.log, scanEpoch })
         }
-        const total = stats ? Object.entries(stats).filter(([k]) => !['errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0) : 0
+        const total = stats ? Object.entries(stats).filter(([k]) => !['edges','errors','skipped','scanEpoch'].includes(k)).reduce((s,[,v])=>s+v,0) : 0
         grandTotal += total
         await updateScanResult(account.id, 'success', total, null)
         if (!results[prov]) results[prov] = []
@@ -1444,51 +713,69 @@ export default async function discoveryRoutes(fastify) {
 
     await Promise.allSettled(scanJobs)
 
-    // Cleanup stale nodes for each scanned provider
+    // Cleanup stale nodes for each scanned provider. Aggregate the per-
+    // account breakdowns into a single { totalNodes, errors } shape so
+    // cleanupStaleNodes' errored-scan guard can decide whether the
+    // provider's scan was "all-error, zero-node" — which is the unsafe
+    // case that would mark every existing node stale.
     const stale = {}
     for (const prov of providers) {
-      stale[prov] = await cleanupStaleNodes(write, query, fastify.log, prov, scanEpoch)
-    }
-
-    // Auto-enrich Azure structural relationships if Azure was scanned
-    let enrichment = null
-    if (providers.has('azure')) {
-      try {
-        const azureAccount = accounts.find(a => a.provider === 'azure')
-        if (azureAccount) {
-          const cfg = azureAccount.config || {}
-          const cred = await azureCredential(cfg)
-          const subId = cfg.subscriptionId
-          if (cred && subId) {
-            enrichment = await enrichAzureRelationships({
-              cred, subId, write, query, log: fastify.log,
-              layers: ['resource-graph'],
-              autoLink: false,
-            })
+      const accountStats = (results[prov] || []).map(r => r.breakdown).filter(Boolean)
+      const aggregated = accountStats.reduce(
+        (acc, s) => {
+          for (const [k, v] of Object.entries(s)) {
+            if (['edges', 'errors', 'skipped', 'scanEpoch'].includes(k)) continue
+            if (typeof v === 'number') acc[k] = (acc[k] || 0) + v
           }
-        }
-      } catch (err) {
-        fastify.log.warn(`[Auto-enrich] ${err.message}`)
-      }
+          if (Array.isArray(s.errors)) acc.errors.push(...s.errors)
+          return acc
+        },
+        { errors: [] },
+      )
+      // Failed scans (in `errors[prov]`) also count toward the
+      // "errored-scan" signal — surface them to the guard.
+      for (const e of (errors[prov] || [])) aggregated.errors.push(`${e.account}: ${e.error}`)
+      stale[prov] = await cleanupStaleNodes(write, query, fastify.log, prov, scanEpoch, aggregated)
     }
 
-    // Auto-bootstrap: create applications and link unmapped resources
+    // Auto-bootstrap: create applications and link unmapped resources.
+    // Bootstrap shares the parent scan's episodeId so every component-mapping
+    // edge it writes is traceable to this scan run.
     let bootstrap = null
     try {
-      bootstrap = await bootstrapDiscovery(fastify)
+      bootstrap = await bootstrapDiscovery(fastify, { episodeId })
     } catch (err) {
       fastify.log.warn(`[Auto-bootstrap] ${err.message}`)
     }
 
     const duration = Date.now() - startedAt
-    audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
-      { accounts: accounts.length, grandTotal, duration, results, errors })
-    return { total: grandTotal, duration, accounts: accounts.length, results, errors, stale, enrichment, bootstrap, completedAt: new Date().toISOString() }
+    req.audit(actor(req), 'scan', 'CloudAccount', 'all', 'All Providers',
+      { accounts: accounts.length, grandTotal, duration, results, errors, episodeId }).catch(() => {})
+
+    // Tell the CMDB assessment scheduler that fresh data has landed. The
+    // scheduler picks this up on its next tick (or immediately, since the
+    // worker tick is cheap). No-op if the plugin isn't decorated.
+    fastify.cmdbAssessment?.markDirty?.().catch(() => {})
+
+    const outcome = Object.keys(errors).length ? 'partial' : 'ok'
+    await finishEpisode(fastify.neo4j, episode, outcome, {
+      accounts:   accounts.length,
+      grandTotal,
+      durationMs: duration,
+    }).catch(() => {})
+
+    return { episodeId, total: grandTotal, duration, accounts: accounts.length, results, errors, stale, bootstrap, completedAt: new Date().toISOString() }
   })
 
   // ── GET /discovery/schedule ─────────────────────────────────────────────
   // Returns the current auto-discovery schedule configuration
-  fastify.get('/schedule', async (req, reply) => {
+  fastify.get('/schedule', {
+    schema: {
+      summary:     'Current discovery scheduler state',
+      description: 'Returns the cron-style schedule plus the last-run / next-run timestamps. The scheduler runs every enabled provider in parallel.',
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (!fastify.pg?.pool) return {
       scope: 'global', enabled: false, interval_mins: 15,
       last_run_at: null, last_run_status: null, last_run_total: 0, next_run_at: null
@@ -1535,7 +822,17 @@ export default async function discoveryRoutes(fastify) {
   // ── PUT /discovery/schedule ──────────────────────────────────────────────
   // Update schedule config — enabled flag and/or interval_mins
   // interval_mins: minimum 5 (5 minutes), maximum 1440 (24 hours)
-  fastify.put('/schedule', async (req, reply) => {
+  fastify.put('/schedule', {
+    schema: {
+      summary:     'Set the discovery scheduler',
+      description: 'Replaces the schedule with `{ enabled, cron }`. The cron string is standard 5-field; consult any cron reference. Setting `enabled: false` disables future runs without deleting the config.',
+      body: { type: 'object', additionalProperties: true, properties: {
+        enabled: { type: 'boolean' },
+        cron:    { type: 'string', example: '0 */6 * * *' },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { enabled, interval_mins, hours, minutes, auto_create, auto_create_min_score } = req.body || {}
 
     // Accept either interval_mins directly or hours+minutes breakdown
@@ -1604,8 +901,8 @@ export default async function discoveryRoutes(fastify) {
         await fastify.scheduler.restart()
       }
 
-      audit(actor(req), 'update', 'DiscoverySchedule', 'global', 'Discovery Schedule',
-        { enabled, interval_mins: intervalMins })
+      req.audit(actor(req), 'update', 'DiscoverySchedule', 'global', 'Discovery Schedule',
+        { enabled, interval_mins: intervalMins }).catch(() => {})
 
       return schedule || { scope: 'global', enabled: enabled ?? false, interval_mins: intervalMins ?? 15 }
     } catch (err) {
@@ -1616,7 +913,13 @@ export default async function discoveryRoutes(fastify) {
 
   // ── POST /discovery/schedule/run-now ────────────────────────────────────
   // Manually trigger an immediate scan outside the schedule
-  fastify.post('/schedule/run-now', async (req, reply) => {
+  fastify.post('/schedule/run-now', {
+    schema: {
+      summary:     'Trigger the scheduled scan immediately',
+      description: 'Equivalent to `POST /discovery/scan/all` but uses the same code path the scheduler does (so it picks up the same accounts + flags).',
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     if (fastify.scheduler?.runNow) {
       // Fire and forget — don't await so the response returns immediately
       fastify.scheduler.runNow().catch(err =>
@@ -1636,9 +939,29 @@ export default async function discoveryRoutes(fastify) {
 
 
   // ── GET /discovery/debug/:id — inspect raw Neo4j data for a resource ──
-  // Use this to verify tags and raw are being stored correctly.
-  // curl http://localhost:3000/discovery/debug/INFRA_ID
-  fastify.get('/debug/:id', async (req, reply) => {
+  // Returns full raw cloud-API responses + every `:CONNECTS_TO` edge with
+  // properties. Useful for understanding scanner / autolink decisions, but
+  // it leaks tag values that may carry PII (`appcloud:owner`, slack-channel
+  // tags, etc.) and the truncated `raw` blob may carry sensitive metadata.
+  //
+  // Gated behind admin-tier auth AND APPCLOUD_DEBUG=1 so it can't be hit by
+  // a regular API key in production. In dev (NODE_ENV !== 'production') the
+  // env-flag gate is relaxed since debugging is the whole point there.
+  fastify.get('/debug/:id', {
+    config: { scope: 'admin' },
+    schema: {
+      summary:     'Per-resource debug dump (admin + APPCLOUD_DEBUG only)',
+      description: 'Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call. **Admin-tier only**, and in production must also have `APPCLOUD_DEBUG=1` set.',
+      params:      IdParamSchema,
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
+    if (process.env.NODE_ENV === 'production' && process.env.APPCLOUD_DEBUG !== '1') {
+      return reply.code(403).send({
+        error:   'Forbidden',
+        message: 'debug endpoint disabled in production — set APPCLOUD_DEBUG=1 to enable temporarily',
+      })
+    }
     const records = await query(
       `MATCH (i:Infra) WHERE i.id = $id OR i.cloud_id = $id RETURN i LIMIT 1`,
       { id: req.params.id }
@@ -1702,7 +1025,13 @@ export default async function discoveryRoutes(fastify) {
   //   Threshold for "high confidence" auto-suggest: >= 60
   //   Threshold for "possible match" display:       >= 25
 
-  fastify.get('/suggest', async (req) => {
+  fastify.get('/suggest', {
+    schema: {
+      summary:     'Pull the suggest engine\'s current output',
+      description: 'For every unmapped Infra, returns up to 5 ranked Component candidates with rule names + scores. Drives the mapping-suggestions UI.',
+      response: { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req) => {
     const { minScore = 25, limit = 100, strategy } = req.query
 
     // When a high-fidelity strategy is active, demote name-based heuristic scores
@@ -1719,7 +1048,7 @@ export default async function discoveryRoutes(fastify) {
     const infraRecords = await query(`
       MATCH (i:Infra)
       WHERE i.source = 'discovery'
-        AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+        AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       RETURN i
       ORDER BY i.provider, i.resource_type, i.name
       LIMIT toInteger($limit)
@@ -1750,6 +1079,28 @@ export default async function discoveryRoutes(fastify) {
           const infra = match.infra || {}
           const score = parseInt(match.score || 0)
           const confidence = score >= 70 ? 'high' : score >= 45 ? 'medium' : 'low'
+
+          // Extract component name from tags (normalised) — prefer tag over infra name
+          const matchTags = match.infra?.tags || {}
+          let compFromTag = ''
+          for (const [k, v] of Object.entries(matchTags)) {
+            const nk = k.toLowerCase().replace(/^appcloud[:-]/, '').replace(/^app[:-]/, '').replace(/-/g, '_').trim()
+            if ((nk === 'component' || nk === 'service' || nk === 'component_name') && v) {
+              compFromTag = String(v); break
+            }
+          }
+          // Extract owner, env, tier from tags
+          let tagOwner = '', tagEnv = '', tagTier = ''
+          for (const [k, v] of Object.entries(matchTags)) {
+            const nk = k.toLowerCase().replace(/^appcloud[:-]/, '').replace(/^app[:-]/, '').replace(/-/g, '_').trim()
+            if ((nk === 'owner' || nk === 'team') && v && !tagOwner) tagOwner = String(v)
+            if ((nk === 'env' || nk === 'environment') && v && !tagEnv) tagEnv = String(v)
+            if ((nk === 'tier' || nk === 'criticality') && v && !tagTier) tagTier = String(v)
+          }
+
+          const compName = compFromTag || infra.name || 'component'
+          const appName = appSuggestion.application?.name || infra.name || 'default-app'
+
           suggestions.push({
             infra,
             suggestions: [{
@@ -1757,14 +1108,17 @@ export default async function discoveryRoutes(fastify) {
               componentId: null,
               componentName: null,
               applicationId: null,
-              applicationName: appSuggestion.application?.name || 'unknown',
+              applicationName: appName,
               score,
               confidence,
               reasons: match.reasons || [],
               action: 'create_application',
-              actionLabel: `Create application "${appSuggestion.application?.name || 'app'}" with component "${infra.name || 'component'}"`,
-              newAppName: appSuggestion.application?.name || infra.name || 'default-app',
-              newCompName: infra.name || 'component',
+              actionLabel: `Create application "${appName}" with component "${compName}"`,
+              newAppName: appName,
+              newCompName: compName,
+              suggestedTier:  tagTier ? parseInt(tagTier) || 1 : 1,
+              suggestedEnv:   tagEnv  || 'production',
+              suggestedOwner: tagOwner || '',
             }],
             topScore: score,
             topConfidence: confidence,
@@ -1802,7 +1156,7 @@ export default async function discoveryRoutes(fastify) {
     // Used for Rule: "other resources in the same RG are already mapped → likely same component"
     const rgMappedIndex = {}
     const mappedRgRows = await query(`
-      MATCH (c:Component)-[:DEPLOYED_ON]->(i:Infra)
+      MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       WHERE i.provider = 'azure' AND i.cloud_id IS NOT NULL
       MATCH (a:Application)-[:CONTAINS]->(c)
       RETURN i.raw AS raw, c.id AS compId, c.name AS compName,
@@ -1826,7 +1180,7 @@ export default async function discoveryRoutes(fastify) {
     // App Services sharing the same App Service Plan very likely belong together
     const planMappedIndex = {}
     const mappedPlanRows = await query(`
-      MATCH (c:Component)-[:DEPLOYED_ON]->(i:Infra)
+      MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
       WHERE i.resource_type = 'app_service' AND i.raw IS NOT NULL
       MATCH (a:Application)-[:CONTAINS]->(c)
       RETURN i.raw AS raw, c.id AS compId, c.name AS compName,
@@ -1903,23 +1257,28 @@ export default async function discoveryRoutes(fastify) {
       const isPlatformUntagged = PLATFORM_TYPES.has(infraType) && !tagApp
 
       const TYPE_MAP = {
-        ec2_instance:    ['api','worker','app','server'],
-        function:        ['api','worker','function','lambda'],
-        rds_instance:    ['db','database','datastore'],
-        app_service:     ['api','web','ui','frontend'],
-        vm:              ['api','worker','app','server'],
-        compute_instance:['api','worker','app','server'],
-        cloud_run:       ['api','worker','service'],
-        cloud_function:  ['api','worker','function'],
-        app_insights:    ['monitoring','insights','observability','telemetry'],
-        storage_account: ['storage','assets','datastore','blob'],
-        service_bus:     ['queue','eventbus','messaging','bus'],
-        key_vault:       ['secrets','security','vault'],
-        s3_bucket:       ['storage','assets','datastore'],
-        dynamodb:        ['db','database','datastore'],
-        eks_cluster:     ['kubernetes','k8s','cluster'],
-        aks_cluster:     ['kubernetes','k8s','cluster'],
-        gke_cluster:     ['kubernetes','k8s','cluster'],
+        ec2_instance:       ['api','worker','app','server'],
+        function:           ['api','worker','function','lambda'],
+        function_app:       ['api','worker','function','lambda'],
+        rds_instance:       ['db','database','datastore'],
+        app_service:        ['api','web','ui','frontend'],
+        vm:                 ['api','worker','app','server'],
+        compute_instance:   ['api','worker','app','server'],
+        cloud_run:          ['api','worker','service'],
+        cloud_function:     ['api','worker','function'],
+        app_insights:       ['monitoring','insights','observability','telemetry'],
+        storage_account:    ['storage','assets','datastore','blob'],
+        service_bus:        ['queue','eventbus','messaging','bus'],
+        key_vault:          ['secrets','security','vault'],
+        s3_bucket:          ['storage','assets','datastore'],
+        dynamodb:           ['db','database','datastore'],
+        eks_cluster:        ['kubernetes','k8s','cluster'],
+        aks_cluster:        ['kubernetes','k8s','cluster'],
+        gke_cluster:        ['kubernetes','k8s','cluster'],
+        cosmos_db:          ['db','database','datastore'],
+        container_registry: ['registry','container','docker'],
+        log_analytics:      ['monitoring','observability','logging'],
+        static_web_app:     ['web','frontend','static'],
       }
       const likelyCompTypes = TYPE_MAP[infraType] || []
 
@@ -2211,10 +1570,19 @@ export default async function discoveryRoutes(fastify) {
   })
 
   // ── POST /discovery/suggest/apply ────────────────────────────────────────
-  // Applies confirmed mapping suggestions — creates DEPLOYED_ON relationships.
+  // Applies confirmed mapping suggestions — creates :CONNECTS_TO {via:'component-mapping'} edges.
   // Body: { mappings: [{ infraId, componentId }] }
 
-  fastify.post('/suggest/apply', async (req, reply) => {
+  fastify.post('/suggest/apply', {
+    schema: {
+      summary:     'Apply a batch of confirmed mappings (legacy single-action endpoint)',
+      description: 'Each mapping creates a `:CONNECTS_TO {via:"component-mapping", source:"auto-mapped"}` edge. For mixed-action batches (link + create-component + create-application), use `/discovery/suggest/apply-all`.',
+      body: { type: 'object', required: ['mappings'], additionalProperties: true, properties: {
+        mappings: { type: 'array', items: { type: 'object', required: ['infraId', 'componentId'], additionalProperties: true } },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { mappings = [] } = req.body || {}
     if (!mappings.length) return reply.badRequest('mappings array is required')
 
@@ -2225,14 +1593,18 @@ export default async function discoveryRoutes(fastify) {
       try {
         const r = await write(`
           MATCH (c:Component {id: $componentId}), (i:Infra {id: $infraId})
-          MERGE (c)-[rel:DEPLOYED_ON]->(i)
-          SET rel.source = 'auto-mapped', rel.mappedAt = datetime()
+          MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+          ON CREATE SET rel.discovered_at = datetime(),
+                        rel.source        = 'auto-mapped',
+                        rel.confidence    = 80,
+                        rel.evidence      = 'manual mapping confirmation'
+          SET rel.last_seen = datetime()
           RETURN c.name AS comp, i.name AS infra
         `, { componentId, infraId })
         if (r.length) {
           results.applied++
-          audit(actor(req), 'create', 'Infra', infraId,
-            r[0].get('infra'), { componentId, source: 'auto-mapped' })
+          req.audit(actor(req), 'create', 'Infra', infraId,
+            r[0].get('infra'), { componentId, source: 'auto-mapped' }).catch(() => {})
         } else {
           results.errors.push(`${infraId}: component or infra not found`)
         }
@@ -2246,7 +1618,7 @@ export default async function discoveryRoutes(fastify) {
 
   // ── POST /discovery/suggest/apply-all ────────────────────────────────────
   // Handles all action types from the suggest engine in a single call:
-  //   link_component     — MERGE DEPLOYED_ON between existing component + infra
+  //   link_component     — MERGE :CONNECTS_TO {via:'component-mapping'} between existing component + infra
   //   create_component   — create Component under existing Application + link infra
   //   create_application — create Application + Component + link infra
   //
@@ -2254,7 +1626,14 @@ export default async function discoveryRoutes(fastify) {
   //                     newAppName?, newCompName?, suggestedTier?,
   //                     suggestedEnv?, suggestedOwner? }] }
 
-  fastify.post('/suggest/apply-all', async (req, reply) => {
+  fastify.post('/suggest/apply-all', {
+    schema: {
+      summary:     'Apply a mixed-action batch from the suggest engine',
+      description: 'Three action shapes share one endpoint:\n- `link_component` — link existing Component to existing Infra\n- `create_component` — create a Component under an existing Application + link\n- `create_application` — create Application + Component(s) + link\n\nPhase 2 also runs after the batch: tag-based auto-link sweeps any still-unmapped Infra against the newly-created components.',
+      body:     SuggestApplyAllBodySchema,
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { actions = [] } = req.body || {}
     if (!actions.length) return reply.badRequest('actions array is required')
 
@@ -2273,14 +1652,18 @@ export default async function discoveryRoutes(fastify) {
           if (!action.componentId) { results.skipped++; continue }
           const r = await write(`
             MATCH (c:Component {id: $componentId}), (i:Infra {id: $infraId})
-            MERGE (c)-[rel:DEPLOYED_ON]->(i)
-            SET rel.source = 'auto-mapped', rel.mappedAt = datetime()
+            MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+            ON CREATE SET rel.discovered_at = datetime(),
+                          rel.source        = 'auto-mapped',
+                          rel.confidence    = 80,
+                          rel.evidence      = 'link_component action'
+            SET rel.last_seen = datetime()
             RETURN c.name AS comp, i.name AS infra
           `, { componentId: action.componentId, infraId })
           if (r.length) {
             results.linked++
-            audit(actor(req), 'create', 'Infra', infraId, r[0].get('infra'),
-              { componentId: action.componentId, source: 'auto-mapped' })
+            req.audit(actor(req), 'create', 'Infra', infraId, r[0].get('infra'),
+              { componentId: action.componentId, source: 'auto-mapped' }).catch(() => {})
           }
 
         } else if (action.action === 'create_component') {
@@ -2297,8 +1680,12 @@ export default async function discoveryRoutes(fastify) {
               createdAt:   datetime()
             })
             MERGE (a)-[:CONTAINS]->(c)
-            MERGE (c)-[rel:DEPLOYED_ON]->(i)
-            SET rel.source = 'auto-created', rel.mappedAt = datetime()
+            MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+            ON CREATE SET rel.discovered_at = datetime(),
+                          rel.source        = 'auto-created',
+                          rel.confidence    = 80,
+                          rel.evidence      = 'create_component action'
+            SET rel.last_seen = datetime()
             RETURN c.id AS compId, c.name AS comp, i.name AS infra, a.name AS app
           `, {
             appId:   action.applicationId,
@@ -2310,7 +1697,7 @@ export default async function discoveryRoutes(fastify) {
           if (r.length) {
             results.componentsCreated++
             results.linked++
-            audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
+            req.audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
               { applicationId: action.applicationId, source: 'auto-created', infraId })
           }
 
@@ -2350,10 +1737,12 @@ export default async function discoveryRoutes(fastify) {
                     c.type        = $compType,
                     c.description = $desc,
                     c.createdAt   = datetime()
-                MERGE (c)-[rel:DEPLOYED_ON]->(i)
+                MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
                   ON CREATE SET
-                    rel.source    = 'auto-created',
-                    rel.mappedAt  = datetime()
+                    rel.discovered_at = datetime(),
+                    rel.source        = 'auto-created',
+                    rel.confidence    = 80,
+                    rel.evidence      = 'create_application action'
                 RETURN a.id AS appId, c.id AS compId,
                        a.name AS app, c.name AS comp, i.name AS infra,
                        (a.createdAt = datetime()) AS appWasNew
@@ -2372,9 +1761,9 @@ export default async function discoveryRoutes(fastify) {
                 results.applicationsCreated++
                 results.componentsCreated++
                 results.linked++
-                audit(actor(req), 'create', 'Application', r[0].get('appId'), appName,
+                req.audit(actor(req), 'create', 'Application', r[0].get('appId'), appName,
                   { source: 'auto-created', infraId })
-                audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
+                req.audit(actor(req), 'create', 'Component', r[0].get('compId'), compName,
                   { applicationId: r[0].get('appId'), source: 'auto-created', infraId })
               }
             } catch (err) {
@@ -2386,6 +1775,108 @@ export default async function discoveryRoutes(fastify) {
         results.errors.push(`${action.infraId}: ${err.message}`)
       }
     }
+
+    // ── Phase 2: Tag-based auto-link for remaining unmapped resources ────────
+    // After Phase 1 created applications and components, sweep all still-unmapped
+    // infra that has appcloud-app / appcloud-component tags and link them to the
+    // matching Application → Component. Creates components if they don't exist.
+    try {
+      const stillUnmapped = await query(`
+        MATCH (i:Infra)
+        WHERE i.source = 'discovery'
+          AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
+        RETURN i
+      `)
+
+      if (stillUnmapped.length) {
+        // Load all apps + components for matching
+        const allApps = await query(`
+          MATCH (a:Application)
+          OPTIONAL MATCH (a)-[:CONTAINS]->(c:Component)
+          RETURN a.id AS appId, a.name AS appName,
+                 collect(DISTINCT { id: c.id, name: c.name }) AS components
+        `)
+        const appLookup = {}  // lowercase name → { appId, appName, components: [{ id, name }] }
+        for (const r of allApps) {
+          const name = (r.get('appName') || '').toLowerCase()
+          appLookup[name] = {
+            appId:      r.get('appId'),
+            appName:    r.get('appName'),
+            components: (r.get('components') || []).filter(c => c.id),
+          }
+        }
+
+        results.phase2Linked = 0
+        results.phase2ComponentsCreated = 0
+
+        for (const ir of stillUnmapped) {
+          const i = ir.get('i').properties
+          let tags = {}
+          try { tags = typeof i.tags === 'string' ? JSON.parse(i.tags) : i.tags || {} } catch {}
+
+          // Normalize tags
+          const nt = {}
+          for (const [k, v] of Object.entries(tags)) {
+            const nk = k.toLowerCase().replace(/^appcloud[:-]/, '').replace(/^app[:-]/, '').replace(/-/g, '_').trim()
+            if (!nt[nk]) nt[nk] = String(v || '').trim()
+          }
+
+          const tagApp  = nt.app || nt.application || nt.app_name || ''
+          const tagComp = nt.component || nt.service || nt.component_name || ''
+          if (!tagApp) continue
+
+          const appEntry = appLookup[tagApp.toLowerCase()]
+          if (!appEntry) continue
+
+          const { appId, appName } = appEntry
+          const existingComp = tagComp
+            ? appEntry.components.find(c => c.name.toLowerCase() === tagComp.toLowerCase())
+            : null
+
+          try {
+            if (existingComp) {
+              // Component exists — just link
+              await write(`
+                MATCH (c:Component {id: $compId}), (i:Infra {id: $infraId})
+                MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+                ON CREATE SET rel.discovered_at = datetime(),
+                              rel.source        = 'auto-mapped-phase2',
+                              rel.confidence    = 75,
+                              rel.evidence      = 'phase2 tag-based auto-link'
+                SET rel.last_seen = datetime()
+              `, { compId: existingComp.id, infraId: i.id })
+              results.phase2Linked++
+            } else if (tagComp) {
+              // Component doesn't exist — create under app + link
+              const r = await write(`
+                MATCH (a:Application {id: $appId}), (i:Infra {id: $infraId})
+                MERGE (a)-[:CONTAINS]->(c:Component {name: $compName})
+                ON CREATE SET c.id = randomUUID(), c.type = 'service', c.createdAt = datetime()
+                MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+                ON CREATE SET rel.discovered_at = datetime(),
+                              rel.source        = 'auto-mapped-phase2',
+                              rel.confidence    = 75,
+                              rel.evidence      = 'phase2 tag-based auto-link (new component)'
+                SET rel.last_seen = datetime()
+                RETURN c.id AS compId
+              `, { appId, infraId: i.id, compName: tagComp })
+              if (r.length) {
+                results.phase2ComponentsCreated++
+                results.phase2Linked++
+                // Update local lookup so subsequent resources can find this component
+                const newCompId = r[0].get('compId')
+                appEntry.components.push({ id: newCompId, name: tagComp })
+              }
+            }
+          } catch (err) {
+            results.errors.push(`phase2 ${i.id}: ${err.message}`)
+          }
+        }
+      }
+    } catch (err) {
+      results.errors.push(`phase2: ${err.message}`)
+    }
+
     return results
   })
 
@@ -2393,7 +1884,14 @@ export default async function discoveryRoutes(fastify) {
   // Re-fetches tags and metadata for a single Infra node from the cloud API.
   // This picks up tags that were added manually after the last scan.
 
-  fastify.get('/resources/:id/refresh', async (req, reply) => {
+  fastify.get('/resources/:id/refresh', {
+    schema: {
+      summary:     'Refresh tags for a single Infra (currently a hint)',
+      description: 'Per-resource refresh is not yet implemented — the response is a `hint` instructing the caller to run a full provider scan. Reserved for a future targeted fetch.',
+      params:      IdParamSchema,
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const records = await query(
       `MATCH (i:Infra {id: $id}) RETURN i`, { id: req.params.id }
     )
@@ -2429,14 +1927,35 @@ export default async function discoveryRoutes(fastify) {
   })
 
   // ── GET /discovery/resources — all discovered Infra nodes ─────────────
-  fastify.get('/resources', async (req) => {
-    const { provider, resourceType, limit = 200 } = req.query
+  fastify.get('/resources', {
+    schema: {
+      summary:     'List discovered Infra (with mapping status)',
+      description: 'Filterable by `provider`, `resourceType`, and `mapped` (true=only owned by a Component, false=only orphans). Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:"component-mapping"}`.',
+      querystring: { type: 'object', properties: {
+        provider:     { type: 'string', enum: ['aws', 'azure', 'gcp'] },
+        resourceType: { type: 'string' },
+        mapped:       { type: 'boolean', description: 'Filter by mapping status. Omit for both. true = only resources with at least one Component owner; false = only orphans (the Mapping agent\'s Pass 2 universe).' },
+        limit:        { type: ['integer', 'string'], default: 200 },
+      } },
+      response: { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req) => {
+    const { provider, resourceType, mapped, limit = 200 } = req.query
+    // Pre-filter the MATCH on mapping status using a Cypher EXISTS subquery.
+    // Doing it here (vs. post-filter after OPTIONAL MATCH + collect) keeps
+    // the LIMIT honest — otherwise an unmapped=false caller would silently
+    // truncate the unmapped set when the first 200 rows happen to be mapped.
+    const mappedClause =
+      mapped === true  ? 'AND EXISTS { (i)<-[:CONNECTS_TO {via: \'component-mapping\'}]-(:Component) }' :
+      mapped === false ? 'AND NOT EXISTS { (i)<-[:CONNECTS_TO {via: \'component-mapping\'}]-(:Component) }' :
+      ''
     const records = await query(`
       MATCH (i:Infra)
       WHERE i.source = 'discovery'
         ${provider     ? 'AND i.provider      = $provider'     : ''}
         ${resourceType ? 'AND i.resource_type = $resourceType' : ''}
-      OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+        ${mappedClause}
+      OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
       OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
       RETURN i,
              collect(DISTINCT c.name) AS components,
@@ -2465,12 +1984,23 @@ export default async function discoveryRoutes(fastify) {
   })
 
   // ── GET /discovery/summary — counts by provider + resource type ────────
-  fastify.get('/summary', async () => {
+  fastify.get('/summary', {
+    schema: {
+      summary:     'Discovery summary — counts by provider and type',
+      description: 'For each (provider, resource_type) pair, returns total + mapped count. Drives the discovery dashboard.',
+      response: { 200: { type: 'object', additionalProperties: true, properties: {
+        total:       { type: 'integer' },
+        totalMapped: { type: 'integer' },
+        unmapped:    { type: 'integer' },
+        byProvider:  { type: 'object', additionalProperties: true },
+      } } },
+    },
+  }, async () => {
     const records = await query(`
       MATCH (i:Infra) WHERE i.source = 'discovery'
       RETURN i.provider AS provider, i.resource_type AS type,
              count(i) AS cnt,
-             count(CASE WHEN (:Component)-[:DEPLOYED_ON]->(i) THEN 1 END) AS mapped
+             count(CASE WHEN (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i) THEN 1 END) AS mapped
       ORDER BY provider, type
     `)
     const byProvider = {}
@@ -2491,22 +2021,44 @@ export default async function discoveryRoutes(fastify) {
   })
 
   // ── POST /discovery/link — link an Infra node to a Component ─────────
-  fastify.post('/link', async (req, reply) => {
+  fastify.post('/link', {
+    schema: {
+      summary:     'Manually link an Infra to a Component',
+      description: 'Idempotent MERGE of `:CONNECTS_TO {via:"component-mapping", source:"manual-link", confidence:100}`. Use this when the suggest engine missed a mapping.',
+      body: { type: 'object', required: ['infraId', 'componentId'], additionalProperties: true, properties: {
+        infraId:     { type: 'string', format: 'uuid' },
+        componentId: { type: 'string', format: 'uuid' },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true }, 400: StandardErrorResponses[400] },
+    },
+  }, async (req, reply) => {
     const { infraId, componentId } = req.body
     if (!infraId || !componentId) return reply.badRequest('infraId and componentId required')
     await write(`
       MATCH (i:Infra {id: $infraId}), (c:Component {id: $componentId})
-      MERGE (c)-[:DEPLOYED_ON]->(i)
+      MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+      ON CREATE SET rel.discovered_at = datetime(),
+                    rel.source        = 'manual-link',
+                    rel.confidence    = 100,
+                    rel.evidence      = 'manual link via /discovery/link'
+      ON MATCH  SET rel.last_seen = datetime()
     `, { infraId, componentId })
-    audit(actor(req), 'link', 'Infra', infraId, infraId, { componentId })
+    req.audit(actor(req), 'link', 'Infra', infraId, infraId, { componentId })
     return { linked: true, infraId, componentId }
   })
 
   // ── DELETE /discovery/resources/:id — remove a discovered resource ────
-  fastify.delete('/resources/:id', async (req, reply) => {
+  fastify.delete('/resources/:id', {
+    schema: {
+      summary:     'Delete a discovered Infra resource',
+      description: 'Refuses (409) when any Component owns the Infra. Unlink first via `DELETE` on the owning Component\'s connection or use `/discovery/resources/bulk-delete` with explicit confirmation.',
+      params:      IdParamSchema,
+      response: { 204: { type: 'null' }, 404: StandardErrorResponses[404], 409: StandardErrorResponses[409] },
+    },
+  }, async (req, reply) => {
     const pre = await query(
       `MATCH (i:Infra {id:$id}) WHERE i.source = 'discovery'
-       OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+       OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
        RETURN i.name AS name, i.provider AS provider,
               count(c) AS linkedComponents`,
       { id: req.params.id }
@@ -2526,7 +2078,7 @@ export default async function discoveryRoutes(fastify) {
       MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery'
       DETACH DELETE i
     `, { id: req.params.id })
-    audit(actor(req), 'delete', 'Infra', req.params.id,
+    req.audit(actor(req), 'delete', 'Infra', req.params.id,
       pre[0]?.get('name') || req.params.id,
       { source: 'discovery', provider: pre[0]?.get('provider') })
     reply.code(204)
@@ -2537,7 +2089,16 @@ export default async function discoveryRoutes(fastify) {
   // Skips any that are linked to components.
   // Body: { ids: [string] }
 
-  fastify.post('/resources/bulk-delete', async (req, reply) => {
+  fastify.post('/resources/bulk-delete', {
+    schema: {
+      summary:     'Delete multiple Infra resources by id',
+      description: 'Per-id behavior matches `DELETE /discovery/resources/:id`: linked Infra is skipped (with reason), unlinked is removed. The response details deleted / skipped / errored.',
+      body: { type: 'object', required: ['ids'], additionalProperties: true, properties: {
+        ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const { ids = [] } = req.body || {}
     if (!ids.length) return reply.badRequest('ids array is required')
 
@@ -2547,7 +2108,7 @@ export default async function discoveryRoutes(fastify) {
       try {
         const pre = await query(
           `MATCH (i:Infra {id:$id}) WHERE i.source = 'discovery'
-           OPTIONAL MATCH (c:Component)-[:DEPLOYED_ON]->(i)
+           OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
            RETURN i.name AS name, count(c) AS linkedComponents`,
           { id }
         )
@@ -2569,7 +2130,7 @@ export default async function discoveryRoutes(fastify) {
           `MATCH (i:Infra {id: $id}) WHERE i.source = 'discovery' DETACH DELETE i`,
           { id }
         )
-        audit(actor(req), 'delete', 'Infra', id, pre[0].get('name'),
+        req.audit(actor(req), 'delete', 'Infra', id, pre[0].get('name'),
           { source: 'bulk-delete' })
         results.deleted++
       } catch (err) {
@@ -2584,7 +2145,13 @@ export default async function discoveryRoutes(fastify) {
   // Accepts optional body { strategy } to record which strategy drove the bootstrap.
   // The bootstrap itself always uses tag/RG/name heuristics — the strategy param
   // is advisory metadata so callers can chain: enrich(strategy) → bootstrap → suggest.
-  fastify.post('/bootstrap', async (req) => {
+  fastify.post('/bootstrap', {
+    schema: {
+      summary:     'Run bootstrap (tag + RG-propagation auto-link) without scanning',
+      description: 'Useful when you\'ve added/edited tags in the cloud and want to re-derive Application/Component mappings without paying for a full scan. Episode-tracked.',
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req) => {
     const { strategy } = req.body || {}
     const result = await bootstrapDiscovery(fastify)
     const strat = strategy ? AZURE_LINKING_STRATEGIES.find(s => s.id === strategy) : null
@@ -2595,7 +2162,13 @@ export default async function discoveryRoutes(fastify) {
   // Returns available Azure linking strategies ranked by priority.
   // The UI can display these so users pick the strategy that matches their
   // environment's permissions and cost tolerance.
-  fastify.get('/linking-strategies', async (req) => {
+  fastify.get('/linking-strategies', {
+    schema: {
+      summary:     'Linking strategy catalog (Azure)',
+      description: 'Returns the available enrichment strategies for Azure (resource-graph / network-watcher / monitor-insights / tagging / azure-arc / name-heuristics) with descriptions, required permissions, and token cost. Drives the strategy selector in `/discovery/enrich/azure`.',
+      response: { 200: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+    },
+  }, async (req) => {
     const { provider = 'azure' } = req.query
     if (provider !== 'azure') {
       return { strategies: [], message: `No linking strategies defined for provider "${provider}" yet.` }
@@ -2617,7 +2190,20 @@ export default async function discoveryRoutes(fastify) {
   //   workspaceId  — (optional) Log Analytics workspace id (required for monitor-insights)
   //   autoLink     — (optional) boolean, default true — run Phase 2 auto-linking
   //   minScore     — (optional) 0-100, default 60 — auto-link confidence threshold
-  fastify.post('/enrich/azure', async (req, reply) => {
+  fastify.post('/enrich/azure', {
+    schema: {
+      summary:     'Run Azure supplement layers (Network Watcher / VM Insights / auto-link)',
+      description: 'Invokes one of the named strategies from `/discovery/linking-strategies` against the configured Azure account. Idempotent — safe to re-run. `monitor-insights` requires a Log Analytics workspace ID; `network-watcher` requires Network Watcher Reader.',
+      body: { type: 'object', additionalProperties: true, properties: {
+        strategy:    { type: 'string', enum: ['resource-graph', 'network-watcher', 'monitor-insights', 'tagging', 'azure-arc', 'name-heuristics'] },
+        accountId:   { type: 'string' },
+        workspaceId: { type: 'string', description: 'Log Analytics workspace resource id (monitor-insights)' },
+        autoLink:    { type: 'boolean', default: true },
+        minScore:    { type: 'integer', minimum: 0, maximum: 100, default: 60 },
+      } },
+      response: { 200: { type: 'object', additionalProperties: true } },
+    },
+  }, async (req, reply) => {
     const {
       strategy    = 'resource-graph',
       accountId,
@@ -2656,7 +2242,7 @@ export default async function discoveryRoutes(fastify) {
       // Arc resources are surfaced through Resource Graph with special types
       const accounts = await loadAccounts('azure')
       const target   = accountId ? accounts.find(a => a.id === accountId || a.name === accountId) : accounts[0]
-      if (!target) return reply.badRequest('No Azure account configured. Add one via POST /discovery/accounts first.')
+      if (!target) return reply.badRequest('No Azure account configured. Add one via POST /integrations/cloud first.')
 
       const cfg  = target.config || {}
       const cred = await azureCredential(cfg)
@@ -2705,7 +2291,7 @@ export default async function discoveryRoutes(fastify) {
         }
 
         // Then enrich structural relationships
-        const enrichResult = await enrichAzureRelationships({
+        const enrichResult = await supplementAzureDiscovery({
           cred, subId, write, query, log: fastify.log,
           layers: strat.layers, autoLink, minScore,
         })
@@ -2723,7 +2309,7 @@ export default async function discoveryRoutes(fastify) {
     // Structural strategies: resource-graph, network-watcher, monitor-insights
     const accounts = await loadAccounts('azure')
     const target   = accountId ? accounts.find(a => a.id === accountId || a.name === accountId) : accounts[0]
-    if (!target) return reply.badRequest('No Azure account configured. Add one via POST /discovery/accounts first.')
+    if (!target) return reply.badRequest('No Azure account configured. Add one via POST /integrations/cloud first.')
 
     const cfg   = target.config || {}
     const cred  = await azureCredential(cfg)
@@ -2734,7 +2320,7 @@ export default async function discoveryRoutes(fastify) {
     }
 
     try {
-      const result = await enrichAzureRelationships({
+      const result = await supplementAzureDiscovery({
         cred,
         subId,
         write,
@@ -2746,7 +2332,7 @@ export default async function discoveryRoutes(fastify) {
         minScore,
       })
 
-      audit(actor(req), 'enrich', 'CloudAccount', target.id, target.name, {
+      req.audit(actor(req), 'enrich', 'CloudAccount', target.id, target.name, {
         strategy, layers: strat.layers, ...result,
       })
 

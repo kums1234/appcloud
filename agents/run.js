@@ -4,7 +4,6 @@ import { validateConfig } from './lib/config.js';
 import { runPipeline } from './orchestrator.js';
 import { runDiscoveryAgent } from './agents/discovery.js';
 import { runMappingAgent } from './agents/mapping.js';
-import { runOnboardingAgent } from './agents/onboarding.js';
 import { runBlastRadiusAgent } from './agents/blast-radius.js';
 
 const HELP = `
@@ -13,19 +12,24 @@ AppCloud Multi-Agent Pipeline
 Usage: node run.js <command> [options]
 
 Commands:
-  pipeline       Run full pipeline: Discovery -> Mapping -> Onboarding -> Blast Radius
+  pipeline       Run full pipeline: Discovery -> Mapping -> Blast Radius
   discover       Run Discovery Agent only (scan cloud accounts)
-  map            Run Mapping Agent only (link infra to components)
-  onboard        Run Onboarding Agent only (create apps for unmapped infra)
+  map            Run Mapping Agent only (two-pass: link existing,
+                  then propose new apps/components for residual unmapped)
   blast-radius   Run Blast Radius Agent only (analyze change impact)
+  chat           Open the AI Assistant interactive chat (POST /ai/chat)
 
 Options:
-  --change-id <id>   For blast-radius: analyze a specific change
+  --subject "<question>"  For blast-radius: free-text question, e.g.
+                          "what happens if I change prod-payment-rds?"
 
 Examples:
   node run.js pipeline
   node run.js discover
-  node run.js blast-radius --change-id abc-123
+  node run.js map
+  node run.js blast-radius
+  node run.js blast-radius --subject "what breaks if portal-api is restarted?"
+  node run.js chat
 `;
 
 const [command, ...args] = process.argv.slice(2);
@@ -52,16 +56,19 @@ async function main() {
       await runMappingAgent();
       break;
 
-    case 'onboard':
-      await runOnboardingAgent();
-      break;
-
     case 'blast-radius': {
-      const changeIdIdx = args.indexOf('--change-id');
-      const changeId = changeIdIdx !== -1 ? args[changeIdIdx + 1] : null;
-      await runBlastRadiusAgent('', changeId);
+      const subjectIdx = args.indexOf('--subject');
+      const subject = subjectIdx !== -1 ? args[subjectIdx + 1] : '';
+      await runBlastRadiusAgent('', subject);
       break;
     }
+
+    case 'chat':
+      // Re-exec into the chat REPL — readline owns stdin and we don't want
+      // run.js's switch returning to clean state in the middle of an interactive
+      // session. await import() runs main() inside chat.js as a side effect.
+      await import('./chat.js');
+      return;
 
     default:
       console.error(`Unknown command: ${command}`);

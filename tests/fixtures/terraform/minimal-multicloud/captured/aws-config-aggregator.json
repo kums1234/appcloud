@@ -1,0 +1,181 @@
+{
+  "Results": [
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::EC2::VPC",
+      "resourceId": "vpc-aaa1aaa1aaa1aaa1a",
+      "arn": "arn:aws:ec2:us-east-1:111122223333:vpc/vpc-aaa1aaa1aaa1aaa1a",
+      "configuration": {
+        "vpcId": "vpc-aaa1aaa1aaa1aaa1a",
+        "cidrBlock": "10.10.0.0/16",
+        "state": "available"
+      },
+      "tags": [
+        { "key": "component", "value": "web-app" },
+        { "key": "env", "value": "prod" }
+      ]
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::EC2::Subnet",
+      "resourceId": "subnet-aaa1aaa1aaa1aaa1a",
+      "arn": "arn:aws:ec2:us-east-1:111122223333:subnet/subnet-aaa1aaa1aaa1aaa1a",
+      "configuration": {
+        "subnetId": "subnet-aaa1aaa1aaa1aaa1a",
+        "vpcId": "vpc-aaa1aaa1aaa1aaa1a",
+        "cidrBlock": "10.10.1.0/24",
+        "availabilityZone": "us-east-1a"
+      },
+      "tags": [{ "key": "component", "value": "web-app" }]
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::EC2::SecurityGroup",
+      "resourceId": "sg-aaa1aaa1aaa1aaa1a",
+      "arn": "arn:aws:ec2:us-east-1:111122223333:security-group/sg-aaa1aaa1aaa1aaa1a",
+      "configuration": {
+        "groupId": "sg-aaa1aaa1aaa1aaa1a",
+        "groupName": "web-sg",
+        "vpcId": "vpc-aaa1aaa1aaa1aaa1a"
+      },
+      "tags": [{ "key": "component", "value": "web-app" }]
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::EC2::NetworkInterface",
+      "resourceId": "eni-aaa1aaa1aaa1aaa1a",
+      "arn": "arn:aws:ec2:us-east-1:111122223333:network-interface/eni-aaa1aaa1aaa1aaa1a",
+      "configuration": {
+        "networkInterfaceId": "eni-aaa1aaa1aaa1aaa1a",
+        "subnetId": "subnet-aaa1aaa1aaa1aaa1a",
+        "vpcId": "vpc-aaa1aaa1aaa1aaa1a",
+        "groups": [{ "groupId": "sg-aaa1aaa1aaa1aaa1a" }]
+      },
+      "tags": [{ "key": "component", "value": "web-app" }]
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "global",
+      "resourceType": "AWS::IAM::Role",
+      "resourceId": "AROAEXAMPLEWEBAPP01",
+      "arn": "arn:aws:iam::111122223333:role/role-web-app",
+      "configuration": {
+        "roleName": "role-web-app",
+        "roleId": "AROAEXAMPLEWEBAPP01",
+        "assumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            { "Effect": "Allow", "Principal": { "Service": "ec2.amazonaws.com" },    "Action": "sts:AssumeRole" },
+            { "Effect": "Allow", "Principal": { "Service": "lambda.amazonaws.com" }, "Action": "sts:AssumeRole" }
+          ]
+        }
+      },
+      "tags": []
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "global",
+      "resourceType": "AWS::IAM::InstanceProfile",
+      "resourceId": "AIPAEXAMPLEWEBAPP01",
+      "arn": "arn:aws:iam::111122223333:instance-profile/web-instance-profile",
+      "configuration": {
+        "instanceProfileName": "web-instance-profile",
+        "roles": [{ "roleName": "role-web-app", "arn": "arn:aws:iam::111122223333:role/role-web-app" }]
+      },
+      "tags": []
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::EC2::Instance",
+      "resourceId": "i-aaa1aaa1aaa1aaa1a",
+      "arn": "arn:aws:ec2:us-east-1:111122223333:instance/i-aaa1aaa1aaa1aaa1a",
+      "configuration": {
+        "instanceId": "i-aaa1aaa1aaa1aaa1a",
+        "instanceType": "t3.micro",
+        "subnetId": "subnet-aaa1aaa1aaa1aaa1a",
+        "vpcId": "vpc-aaa1aaa1aaa1aaa1a",
+        "iamInstanceProfile": {
+          "arn": "arn:aws:iam::111122223333:instance-profile/web-instance-profile",
+          "id": "AIPAEXAMPLEWEBAPP01"
+        },
+        "networkInterfaces": [
+          { "networkInterfaceId": "eni-aaa1aaa1aaa1aaa1a", "subnetId": "subnet-aaa1aaa1aaa1aaa1a" }
+        ],
+        "securityGroups": [{ "groupId": "sg-aaa1aaa1aaa1aaa1a" }]
+      },
+      "tags": [
+        { "key": "component", "value": "web-app" },
+        { "key": "env", "value": "prod" }
+      ]
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-west-2",
+      "resourceType": "AWS::EC2::VPC",
+      "resourceId": "vpc-bbb1bbb1bbb1bbb1b",
+      "arn": "arn:aws:ec2:us-west-2:111122223333:vpc/vpc-bbb1bbb1bbb1bbb1b",
+      "configuration": {
+        "vpcId": "vpc-bbb1bbb1bbb1bbb1b",
+        "cidrBlock": "10.20.0.0/16"
+      },
+      "tags": []
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-west-2",
+      "resourceType": "AWS::EC2::Subnet",
+      "resourceId": "subnet-bbb1bbb1bbb1bbb1b",
+      "arn": "arn:aws:ec2:us-west-2:111122223333:subnet/subnet-bbb1bbb1bbb1bbb1b",
+      "configuration": {
+        "subnetId": "subnet-bbb1bbb1bbb1bbb1b",
+        "vpcId": "vpc-bbb1bbb1bbb1bbb1b",
+        "cidrBlock": "10.20.1.0/24",
+        "availabilityZone": "us-west-2a"
+      },
+      "tags": []
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-west-2",
+      "resourceType": "AWS::EC2::SecurityGroup",
+      "resourceId": "sg-bbb1bbb1bbb1bbb1b",
+      "arn": "arn:aws:ec2:us-west-2:111122223333:security-group/sg-bbb1bbb1bbb1bbb1b",
+      "configuration": {
+        "groupId": "sg-bbb1bbb1bbb1bbb1b",
+        "groupName": "batch-sg",
+        "vpcId": "vpc-bbb1bbb1bbb1bbb1b"
+      },
+      "tags": []
+    },
+    {
+      "accountId": "111122223333",
+      "awsRegion": "us-west-2",
+      "resourceType": "AWS::Lambda::Function",
+      "resourceId": "fn-batch",
+      "arn": "arn:aws:lambda:us-west-2:111122223333:function:fn-batch",
+      "configuration": {
+        "functionName": "fn-batch",
+        "runtime": "nodejs20.x",
+        "role": "arn:aws:iam::111122223333:role/role-web-app",
+        "vpcConfig": {
+          "subnetIds": ["subnet-bbb1bbb1bbb1bbb1b"],
+          "securityGroupIds": ["sg-bbb1bbb1bbb1bbb1b"],
+          "vpcId": "vpc-bbb1bbb1bbb1bbb1b"
+        }
+      },
+      "tags": []
+    }
+  ],
+  "QueryInfo": {
+    "SelectFields": [
+      { "Name": "accountId" }, { "Name": "awsRegion" }, { "Name": "resourceType" },
+      { "Name": "resourceId" }, { "Name": "arn" }, { "Name": "configuration" }, { "Name": "tags" }
+    ]
+  },
+  "NextToken": null
+}

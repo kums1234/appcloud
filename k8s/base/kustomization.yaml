@@ -13,9 +13,8 @@ resources:
   - postgres-deployment.yaml
   - postgres-service.yaml
   - api-deployment.yaml
+  - api-pdb.yaml
   - api-service.yaml
-  - ui-deployment.yaml
-  - ui-service.yaml
   - ollama-deployment.yaml
   - ollama-service.yaml
   - ollama-pvc.yaml
@@ -23,10 +22,29 @@ resources:
 # Postgres init SQL lives here so kustomize security rules are satisfied
 # (files must be within or below the kustomization directory)
 configMapGenerator:
+  # Postgres init scripts run in lexical order on first boot of an empty data
+  # volume. To rerun on an existing cluster, drop the postgres-data PVC and
+  # let the deployment recreate the volume — `kubectl -n appcloud delete
+  # pvc postgres-data` followed by a postgres rollout restart. Existing
+  # tenants are dev-only at this stage; production migration is a future slice.
   - name: postgres-init
     files:
       - postgres-init/01-schema.sql
-      - postgres-init/02-migrate-users.sql
       - postgres-init/03-audit-indexes.sql
+      - postgres-init/04-cloud-accounts.sql
+      - postgres-init/05-discovery-schedule.sql
+      - postgres-init/06-ai-jobs.sql
+      - postgres-init/07-integrations-evolution.sql
+      - postgres-init/08-otel-staging.sql
+      - postgres-init/09-cmdb-assessment.sql
+      - postgres-init/10-api-keys.sql
+      - postgres-init/11-audit-evolution.sql
+      - postgres-init/12-audit-partitioning.sql
+      - postgres-init/13-tenants.sql
+      - postgres-init/14-tenant-schema-migrations.sql
+      - postgres-init/15-default-tenant-cutover.sql
+      - postgres-init/16-integrations-cutover.sql
+      - postgres-init/17-audit-tenant-id.sql
+      - postgres-init/18-tables-cutover.sql
     options:
       disableNameSuffixHash: true

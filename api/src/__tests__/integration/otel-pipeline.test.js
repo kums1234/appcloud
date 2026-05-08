@@ -1,0 +1,181 @@
+// Integration test — full OTel pipeline against real Postgres + Neo4j via
+// Testcontainers. Skips cleanly if Docker is unavailable so the unit suite
+// still passes in environments without the daemon.
+//
+// Run explicitly with:
+//   cd api && npm run test:integration
+import { test, expect, beforeAll, afterAll, jest } from '@jest/globals'
+import { randomUUID } from 'crypto'
+import {
+  getMaybeDescribe,
+  startNeo4j,
+  startPostgres,
+  wrapNeo4jDriver,
+  applyPostgresInitFiles,
+} from './helpers.js'
+
+jest.setTimeout(600_000)
+
+const maybeDescribe = getMaybeDescribe('otel-pipeline integration')
+
+maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
+  let pgContainer, neo4jContainer, pgClient, neo4jDriver
+  let fakeFastify
+
+  beforeAll(async () => {
+    // Start containers in parallel — saves ~1 min on a cold Docker.
+    const [pg, neo] = await Promise.all([startPostgres(), startNeo4j()])
+    pgContainer    = pg.container
+    pgClient       = pg.client
+    neo4jContainer = neo.container
+    neo4jDriver    = neo.driver
+
+    // Apply the baseline schema + evolutions + staging DDL in the same order
+    // postgres-init applies them on a fresh volume.
+    await applyPostgresInitFiles(pgClient, [
+      '01-schema.sql',
+      '07-integrations-evolution.sql',
+      '08-otel-staging.sql',
+    ])
+
+    // Fake the decorators that the aggregator plugin expects on `fastify`.
+    fakeFastify = {
+      log: { info() {}, warn() {}, error() {} },
+      pg: {
+        pool: pgClient,
+        query: async (sql, params = []) => (await pgClient.query(sql, params)).rows,
+      },
+      neo4j: wrapNeo4jDriver(neo4jDriver),
+    }
+  })
+
+  afterAll(async () => {
+    try { await pgClient?.end() }          catch {}
+    try { await neo4jDriver?.close() }     catch {}
+    try { await pgContainer?.stop() }      catch {}
+    try { await neo4jContainer?.stop() }   catch {}
+  })
+
+  test('spans → aggregator tick → Neo4j :Component + :CONNECTS_TO edges', async () => {
+    const { flattenResourceSpans } = await import('../../connectors/otel-ingest/parse.js')
+    const { aggregateBatch }        = await import('../../plugins/otel-aggregator.js')
+    const { TELEMETRY_COMPONENT_LABELS } = await import('../../routes/discovery.schema.js')
+
+    // Slice 5 unified the edge label: telemetry-derived service-to-service
+    // calls ride :CONNECTS_TO with source='otel' and via='otel-http' /
+    // 'otel-rpc' / 'otel-db' / 'otel-messaging'. The legacy typed-rel
+    // aliases (OBSERVED_HTTP_CALL etc.) and VIA_TO_REL_TYPE export are gone.
+    const TELEMETRY_VIAS = new Set(['otel-http', 'otel-rpc', 'otel-db', 'otel-messaging'])
+
+    // ── Seed an integration + tenant row ──
+    const integrationId = randomUUID()
+    await pgClient.query(
+      `INSERT INTO integrations (id, type, name, config, enabled)
+        VALUES ($1, 'otel-ingest', 'test', '{}'::jsonb, true)`,
+      [integrationId],
+    )
+    const tenantRes = await pgClient.query(
+      `INSERT INTO otel_tenants (integration_id, token_hash) VALUES ($1, $2) RETURNING id`,
+      [integrationId, 'test-hash'],
+    )
+    const tenantId = tenantRes.rows[0].id
+
+    // ── Stage a 3-service trace through the real parse helper ──
+    const payload = {
+      resourceSpans: [
+        { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'frontend' } }] },
+          scopeSpans: [{ scope: { name: 't' }, spans: [{
+            traceId: '11111111111111111111111111111111', spanId: 'aaaaaaaaaaaaaaaa',
+            name: 'GET /', kind: 2,
+            startTimeUnixNano: '1000000000', endTimeUnixNano: '20000000',
+            status: { code: 1 }, attributes: [{ key: 'http.route', value: { stringValue: '/' } }] },
+          ]}]},
+        { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'orders' } }] },
+          scopeSpans: [{ scope: { name: 't' }, spans: [{
+            traceId: '11111111111111111111111111111111', spanId: 'bbbbbbbbbbbbbbbb',
+            parentSpanId: 'aaaaaaaaaaaaaaaa', name: 'POST /orders', kind: 2,
+            startTimeUnixNano: '5000000', endTimeUnixNano: '15000000',
+            status: { code: 1 }, attributes: [{ key: 'http.method', value: { stringValue: 'POST' } }] },
+          ]}]},
+        { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'payments' } }] },
+          scopeSpans: [{ scope: { name: 't' }, spans: [{
+            traceId: '11111111111111111111111111111111', spanId: 'cccccccccccccccc',
+            parentSpanId: 'bbbbbbbbbbbbbbbb', name: 'POST /charge', kind: 2,
+            startTimeUnixNano: '8000000', endTimeUnixNano: '11000000',
+            status: { code: 2 }, attributes: [{ key: 'http.method', value: { stringValue: 'POST' } }] },
+          ]}]},
+      ],
+    }
+    const rowObjects = flattenResourceSpans(payload)
+    for (const r of rowObjects) {
+      await pgClient.query(
+        `INSERT INTO otel_spans_raw (
+           tenant_id, trace_id, span_id, parent_span_id,
+           service_name, service_namespace, deployment_environment,
+           span_name, span_kind, start_time_ns, end_time_ns,
+           status_code, attributes, resource_attributes
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [tenantId, r.trace_id, r.span_id, r.parent_span_id,
+         r.service_name, r.service_namespace, r.deployment_environment,
+         r.span_name, r.span_kind, r.start_time_ns, r.end_time_ns,
+         r.status_code, r.attributes, r.resource_attributes],
+      )
+    }
+
+    // ── Aggregate in memory, emit to Neo4j manually (mirroring runTick) ──
+    const { rows } = await pgClient.query(
+      `SELECT id, span_id, parent_span_id,
+              service_name, service_namespace, deployment_environment,
+              start_time_ns, end_time_ns, status_code,
+              attributes, resource_attributes
+         FROM otel_spans_raw ORDER BY start_time_ns`,
+    )
+    const { components, edges } = aggregateBatch(rows)
+    expect(components.map(c => c.name).sort()).toEqual(['frontend', 'orders', 'payments'])
+    expect(edges.length).toBe(2)
+
+    const teleLabels = TELEMETRY_COMPONENT_LABELS.join(':')
+    await fakeFastify.neo4j.write(`
+      UNWIND $components AS c
+      MERGE (comp:Component { name: c.name, origin_source: 'otel', origin_namespace: c.namespace })
+        ON CREATE SET comp.id = randomUUID()
+      SET comp:${teleLabels},
+          comp.environment           = c.environment,
+          comp.source                = 'otel',
+          comp.sample_resource_attrs = c.sampleResourceAttrsJson
+    `, { components })
+
+    await fakeFastify.neo4j.write(`
+      UNWIND $edges AS e
+      MATCH (src:Component { name: e.srcName, origin_source: 'otel', origin_namespace: e.srcNs })
+      MATCH (dst:Component { name: e.dstName, origin_source: 'otel', origin_namespace: e.dstNs })
+      MERGE (src)-[r:CONNECTS_TO { source: 'otel', via: e.via }]->(dst)
+      SET   r.rps = e.rps, r.error_rate = e.errorRate,
+            r.p50_ms = e.p50Ms, r.p95_ms = e.p95Ms,
+            r.route = e.route
+    `, { edges })
+
+    // ── Verify :Component nodes ──
+    const compRes = await fakeFastify.neo4j.query(
+      `MATCH (c:Component {origin_source:'otel'}) RETURN c.name AS name, labels(c) AS labels ORDER BY name`,
+    )
+    const compNames = compRes.map(r => r.get('name'))
+    expect(compNames).toEqual(['frontend', 'orders', 'payments'])
+    for (const r of compRes) {
+      expect(r.get('labels')).toEqual(expect.arrayContaining(['Component', 'TelemetryService', 'Workload']))
+    }
+
+    // ── Verify :CONNECTS_TO edges with OTel provenance + error rate ──
+    const edgeRes = await fakeFastify.neo4j.query(
+      `MATCH (a:Component {origin_source:'otel'})-[r:CONNECTS_TO {source:'otel'}]->(b:Component {origin_source:'otel'})
+       RETURN a.name AS src, b.name AS dst, r.via AS via, r.error_rate AS err
+       ORDER BY src`,
+    )
+    const summary = edgeRes.map(r => `${r.get('src')}→${r.get('dst')} (err=${r.get('err')})`).join(',')
+    expect(summary).toContain('frontend→orders (err=0)')
+    expect(summary).toContain('orders→payments (err=1)')
+
+    // Every emitted via stays within the documented telemetry namespace.
+    for (const e of edges) expect(TELEMETRY_VIAS.has(e.via)).toBe(true)
+  })
+})

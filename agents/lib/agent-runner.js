@@ -101,34 +101,93 @@ function parseOpenAIResponse(choice) {
   return { text, toolCalls, rawContent };
 }
 
-async function callAzureOpenAI(systemPrompt, tools, messages) {
+// Generic OpenAI-Chat-Completions-shaped caller. Used by every provider that
+// exposes the OpenAI chat-completions surface (Azure OpenAI's deployment-encoded
+// URL, Google's OpenAI-compat endpoint at generativelanguage.googleapis.com,
+// Groq's api.groq.com/openai/v1, OpenAI proper). The Anthropic→OpenAI tool +
+// message conversion is shared; only URL, headers, and (optional) body model
+// vary between providers.
+//
+// `model` is set in the body except for Azure, which encodes the deployment in
+// the URL path itself.
+export async function callOpenAICompatible(
+  { url, headers, model, errLabel = 'OpenAI-compat', temperature = 0.1, maxTokens = 4096 },
+  systemPrompt, tools, messages,
+) {
   const openAIMessages = openAIMessagesFromAnthropic(systemPrompt, messages);
   const openAITools = tools.map(anthropicToolToOpenAI);
 
-  // Use Azure OpenAI REST API directly — no extra SDK dependency needed
-  const url = `${config.azureOpenAiEndpoint.replace(/\/$/, '')}/openai/deployments/${config.azureOpenAiDeployment}/chat/completions?api-version=${config.azureOpenAiApiVersion}`;
+  const body = {
+    messages:    openAIMessages,
+    tools:       openAITools,
+    temperature,
+    max_tokens:  maxTokens,
+  };
+  if (model) body.model = model;
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': config.azureOpenAiKey,
-    },
-    body: JSON.stringify({
-      messages: openAIMessages,
-      tools: openAITools,
-      temperature: 0.1,
-      max_tokens: 4096,
-    }),
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body:   JSON.stringify(body),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Azure OpenAI error (${res.status}): ${errText.slice(0, 400)}`);
+    throw new Error(`${errLabel} error (${res.status}): ${errText.slice(0, 400)}`);
   }
 
   const data = await res.json();
   return parseOpenAIResponse(data.choices[0]);
+}
+
+async function callAzureOpenAI(systemPrompt, tools, messages) {
+  const url = `${config.azureOpenAiEndpoint.replace(/\/$/, '')}/openai/deployments/${config.azureOpenAiDeployment}/chat/completions?api-version=${config.azureOpenAiApiVersion}`;
+  return callOpenAICompatible(
+    {
+      url,
+      headers:  { 'api-key': config.azureOpenAiKey },
+      // Azure encodes the model in the URL via deployment name — no body model.
+      errLabel: 'Azure OpenAI',
+    },
+    systemPrompt, tools, messages,
+  );
+}
+
+// ─── Google Gemini (via OpenAI-compat endpoint) ─────────────────────────────
+//
+// Gemini's OpenAI-compat surface lives at
+//   https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+// Auth is `Authorization: Bearer <GEMINI_API_KEY>`. Tool calling is supported
+// (one tool per turn is reliable; parallel tool calls are flakier than native
+// — the agent loop calls one tool per turn anyway, so this is a non-issue).
+async function callGemini(systemPrompt, tools, messages) {
+  return callOpenAICompatible(
+    {
+      url:      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      headers:  { 'Authorization': `Bearer ${config.geminiApiKey}` },
+      model:    config.geminiModel,
+      errLabel: 'Gemini',
+    },
+    systemPrompt, tools, messages,
+  );
+}
+
+// ─── Groq (OpenAI-compat) ───────────────────────────────────────────────────
+//
+// Groq's API is OpenAI-compatible at
+//   https://api.groq.com/openai/v1/chat/completions
+// Free tier (May 2026): llama-3.1-8b-instant — 30 RPM, 6K TPM, 14,400 req/day,
+// 500K daily tokens. Reset at midnight UTC.
+async function callGroq(systemPrompt, tools, messages) {
+  return callOpenAICompatible(
+    {
+      url:      'https://api.groq.com/openai/v1/chat/completions',
+      headers:  { 'Authorization': `Bearer ${config.groqApiKey}` },
+      model:    config.groqModel,
+      errLabel: 'Groq',
+    },
+    systemPrompt, tools, messages,
+  );
 }
 
 // ─── Ollama Backend ─────────────────────────────────────────────────────────
@@ -179,9 +238,11 @@ function getModelCaller() {
   switch (config.aiProvider) {
     case 'anthropic':    return callAnthropic;
     case 'azure_openai': return callAzureOpenAI;
+    case 'gemini':       return callGemini;
+    case 'groq':         return callGroq;
     case 'ollama':       return callOllama;
     default:
-      console.error(`Unknown AI_PROVIDER: ${config.aiProvider}. Use: ollama, anthropic, azure_openai`);
+      console.error(`Unknown AI_PROVIDER: ${config.aiProvider}. Use: ollama, anthropic, azure_openai, gemini, groq`);
       process.exit(1);
   }
 }
@@ -194,10 +255,16 @@ function getModelLabel() {
   switch (config.aiProvider) {
     case 'anthropic':    return config.claudeModel;
     case 'azure_openai': return config.azureOpenAiDeployment;
+    case 'gemini':       return config.geminiModel;
+    case 'groq':         return config.groqModel;
     case 'ollama':       return config.ollamaModel;
     default:             return config.aiProvider;
   }
 }
+
+// Exported only so the test file can import them and stub fetch.
+// Production code reaches the providers through getModelCaller() above.
+export const __testables = { callAzureOpenAI, callGemini, callGroq };
 
 /**
  * Run an agent through the agentic tool-use loop.
@@ -217,8 +284,22 @@ export async function runAgent({ name, systemPrompt, tools, toolHandler, userMes
     try {
       response = await callModel(systemPrompt, tools, messages);
     } catch (err) {
-      log.error(`Model call failed: ${err.message}`);
-      return `Agent ${name} failed: ${err.message}`;
+      // Retry on rate limit (429) — parse wait time from error, back off, and retry
+      if (err.message.includes('429') || err.message.toLowerCase().includes('rate limit')) {
+        const waitMatch = err.message.match(/wait\s+(\d+)\s*seconds?/i);
+        const waitSec = waitMatch ? parseInt(waitMatch[1]) + 3 : 30;  // +3s buffer
+        log.info(`Rate limited — waiting ${waitSec}s before retry...`);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        try {
+          response = await callModel(systemPrompt, tools, messages);
+        } catch (retryErr) {
+          log.error(`Retry failed: ${retryErr.message}`);
+          return `Agent ${name} failed after retry: ${retryErr.message}`;
+        }
+      } else {
+        log.error(`Model call failed: ${err.message}`);
+        return `Agent ${name} failed: ${err.message}`;
+      }
     }
 
     if (response.text) {

@@ -5,8 +5,7 @@
 #   ./k8s/scripts/deploy-minikube.sh              # full deploy (build only if changed)
 #   ./k8s/scripts/deploy-minikube.sh --force       # force rebuild even if images match
 #   ./k8s/scripts/deploy-minikube.sh --skip-build  # skip build + load entirely
-#   ./k8s/scripts/deploy-minikube.sh --api-only    # rebuild only the API image
-#   ./k8s/scripts/deploy-minikube.sh --ui-only     # rebuild only the UI image
+#   ./k8s/scripts/deploy-minikube.sh --api-only    # (kept for backwards compat — same as default)
 #
 # Smart behavior:
 #   - Compares local Docker image IDs with minikube's image IDs
@@ -17,14 +16,11 @@ set -euo pipefail
 
 SKIP_BUILD=false
 FORCE_BUILD=false
-API_ONLY=false
-UI_ONLY=false
 for arg in "$@"; do
   case "$arg" in
     --skip-build) SKIP_BUILD=true ;;
     --force)      FORCE_BUILD=true ;;
-    --api-only)   API_ONLY=true ;;
-    --ui-only)    UI_ONLY=true ;;
+    --api-only)   ;;
   esac
 done
 
@@ -61,18 +57,42 @@ minikube addons enable storage-provisioner --profile=$PROFILE 2>/dev/null || tru
 
 # ── Helper: get image ID from local Docker ────────────────────────────────────
 local_image_id() {
-  docker images --format '{{.ID}}' "$1" 2>/dev/null | head -1
+  docker images --format '{{.ID}}' "$1" 2>/dev/null | head -1 | tr -d '\r\n' | xargs
 }
 
 # ── Helper: get image ID inside minikube ──────────────────────────────────────
+# `minikube ssh` can emit CRLF line endings which make string comparisons
+# silently fail (identical-looking IDs compare as different). Strip \r and any
+# trailing whitespace so the ID is a clean hex string.
 minikube_image_id() {
   minikube ssh --profile=$PROFILE -- \
-    "docker images --format '{{.ID}}' '$1' 2>/dev/null | head -1" 2>/dev/null || echo ""
+    "docker images --format '{{.ID}}' '$1' 2>/dev/null | head -1" 2>/dev/null \
+    | tr -d '\r\n' | xargs
+}
+
+# ── Helper: release the image lock by scaling pods down ───────────────────────
+# `docker rmi` inside minikube fails if a running pod references the image.
+# Scale the matching deployment to 0, wait for the pod to exit, then the
+# rmi + reload can succeed. Caller is responsible for kubectl apply afterwards
+# which kustomize does — it restores the replica count.
+release_image_lock() {
+  local deployment=$1
+  echo "    Scaling deployment/$deployment to 0 to release image lock..."
+  kubectl -n appcloud scale deployment "$deployment" --replicas=0 &>/dev/null || true
+  # Wait up to 30s for pods to actually terminate
+  local waited=0
+  while [[ $waited -lt 30 ]]; do
+    local count
+    count=$(kubectl -n appcloud get pods -l "app=$deployment" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    [[ "$count" == "0" ]] && return 0
+    sleep 2
+    waited=$((waited + 2))
+  done
+  echo "    ⚠ $deployment pods did not terminate after 30s, continuing anyway"
 }
 
 # ── Smart build + load ────────────────────────────────────────────────────────
 NEEDS_RESTART_API=false
-NEEDS_RESTART_UI=false
 
 if [[ "$SKIP_BUILD" == "true" ]]; then
   echo "► Skipping build + load (--skip-build)"
@@ -118,24 +138,48 @@ else
       echo "  ✓ Loaded and verified ($mk_after)"
     else
       echo "  ⚠ Image ID mismatch after load (local=$local_after, minikube=$mk_after)"
-      echo "    Removing stale image and reloading..."
-      minikube ssh --profile=$PROFILE -- "docker rmi '$image' 2>/dev/null" || true
+      echo "    Stale image is likely referenced by a running pod. Scaling down + forcing reload..."
+
+      # Identify which deployment is referencing the image so we can release
+      # the lock. `appcloud-api` → `api`.
+      local deployment=""
+      case "$name" in
+        appcloud-api) deployment="api" ;;
+      esac
+
+      if [[ -n "$deployment" ]]; then
+        release_image_lock "$deployment"
+      fi
+
+      # Force-remove the stale image. The -f flag handles edge cases where the
+      # image might still be weakly referenced by a stopped container.
+      echo "    Removing stale image..."
+      if ! minikube ssh --profile=$PROFILE -- "docker rmi -f '$image'" 2>&1; then
+        echo "  ✗ ERROR: Failed to remove stale image from minikube."
+        echo "    Try manually: minikube -p $PROFILE ssh -- docker rmi -f $image"
+        echo "    Then re-run this script."
+        exit 1
+      fi
+
+      echo "    Reloading image into minikube..."
       minikube image load "$image" --profile=$PROFILE 2>&1
+
       mk_after=$(minikube_image_id "$image")
-      echo "  ✓ Reloaded ($mk_after)"
+      if [[ "$mk_after" != "$local_after" ]]; then
+        echo "  ✗ ERROR: Image IDs still don't match after force-reload."
+        echo "    Local:    $local_after"
+        echo "    Minikube: $mk_after"
+        echo "    This means the reload silently failed. Cannot proceed."
+        exit 1
+      fi
+      echo "  ✓ Force-reloaded and verified ($mk_after)"
     fi
 
     # Flag restart needed
     if [[ "$name" == "appcloud-api" ]]; then NEEDS_RESTART_API=true; fi
-    if [[ "$name" == "appcloud-ui" ]];  then NEEDS_RESTART_UI=true; fi
   }
 
-  if [[ "$UI_ONLY" == "false" ]]; then
-    build_and_load "appcloud-api" "$ROOT_DIR/api"
-  fi
-  if [[ "$API_ONLY" == "false" ]]; then
-    build_and_load "appcloud-ui" "$ROOT_DIR/ui"
-  fi
+  build_and_load "appcloud-api" "$ROOT_DIR/api"
 fi
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
@@ -143,7 +187,7 @@ echo ""
 echo "► Creating namespace and secrets..."
 kubectl apply -f "$K8S_DIR/base/namespace.yaml" 2>/dev/null || true
 
-for secret_name in appcloud-db-credentials appcloud-pg-credentials appcloud-jwt-secret; do
+for secret_name in appcloud-db-credentials appcloud-pg-credentials appcloud-api-key appcloud-encryption-key; do
   kubectl -n appcloud get secret "$secret_name" &>/dev/null && continue
   case "$secret_name" in
     appcloud-db-credentials)
@@ -154,9 +198,12 @@ for secret_name in appcloud-db-credentials appcloud-pg-credentials appcloud-jwt-
       kubectl -n appcloud create secret generic "$secret_name" \
         --from-file=pg_username="$SECRETS_DIR/pg_username.txt" \
         --from-file=pg_password="$SECRETS_DIR/pg_password.txt" ;;
-    appcloud-jwt-secret)
+    appcloud-api-key)
       kubectl -n appcloud create secret generic "$secret_name" \
-        --from-file=jwt_secret="$SECRETS_DIR/jwt_secret.txt" ;;
+        --from-file=appcloud_api_key="$SECRETS_DIR/appcloud_api_key.txt" ;;
+    appcloud-encryption-key)
+      kubectl -n appcloud create secret generic "$secret_name" \
+        --from-file=appcloud_encryption_key="$SECRETS_DIR/appcloud_encryption_key.txt" ;;
   esac
   echo "  ✓ Created $secret_name"
 done
@@ -200,13 +247,8 @@ if [[ "$NEEDS_RESTART_API" == "true" ]]; then
   echo "► Restarting API pods (new image loaded)..."
   kubectl -n appcloud delete pod -l app=api --wait=false 2>/dev/null || true
 fi
-if [[ "$NEEDS_RESTART_UI" == "true" ]]; then
-  echo "► Restarting UI pods (new image loaded)..."
-  kubectl -n appcloud delete pod -l app=ui --wait=false 2>/dev/null || true
-fi
 
 wait_for_deployment api 240
-wait_for_deployment ui  180
 
 # ── /etc/hosts ────────────────────────────────────────────────────────────────
 if grep -q "appcloud.local" /etc/hosts; then
@@ -216,6 +258,27 @@ else
   echo "127.0.0.1  appcloud.local" | sudo tee -a /etc/hosts
 fi
 
+# ── Final sanity check: local and minikube image IDs must match ───────────────
+# If this fails, the pod will silently run stale code. Fail loud here instead.
+final_api_local=$(local_image_id appcloud-api:latest)
+final_api_mk=$(minikube_image_id appcloud-api:latest)
+
+sanity_ok=true
+if [[ "$SKIP_BUILD" == "false" ]] \
+   && [[ -n "$final_api_local" ]] && [[ "$final_api_local" != "$final_api_mk" ]]; then
+  echo ""
+  echo "  ✗ SANITY CHECK FAILED: API image IDs differ"
+  echo "      Local:    $final_api_local"
+  echo "      Minikube: $final_api_mk"
+  sanity_ok=false
+fi
+
+if [[ "$sanity_ok" == "false" ]]; then
+  echo ""
+  echo "  Pods are running STALE code. Fix before trusting any smoke tests."
+  exit 1
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════"
@@ -223,19 +286,17 @@ echo "  ✓  AppCloud is running on Minikube!"
 echo "══════════════════════════════════════════════════"
 echo ""
 echo "  Image status:"
-echo "    API: $(local_image_id appcloud-api:latest) (local) / $(minikube_image_id appcloud-api:latest) (minikube)"
-echo "    UI:  $(local_image_id appcloud-ui:latest) (local) / $(minikube_image_id appcloud-ui:latest) (minikube)"
+echo "    API: $final_api_local (local) / $final_api_mk (minikube)"
 echo ""
 echo "  Access:"
-echo "    Port forward:  kubectl -n appcloud port-forward svc/ui 4000:4000"
-echo "                   then open http://localhost:4000"
+echo "    Port forward:  kubectl -n appcloud port-forward svc/api 3000:3000"
+echo "                   then open http://localhost:3000"
 echo "    Tunnel:        minikube tunnel --profile=$PROFILE"
 echo "                   then open http://appcloud.local"
 echo ""
 echo "  Quick redeploy (code changes only):"
-echo "    ./k8s/scripts/deploy-minikube.sh --api-only    # API changes"
-echo "    ./k8s/scripts/deploy-minikube.sh --ui-only     # UI changes"
-echo "    ./k8s/scripts/deploy-minikube.sh --force       # force full rebuild"
+echo "    ./k8s/scripts/deploy-minikube.sh               # API rebuild (default)"
+echo "    ./k8s/scripts/deploy-minikube.sh --force       # force rebuild"
 echo ""
 echo "  Logs:      kubectl -n appcloud logs -f deploy/api"
 echo "  Pods:      kubectl -n appcloud get pods"

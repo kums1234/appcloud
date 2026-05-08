@@ -18,7 +18,15 @@ services:
       - /app/node_modules  # Named volume to avoid host node_modules conflicts
     environment:
       - NODE_ENV=development
-      - JWT_SECRET=dev-jwt-secret-for-local-development
+      # Dev keys are sourced from .env.local (gitignored). Run `cp .env.local.example
+      # .env.local` and edit. The `:?` syntax aborts compose with a helpful error if
+      # they're unset, which is safer than silently falling back to a known-weak
+      # default that anyone reading the repo could exploit.
+      - APPCLOUD_API_KEY=${APPCLOUD_API_KEY:?set APPCLOUD_API_KEY in .env.local — see .env.local.example}
+      - APPCLOUD_ENCRYPTION_KEY=${APPCLOUD_ENCRYPTION_KEY:?set APPCLOUD_ENCRYPTION_KEY in .env.local — see .env.local.example}
+    env_file:
+      - path: .env.local
+        required: false
     command: ["npm", "run", "dev"]
     ports:
       - "3000:3000"

@@ -1,0 +1,4679 @@
+{
+  "item": [
+    {
+      "name": "Quickstart",
+      "description": "Start here. The first three requests confirm wiring; the rest are organised by OpenAPI tag (Discovery, Applications, Components, …).",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness probe. Open — no auth required."
+          }
+        },
+        {
+          "name": "GET /openapi.json",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/openapi.json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi.json"
+              ]
+            },
+            "description": "Live OpenAPI spec. This collection is auto-derived from it."
+          }
+        },
+        {
+          "name": "GET /graph/topology",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/graph/topology",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "graph",
+                "topology"
+              ]
+            },
+            "description": "Single-shot topology snapshot — apps, components, infra, connections."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Applications",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "List Applications",
+          "request": {
+            "name": "List Applications",
+            "description": {
+              "content": "Returns every Application in the graph with a `componentCount` of contained Components, ordered by tier then name.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Create an Application",
+          "request": {
+            "name": "Create an Application",
+            "description": {
+              "content": "Creates a new Application node. `tier` is required; reasonable defaults are filled in for `availability` (`99.9`) and `confidentiality` (`internal`).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"domain\": \"finance\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get one Application",
+          "request": {
+            "name": "Get one Application",
+            "description": {
+              "content": "Resolves the path param against `id` (UUID) or `name` and returns the Application + its Components + their owned Infra. Returns 404 when no match.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Partially update an Application",
+          "request": {
+            "name": "Partially update an Application",
+            "description": {
+              "content": "Any subset of the create fields. Unspecified fields keep their existing values via `coalesce`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Payments Platform\",\n  \"tier\": 1,\n  \"owner\": \"payments-team\",\n  \"environment\": \"production\",\n  \"domain\": \"finance\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete an Application (cascades exclusively-owned Components + Infra)",
+          "request": {
+            "name": "Delete an Application (cascades exclusively-owned Components + Infra)",
+            "description": {
+              "content": "Removes the Application plus any Components that *only* belong to it, plus Infra that is *only* owned by those Components. Shared resources are preserved.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Application topology — Components, Infra, intra-app connections",
+          "request": {
+            "name": "Application topology — Components, Infra, intra-app connections",
+            "description": {
+              "content": "Returns the Application, every Component it contains, the Infra each Component is deployed on, and Component↔Component `:CONNECTS_TO` edges (with protocol/port).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ":id",
+                "topology"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Cross-application dependencies for one Application",
+          "request": {
+            "name": "Cross-application dependencies for one Application",
+            "description": {
+              "content": "Walks each Component in the Application and lists Components in *other* Applications it has a `:CONNECTS_TO` edge to. Used by the impact-radius views.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "applications",
+                ":id",
+                "dependencies"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Components",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Component taxonomy + enum metadata",
+          "request": {
+            "name": "Component taxonomy + enum metadata",
+            "description": {
+              "content": "Single source of truth for component types, tiers, environments, availability SLAs, and confidentiality levels. UI consumers fetch this once and hydrate dropdowns.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                "metadata"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List Components",
+          "request": {
+            "name": "List Components",
+            "description": {
+              "content": "Returns every Component with its containing Application (when one exists). Filterable via the `type` query (api / db / worker / ui).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "type",
+                  "value": "string",
+                  "description": "Optional filter on Component type"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Create a Component",
+          "request": {
+            "name": "Create a Component",
+            "description": {
+              "content": "Creates a Component node, optionally attaching it to an existing Application via `:CONTAINS`. Either `applicationId` or `appId` works (legacy alias).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"payment-api\",\n  \"type\": \"api\",\n  \"runtime\": \"nodejs\",\n  \"applicationId\": \"00000000-0000-0000-0000-000000000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get one Component",
+          "request": {
+            "name": "Get one Component",
+            "description": {
+              "content": "Returns the Component, its parent Application (or null), and the Infra resources it owns via `:CONNECTS_TO {via:\"component-mapping\"}`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update a Component",
+          "request": {
+            "name": "Update a Component",
+            "description": {
+              "content": "Partial update on `name` / `type` / `runtime`. Other fields preserved.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": false,\n  \"key_1\": 727.580904494971,\n  \"key_2\": 7717.618327587843,\n  \"key_3\": 3937\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete a Component",
+          "request": {
+            "name": "Delete a Component",
+            "description": {
+              "content": "DETACH-delete: removes every relationship the Component participates in (including ownership and Component↔Component connections).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Connect this Component to another (Component → Component edge)",
+          "request": {
+            "name": "Connect this Component to another (Component → Component edge)",
+            "description": {
+              "content": "Idempotently MERGEs a `:CONNECTS_TO {protocol, port}` edge from this Component to the target. No `via` is set — the endpoint labels (`:Component`→`:Component`) distinguish it from infra-side edges.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ":id",
+                "connections"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetId\": \"00000000-0000-0000-0000-000000000000\",\n  \"protocol\": \"https\",\n  \"port\": 443\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Deploy a Component onto an Infra (manual ownership)",
+          "request": {
+            "name": "Deploy a Component onto an Infra (manual ownership)",
+            "description": {
+              "content": "Idempotently MERGEs a `:CONNECTS_TO {via:\"component-mapping\", source:\"manual-deploy\", confidence:100}` edge from the Component to the Infra. Use this to record human-confirmed ownership.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "components",
+                ":id",
+                "deploy"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"infraId\": \"00000000-0000-0000-0000-000000000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Infra",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "List Infra",
+          "request": {
+            "name": "List Infra",
+            "description": {
+              "content": "Returns Infra nodes ordered by provider then name. Filter by `provider` (aws/azure/gcp) and/or `public` (true/false). Paginated — default page size 500, max 5000. At realistic data volumes (10k+ resources) pulling everything in one response is multi-second + memory-spike on the client; use `?offset=` to page through.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "infra",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "provider",
+                  "value": "azure"
+                },
+                {
+                  "disabled": false,
+                  "key": "public",
+                  "value": "false"
+                },
+                {
+                  "disabled": false,
+                  "key": "limit",
+                  "value": "500"
+                },
+                {
+                  "disabled": false,
+                  "key": "offset",
+                  "value": "0"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Manually create an Infra node",
+          "request": {
+            "name": "Manually create an Infra node",
+            "description": {
+              "content": "Most Infra comes from discovery scans (`/discovery/scan/*`). Use this for resources that aren't in any cloud-API surface — e.g. an on-prem appliance you want represented in the graph.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "infra",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"web-server-01\",\n  \"provider\": \"azure\",\n  \"resource_type\": \"vm\",\n  \"region\": \"eastus\",\n  \"public\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get one Infra node",
+          "request": {
+            "name": "Get one Infra node",
+            "description": {
+              "content": "Returns the Infra plus its `deployments` — every Component that owns it (with the containing Application name when available).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "infra",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update an Infra node (name / region / public flag)",
+          "request": {
+            "name": "Update an Infra node (name / region / public flag)",
+            "description": {},
+            "url": {
+              "path": [
+                "infra",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"string\",\n  \"region\": \"string\",\n  \"public\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete an Infra node",
+          "request": {
+            "name": "Delete an Infra node",
+            "description": {
+              "content": "DETACH-deletes the node and every relationship it participates in. The next discovery scan will re-create it if it still exists in the cloud.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "infra",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Infra owned by more than one Application (shared services)",
+          "request": {
+            "name": "Infra owned by more than one Application (shared services)",
+            "description": {
+              "content": "Returns Infra nodes whose owning Components live in two or more distinct Applications, ordered by `usedByApps` desc. Useful for surfacing shared services that need coordination during change windows.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "infra",
+                "shared",
+                "resources"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Internet-exposed Infra (public = true)",
+          "request": {
+            "name": "Internet-exposed Infra (public = true)",
+            "description": {
+              "content": "Returns every Infra node flagged `public: true` plus the names of any Components that own them. Cross-cuts the security review surface.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "infra",
+                "public",
+                "exposed"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Graph",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Counts: applications, components, infra, connections, public-exposed",
+          "request": {
+            "name": "Counts: applications, components, infra, connections, public-exposed",
+            "description": {
+              "content": "A single-shot summary of the graph: total counts plus components-by-type and infra-by-provider histograms. Used by dashboard tiles.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "summary"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Full graph snapshot — apps, components, connections, deployments, infra",
+          "request": {
+            "name": "Full graph snapshot — apps, components, connections, deployments, infra",
+            "description": {
+              "content": "Single response covering every Application, Component, Component↔Component connection (with protocol/port), Component→Infra deployment, and the unique Infra referenced. Drives the topology canvas.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "topology"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Blast-radius for a single Infra resource",
+          "request": {
+            "name": "Blast-radius for a single Infra resource",
+            "description": {
+              "content": "Walks Infra ← Component ← Application and returns every Component / Application that depends on the given Infra. Applications come back sorted by tier (1 = critical first).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "impact"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "infraId",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "description": "(Required) "
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Every Component → Component edge that crosses an Application boundary",
+          "request": {
+            "name": "Every Component → Component edge that crosses an Application boundary",
+            "description": {
+              "content": "Returns one row per cross-application Component connection: `from` (app, tier, component), `connection` (protocol, port), `to` (app, tier, component). Used for change-coordination dashboards.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "cross-app-dependencies"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Shortest path between two Components",
+          "request": {
+            "name": "Shortest path between two Components",
+            "description": {
+              "content": "Returns the shortest directed path of any relationship type from `from` to `to`, with the node sequence and hop count. 404 when no path exists.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "path"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "from",
+                  "value": "string",
+                  "description": "(Required) "
+                },
+                {
+                  "disabled": false,
+                  "key": "to",
+                  "value": "string",
+                  "description": "(Required) "
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List topology snapshots",
+          "request": {
+            "name": "List topology snapshots",
+            "description": {
+              "content": "Returns saved snapshots, newest first. Capped at `limit` (default 100, max 1000) — long-running deployments can accumulate thousands; the cap keeps response payloads bounded.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "snapshots"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "limit",
+                  "value": "100"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Capture a topology snapshot",
+          "request": {
+            "name": "Capture a topology snapshot",
+            "description": {
+              "content": "Creates a `:Snapshot` node with the current node counts and an optional `label`. Snapshots are append-only — there's no DELETE endpoint.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "snapshots"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 4514\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Integrations",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Import a Terraform / OpenTofu state file (multipart upload)",
+          "request": {
+            "name": "Import a Terraform / OpenTofu state file (multipart upload)",
+            "description": {
+              "content": "Send `multipart/form-data` with a `statefile` field containing the `.tfstate` JSON. Resources are parsed via `parseTerraformState` and ingested into Neo4j as Infra nodes. Returns the import-job id, parse summary, and per-status counts.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "terraform",
+                "import"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Recent Terraform import jobs",
+          "request": {
+            "name": "Recent Terraform import jobs",
+            "description": {
+              "content": "Returns up to 20 import jobs newest-first with status, parsed Terraform version, workspace, resource counts, and total duration.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "terraform",
+                "history"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List all cloud accounts (decrypted config)",
+          "request": {
+            "name": "List all cloud accounts (decrypted config)",
+            "description": {
+              "content": "Returns every cloud account row with its decrypted `config` (the on-disk row stores AES-256-GCM-encrypted secrets — clientSecret, secretAccessKey, private_key — which are decrypted on read).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Create or upsert a cloud account",
+          "request": {
+            "name": "Create or upsert a cloud account",
+            "description": {
+              "content": "On unique-key conflict (provider, name) the row is updated, not duplicated. Secret fields in `config` (clientSecret, secretAccessKey, private_key) are AES-256-GCM-encrypted before INSERT.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"azure\",\n  \"name\": \"azure-prod\",\n  \"config\": {\n    \"subscriptionId\": \"00000000-0000-0000-0000-000000000000\",\n    \"tenantId\": \"00000000-0000-0000-0000-000000000000\",\n    \"clientId\": \"00000000-0000-0000-0000-000000000000\",\n    \"clientSecret\": \"REPLACE_ME\"\n  },\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List enabled cloud accounts for a provider",
+          "request": {
+            "name": "List enabled cloud accounts for a provider",
+            "description": {
+              "content": "Filters by provider (aws / azure / gcp) and `enabled = true`. Discovery scans use this same query indirectly via the `loadAccounts` helper.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud",
+                ":provider"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "azure",
+                  "key": "provider",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update a cloud account (partial)",
+          "request": {
+            "name": "Update a cloud account (partial)",
+            "description": {
+              "content": "Any subset of `name` / `config` / `enabled`. The `config` shape is *merged* into the existing decrypted config and re-encrypted, so you can patch one secret without re-supplying the others.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": 9014,\n    \"key_1\": \"string\"\n  },\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete a cloud account",
+          "request": {
+            "name": "Delete a cloud account",
+            "description": {
+              "content": "Removes the Postgres row. Discovery-emitted Infra nodes already in Neo4j are *not* deleted; they'll be marked stale on the next scan that runs without this account.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "One-time migration: copy CloudAccount nodes from Neo4j to Postgres",
+          "request": {
+            "name": "One-time migration: copy CloudAccount nodes from Neo4j to Postgres",
+            "description": {
+              "content": "For graphs that pre-date the Postgres backing store. Idempotent (`ON CONFLICT (provider, name) DO UPDATE`). Returns the count of accounts migrated.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud",
+                "sync-from-neo4j"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Internal — record a scan outcome on a cloud account",
+          "request": {
+            "name": "Internal — record a scan outcome on a cloud account",
+            "description": {
+              "content": "Called by the scan handlers in discovery.js to stamp `last_scan_at / last_scan_status / last_scan_total / last_scan_error` on the account row. Not typically called directly by external consumers.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "cloud",
+                ":id",
+                "scan-result"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"error\",\n  \"total\": 5511,\n  \"error\": \"string\",\n  \"key_0\": true,\n  \"key_1\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get the active cloud-AI provider configuration",
+          "request": {
+            "name": "Get the active cloud-AI provider configuration",
+            "description": {
+              "content": "Returns the saved Anthropic / OpenAI / Gemini / Azure-OpenAI config with `apiKey` masked. Returns `{ configured: false }` when no config exists.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "ai"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Save (upsert) the cloud-AI provider configuration",
+          "request": {
+            "name": "Save (upsert) the cloud-AI provider configuration",
+            "description": {
+              "content": "Replaces any existing config (only one active at a time). `apiKey` is AES-256-GCM-encrypted before INSERT. Setting Azure also requires `azureEndpoint` and `azureDeployment`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "ai"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"anthropic\",\n  \"apiKey\": \"string\",\n  \"model\": \"auto\",\n  \"azureEndpoint\": \"string\",\n  \"azureDeployment\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete the saved cloud-AI provider configuration",
+          "request": {
+            "name": "Delete the saved cloud-AI provider configuration",
+            "description": {
+              "content": "After deletion `fastify.ai.refreshCloudFromDb()` clears the in-memory provider so subsequent `/ai/*` routes return 503 until a new config is saved.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "ai"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Test the saved cloud-AI configuration",
+          "request": {
+            "name": "Test the saved cloud-AI configuration",
+            "description": {
+              "content": "Sends a trivial \"Reply with exactly: OK\" message and returns the provider response. Useful for verifying credentials without spending tokens on a real query.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                "ai",
+                "test"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List configured connector instances",
+          "request": {
+            "name": "List configured connector instances",
+            "description": {
+              "content": "Returns every row from the `integrations` table — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends, etc. Secret fields are decrypted; client UIs are responsible for further obscuring.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Create a connector instance",
+          "request": {
+            "name": "Create a connector instance",
+            "description": {
+              "content": "Body shape: `{ type, name, config, enabled?, pollIntervalSeconds? }`. The `type` must match a registered connector (`/connectors`); the connector's `beforeUpsert` runs before validation to fill defaults / auto-generate secrets, and `afterUpsert` runs after persist to sync derived rows. Secret fields are AES-256-GCM-encrypted before INSERT.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"string\",\n  \"name\": \"string\",\n  \"config\": {\n    \"key_0\": \"string\"\n  },\n  \"enabled\": true,\n  \"pollIntervalSeconds\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get one connector instance",
+          "request": {
+            "name": "Get one connector instance",
+            "description": {
+              "content": "Returns the integration row with config decrypted. Use `/connectors/:type` for the connector's schema and capabilities.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update a connector instance (partial)",
+          "request": {
+            "name": "Update a connector instance (partial)",
+            "description": {
+              "content": "Patches `config` (merged + re-encrypted), `enabled`, or `pollIntervalSeconds`. The connector's before/afterUpsert hooks run on each update.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"config\": {\n    \"key_0\": 6646\n  },\n  \"enabled\": false,\n  \"pollIntervalSeconds\": null,\n  \"key_0\": \"string\",\n  \"key_1\": 6321.912968996912\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete a connector instance",
+          "request": {
+            "name": "Delete a connector instance",
+            "description": {
+              "content": "Removes the row. Resources the connector previously ingested into Neo4j stay; the next discovery sweep / cleanupStaleNodes will mark them stale.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Test a connector's healthCheck",
+          "request": {
+            "name": "Test a connector's healthCheck",
+            "description": {
+              "content": "Invokes `spec.healthCheck()` against the live integration. Returns `{ ok, detail }`. Cheap — does not ingest anything.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ":id",
+                "test"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Trigger a one-off ingest pass",
+          "request": {
+            "name": "Trigger a one-off ingest pass",
+            "description": {
+              "content": "Runs `fetch → normalize → ingest` for the connector and records a `sync_jobs` row with the outcome. Returns the result envelope (resourcesFound / created / updated / warnings).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ":id",
+                "scan"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Connector instance sync history",
+          "request": {
+            "name": "Connector instance sync history",
+            "description": {
+              "content": "Returns up to 50 of the most recent `sync_jobs` rows for this integration with status, durations, and per-status counts. Use this to debug why an ingest didn't produce the expected nodes.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "integrations",
+                ":id",
+                "history"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "6c9e2ca3-7dda-ad9e-eb27-d24604b9081a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Connectors",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "List available connectors (registry)",
+          "request": {
+            "name": "List available connectors (registry)",
+            "description": {
+              "content": "Returns every connector registered with the framework — ServiceNow, Terraform Cloud, OTel ingest, IaC state backends. Each entry includes its `authSchema`, `configSchema`, and UI metadata. Use this to render dynamic connector-creation forms.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "connectors",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get one connector's schema",
+          "request": {
+            "name": "Get one connector's schema",
+            "description": {
+              "content": "Returns the full spec for one connector — `id`, `displayName`, `description`, JSON schemas for auth + config, UI metadata, capabilities. Used by the connector-creation UI to drive a form.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "connectors",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Discovery",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Scan AWS via Config aggregator",
+          "request": {
+            "name": "Scan AWS via Config aggregator",
+            "description": {
+              "content": "Pages every aggregated resource via `SelectAggregateResourceConfig` and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied credentials; without one, scans every enabled AWS account from `/integrations/cloud`. Requires `aggregatorName` + `aggregatorRegion` (or `AWS_CONFIG_AGGREGATOR_NAME` env var). See [docs/aws-config-aggregator-coverage.md](../docs/aws-config-aggregator-coverage.md).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "scan",
+                "aws"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"regions\": [\n    \"string\",\n    \"string\"\n  ],\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"accessKeyId\": \"string\",\n    \"secretAccessKey\": \"string\",\n    \"sessionToken\": \"string\",\n    \"aggregatorName\": \"string\",\n    \"aggregatorRegion\": \"string\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Scan Azure via Resource Graph",
+          "request": {
+            "name": "Scan Azure via Resource Graph",
+            "description": {
+              "content": "Pages a single ARG KQL query and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan against the supplied subscription/credentials; without one, scans every enabled Azure account from `/integrations/cloud`. See [docs/azure-resource-graph-coverage.md](../docs/azure-resource-graph-coverage.md).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "scan",
+                "azure"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriptionId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"tenantId\": \"string\",\n    \"clientId\": \"string\",\n    \"clientSecret\": \"string\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Scan GCP via Cloud Asset Inventory",
+          "request": {
+            "name": "Scan GCP via Cloud Asset Inventory",
+            "description": {
+              "content": "Pages `cloudasset.assets.listAssets` for the project and writes Infra + structural `:CONNECTS_TO` edges. With a body, runs a one-off scan; without one, scans every enabled GCP account from `/integrations/cloud`. See [docs/gcp-cloud-asset-coverage.md](../docs/gcp-cloud-asset-coverage.md).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "scan",
+                "gcp"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"string\",\n  \"accountId\": \"string\",\n  \"credentials\": {\n    \"key_0\": 5525.058037601411,\n    \"key_1\": 3453\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Scan every configured cloud account in parallel",
+          "request": {
+            "name": "Scan every configured cloud account in parallel",
+            "description": {
+              "content": "Fans out to `scanAWS` / `scanAzure` / `scanGCP` for every enabled account configured at `/integrations/cloud`. Bootstrap runs once at the end; cleanup is per-provider. The single response covers all three clouds with per-account breakdowns under `results.<provider>[]`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "scan",
+                "all"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Current discovery scheduler state",
+          "request": {
+            "name": "Current discovery scheduler state",
+            "description": {
+              "content": "Returns the cron-style schedule plus the last-run / next-run timestamps. The scheduler runs every enabled provider in parallel.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "schedule"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Set the discovery scheduler",
+          "request": {
+            "name": "Set the discovery scheduler",
+            "description": {
+              "content": "Replaces the schedule with `{ enabled, cron }`. The cron string is standard 5-field; consult any cron reference. Setting `enabled: false` disables future runs without deleting the config.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "schedule"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false,\n  \"cron\": \"0 */6 * * *\",\n  \"key_0\": \"string\",\n  \"key_1\": true,\n  \"key_2\": 4442.136047873646\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Trigger the scheduled scan immediately",
+          "request": {
+            "name": "Trigger the scheduled scan immediately",
+            "description": {
+              "content": "Equivalent to `POST /discovery/scan/all` but uses the same code path the scheduler does (so it picks up the same accounts + flags).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "schedule",
+                "run-now"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Per-resource debug dump (admin + APPCLOUD_DEBUG only)",
+          "request": {
+            "name": "Per-resource debug dump (admin + APPCLOUD_DEBUG only)",
+            "description": {
+              "content": "Returns the Infra node plus every `:CONNECTS_TO` edge it participates in (incoming and outgoing), with full edge properties. Use this to understand why the suggest engine made a particular call. **Admin-tier only**, and in production must also have `APPCLOUD_DEBUG=1` set.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "debug",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Pull the suggest engine's current output",
+          "request": {
+            "name": "Pull the suggest engine's current output",
+            "description": {
+              "content": "For every unmapped Infra, returns up to 5 ranked Component candidates with rule names + scores. Drives the mapping-suggestions UI.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "suggest"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Apply a batch of confirmed mappings (legacy single-action endpoint)",
+          "request": {
+            "name": "Apply a batch of confirmed mappings (legacy single-action endpoint)",
+            "description": {
+              "content": "Each mapping creates a `:CONNECTS_TO {via:\"component-mapping\", source:\"auto-mapped\"}` edge. For mixed-action batches (link + create-component + create-application), use `/discovery/suggest/apply-all`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "suggest",
+                "apply"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mappings\": [\n    {\n      \"infraId\": 6140.001891180873,\n      \"componentId\": 186.55087798833847\n    },\n    {\n      \"infraId\": 2922.082010190934,\n      \"componentId\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Apply a mixed-action batch from the suggest engine",
+          "request": {
+            "name": "Apply a mixed-action batch from the suggest engine",
+            "description": {
+              "content": "Three action shapes share one endpoint:\n- `link_component` — link existing Component to existing Infra\n- `create_component` — create a Component under an existing Application + link\n- `create_application` — create Application + Component(s) + link\n\nPhase 2 also runs after the batch: tag-based auto-link sweeps any still-unmapped Infra against the newly-created components.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "suggest",
+                "apply-all"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actions\": [\n    {\n      \"action\": \"create_component\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 1,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": true\n        },\n        {\n          \"key_0\": false,\n          \"key_1\": \"string\",\n          \"key_2\": false\n        }\n      ]\n    },\n    {\n      \"action\": \"create_application\",\n      \"infraId\": \"string\",\n      \"componentId\": \"string\",\n      \"applicationId\": \"string\",\n      \"newAppName\": \"string\",\n      \"newCompName\": \"string\",\n      \"suggestedTier\": 2,\n      \"suggestedEnv\": \"string\",\n      \"suggestedOwner\": \"string\",\n      \"suggestedType\": \"string\",\n      \"components\": [\n        {\n          \"key_0\": false\n        },\n        {\n          \"key_0\": \"string\",\n          \"key_1\": 4231\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Refresh tags for a single Infra (currently a hint)",
+          "request": {
+            "name": "Refresh tags for a single Infra (currently a hint)",
+            "description": {
+              "content": "Per-resource refresh is not yet implemented — the response is a `hint` instructing the caller to run a full provider scan. Reserved for a future targeted fetch.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "resources",
+                ":id",
+                "refresh"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List discovered Infra (with mapping status)",
+          "request": {
+            "name": "List discovered Infra (with mapping status)",
+            "description": {
+              "content": "Filterable by `provider`, `resourceType`, and `mapped` (true=only owned by a Component, false=only orphans). Each row has `mapped: bool` indicating whether at least one Component owns it via `:CONNECTS_TO {via:\"component-mapping\"}`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "resources"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "provider",
+                  "value": "azure"
+                },
+                {
+                  "disabled": false,
+                  "key": "resourceType",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "mapped",
+                  "value": "true",
+                  "description": "Filter by mapping status. Omit for both. true = only resources with at least one Component owner; false = only orphans (the Mapping agent's Pass 2 universe)."
+                },
+                {
+                  "disabled": false,
+                  "key": "limit",
+                  "value": "200"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Discovery summary — counts by provider and type",
+          "request": {
+            "name": "Discovery summary — counts by provider and type",
+            "description": {
+              "content": "For each (provider, resource_type) pair, returns total + mapped count. Drives the discovery dashboard.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "summary"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Manually link an Infra to a Component",
+          "request": {
+            "name": "Manually link an Infra to a Component",
+            "description": {
+              "content": "Idempotent MERGE of `:CONNECTS_TO {via:\"component-mapping\", source:\"manual-link\", confidence:100}`. Use this when the suggest engine missed a mapping.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "link"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"infraId\": \"db7c7a15-6fc4-6249-e4a6-19b1b0192f15\",\n  \"componentId\": \"37c55f42-9b2b-1968-d093-40883c09ce43\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete a discovered Infra resource",
+          "request": {
+            "name": "Delete a discovered Infra resource",
+            "description": {
+              "content": "Refuses (409) when any Component owns the Infra. Unlink first via `DELETE` on the owning Component's connection or use `/discovery/resources/bulk-delete` with explicit confirmation.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "resources",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) Resource UUID or unique name"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete multiple Infra resources by id",
+          "request": {
+            "name": "Delete multiple Infra resources by id",
+            "description": {
+              "content": "Per-id behavior matches `DELETE /discovery/resources/:id`: linked Infra is skipped (with reason), unlinked is removed. The response details deleted / skipped / errored.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "resources",
+                "bulk-delete"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"26e016a6-444d-3c81-bc49-65ca8c273915\",\n    \"c4d79745-8771-2837-f8c7-5bbf33501af2\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Run bootstrap (tag + RG-propagation auto-link) without scanning",
+          "request": {
+            "name": "Run bootstrap (tag + RG-propagation auto-link) without scanning",
+            "description": {
+              "content": "Useful when you've added/edited tags in the cloud and want to re-derive Application/Component mappings without paying for a full scan. Episode-tracked.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "bootstrap"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Linking strategy catalog (Azure)",
+          "request": {
+            "name": "Linking strategy catalog (Azure)",
+            "description": {
+              "content": "Returns the available enrichment strategies for Azure (resource-graph / network-watcher / monitor-insights / tagging / azure-arc / name-heuristics) with descriptions, required permissions, and token cost. Drives the strategy selector in `/discovery/enrich/azure`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "linking-strategies"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Run Azure supplement layers (Network Watcher / VM Insights / auto-link)",
+          "request": {
+            "name": "Run Azure supplement layers (Network Watcher / VM Insights / auto-link)",
+            "description": {
+              "content": "Invokes one of the named strategies from `/discovery/linking-strategies` against the configured Azure account. Idempotent — safe to re-run. `monitor-insights` requires a Log Analytics workspace ID; `network-watcher` requires Network Watcher Reader.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "enrich",
+                "azure"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"strategy\": \"resource-graph\",\n  \"accountId\": \"string\",\n  \"workspaceId\": \"string\",\n  \"autoLink\": true,\n  \"minScore\": 60,\n  \"key_0\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Catalogue of supported cloud providers",
+          "request": {
+            "name": "Catalogue of supported cloud providers",
+            "description": {
+              "content": "Returns the static list of providers AppCloud can scan (aws / azure / gcp) with display metadata. UI uses this to render the provider picker.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "providers"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Catalogue of recognised resource types",
+          "request": {
+            "name": "Catalogue of recognised resource types",
+            "description": {
+              "content": "Returns the per-provider, typed-label catalogue derived from `discovery.schema.js`. Includes the cross-cloud ontology label (e.g. `ComputeInstance` covers Azure VM, EC2, GCE) and an icon hint.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "discovery",
+                "resource-types"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Audit",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Paginated audit log",
+          "request": {
+            "name": "Paginated audit log",
+            "description": {
+              "content": "Every mutation API call writes a row here. `actor` is exact-match by default — pass `?like=true` to opt into the legacy substring/ILIKE behaviour (separate keys with similar names like `ci-deploy-staging` / `ci-deploy-prod` previously collapsed into one query, which is now opt-in). Other filters: `action`, `resourceType`, `resourceId`, `keyId` (exact UUID), `scope` (admin|write|read), `from`/`to` (ISO date), `q` (substring on `resource_name` OR `actor`). Returns `{ rows, total, page, pageSize, pages }`. Each row includes `actorKeyId` and `actorScope` so a row can be traced back to the specific API key that performed the action.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "audit",
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "page",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "pageSize",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "action",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "resourceType",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "resourceId",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "actor",
+                  "value": "string",
+                  "description": "Exact match by default. Set `like=true` for case-insensitive substring (legacy)."
+                },
+                {
+                  "disabled": false,
+                  "key": "like",
+                  "value": "false",
+                  "description": "Opt-in substring match for `actor` (default false = exact match)."
+                },
+                {
+                  "disabled": false,
+                  "key": "keyId",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "description": "Exact match on actor_key_id — see GET /admin/api-keys for ids."
+                },
+                {
+                  "disabled": false,
+                  "key": "scope",
+                  "value": "write"
+                },
+                {
+                  "disabled": false,
+                  "key": "from",
+                  "value": "1965-07-15T01:42:24.378Z"
+                },
+                {
+                  "disabled": false,
+                  "key": "to",
+                  "value": "1965-07-15T01:42:24.378Z"
+                },
+                {
+                  "disabled": false,
+                  "key": "q",
+                  "value": "string"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Audit-log analytics for the last N days",
+          "request": {
+            "name": "Audit-log analytics for the last N days",
+            "description": {
+              "content": "Returns counts grouped by action / resource_type / actor plus a daily-activity series for sparklines. Default window is 30 days; pass `?days=N` to widen.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "audit",
+                "stats"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "days",
+                  "value": "30"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Full audit history for a specific resource",
+          "request": {
+            "name": "Full audit history for a specific resource",
+            "description": {
+              "content": "Up to the last 500 events for one (resource_type, resource_id) pair, newest first. `resource_type` is one of `Application`, `Component`, `Infra`, `CloudAccount`, etc.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "audit",
+                "resource",
+                ":type",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "type",
+                  "description": "(Required) "
+                },
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "All audit events by a specific actor (paginated)",
+          "request": {
+            "name": "All audit events by a specific actor (paginated)",
+            "description": {
+              "content": "Exact match on the `actor` column by default. Pass `?like=true` for case-insensitive substring (legacy behaviour, collapses across similarly-named keys). Optional `?keyId=<uuid>` narrows to a specific stored API key (exact match on actor_key_id) — preferable to substring-name matching once you know the key id. Optional `?scope=admin|write|read` narrows to one privilege tier.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "audit",
+                "actor",
+                ":name"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "page",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "pageSize",
+                  "value": "string"
+                },
+                {
+                  "disabled": false,
+                  "key": "keyId",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a"
+                },
+                {
+                  "disabled": false,
+                  "key": "scope",
+                  "value": "write"
+                },
+                {
+                  "disabled": false,
+                  "key": "like",
+                  "value": "false",
+                  "description": "Opt-in substring match (default false = exact match)."
+                }
+              ],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "n-op495+cLRfrj+8S9ClYsFpEjlxiQFNLrnu-1ta17cWQxbn+1MoPICLD:tH6E5MVVfC6DE-VWS-1P",
+                  "key": "name",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Audit retry-buffer state (pending + lifetime counters)",
+          "request": {
+            "name": "Audit retry-buffer state (pending + lifetime counters)",
+            "description": {
+              "content": "Snapshot of the audit() retry buffer — the in-memory queue that holds audit rows during a Postgres outage. Use this when debugging \"why are some audit rows missing?\" or when alerts fire on the matching Prometheus gauges. Admin-tier; no rate limit on this route.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "audit-cleanup",
+                "buffer-stats"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Trigger an audit-log retention pass right now",
+          "request": {
+            "name": "Trigger an audit-log retention pass right now",
+            "description": {
+              "content": "Equivalent to the periodic retention tick — drops expired partitions and ensures the current+next-month partitions exist. Idempotent: a second call within seconds will report `dropped: []`. Admin-tier only.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "audit-cleanup",
+                "run-now"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Audit-log default partition attachment state",
+          "request": {
+            "name": "Audit-log default partition attachment state",
+            "description": {
+              "content": "Reports whether audit_log_default is currently attached to the partition tree. A `detached: true` response is a paging condition — INSERTs whose month has no monthly partition will silently fail. Recover with: `ALTER TABLE audit_log ATTACH PARTITION audit_log_default DEFAULT`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "audit-cleanup",
+                "default-partition-state"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Redistribute audit_log_default rows into monthly partitions",
+          "request": {
+            "name": "Redistribute audit_log_default rows into monthly partitions",
+            "description": {
+              "content": "Scans the default partition and moves rows into the partition matching their `created_at` month, creating new monthly partitions as needed. Use this once after the partitioning migration has parked old rows in the default, or any time pre-migration / unrouted rows accumulate. Admin-tier only.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "audit-cleanup",
+                "redistribute-default"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "CMDB",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "/cmdb/assessment",
+          "request": {
+            "name": "/cmdb/assessment",
+            "description": {},
+            "url": {
+              "path": [
+                "cmdb",
+                "assessment"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "/cmdb/assessment/state",
+          "request": {
+            "name": "/cmdb/assessment/state",
+            "description": {},
+            "url": {
+              "path": [
+                "cmdb",
+                "assessment",
+                "state"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "/cmdb/assessment/runs",
+          "request": {
+            "name": "/cmdb/assessment/runs",
+            "description": {},
+            "url": {
+              "path": [
+                "cmdb",
+                "assessment",
+                "runs"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "/cmdb/assessment/:sys_id",
+          "request": {
+            "name": "/cmdb/assessment/:sys_id",
+            "description": {},
+            "url": {
+              "path": [
+                "cmdb",
+                "assessment",
+                ":sys_id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "string",
+                  "key": "sys_id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "/cmdb/assessment/refresh",
+          "request": {
+            "name": "/cmdb/assessment/refresh",
+            "description": {},
+            "url": {
+              "path": [
+                "cmdb",
+                "assessment",
+                "refresh"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "POST",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Admin",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Create a new API key",
+          "request": {
+            "name": "Create a new API key",
+            "description": {
+              "content": "Generates a fresh `ak_…` plaintext, stores SHA-256(plaintext) + the requested scopes, and returns the plaintext **once**. Save it immediately — it is never recoverable.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "api-keys"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ci-deploy-bot\",\n  \"scopes\": [\n    \"write\"\n  ],\n  \"expiresAt\": \"2026-12-31T23:59:59Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List API keys",
+          "request": {
+            "name": "List API keys",
+            "description": {
+              "content": "Returns every row including revoked ones, sorted by creation time (newest first). Plaintext is **never** returned — only the prefix and metadata.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "api-keys"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "includeRevoked",
+                  "value": "false"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Revoke an API key",
+          "request": {
+            "name": "Revoke an API key",
+            "description": {
+              "content": "Soft-deletes the key by setting `revoked_at = now()`. Bootstrap rows (env-var-derived) cannot be revoked here — rotate the env var instead.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "api-keys",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update an API key (name / scopes / expiresAt)",
+          "request": {
+            "name": "Update an API key (name / scopes / expiresAt)",
+            "description": {
+              "content": "Updates the row metadata. The secret cannot be patched — generate a new key and revoke the old one. Bootstrap rows are read-only. Pass `expiresAt: null` to clear an expiry, or an ISO instant to set/extend.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "api-keys",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"vcJu66sIfS\",\n  \"scopes\": [\n    \"write\"\n  ],\n  \"expiresAt\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Create a tenant",
+          "request": {
+            "name": "Create a tenant",
+            "description": {
+              "content": "Inserts a row in `control.tenants` and provisions the matching Postgres schema (`tenant_<id>`) by applying every per-tenant migration in api/src/migrations/tenant-schema/. Both happen in a single transaction so failure to provision the schema rolls back the row insert. Phase 2 will add the per-tenant Neo4j database. Pass `?allowReserved=true` to override the reserved-slug guard (super-admin only — used by agents/seed.js to bootstrap `default-test`).",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "allowReserved",
+                  "value": "false",
+                  "description": "Bypass the reserved-slug guard. Super-admin only. Used by agents/seed.js to provision the `default-test` tenant."
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"acme-corp\",\n  \"displayName\": \"Acme Corporation\",\n  \"metadata\": {\n    \"region\": \"us-east-1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List tenants",
+          "request": {
+            "name": "List tenants",
+            "description": {
+              "content": "Returns every tenant row, sorted by creation time (newest first). Filter by status with `?status=active|suspended|pending_delete`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "status",
+                  "value": "active"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get a tenant by id",
+          "request": {
+            "name": "Get a tenant by id",
+            "description": {},
+            "url": {
+              "path": [
+                "admin",
+                "tenants",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update tenant (display name / status / metadata)",
+          "request": {
+            "name": "Update tenant (display name / status / metadata)",
+            "description": {
+              "content": "Updates the row metadata. Slug is immutable. Status can move active ↔ suspended; pending_delete is set via DELETE and cannot be reversed here.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"string\",\n  \"status\": \"active\",\n  \"metadata\": {\n    \"key_0\": false,\n    \"key_1\": \"string\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Soft-delete a tenant",
+          "request": {
+            "name": "Soft-delete a tenant",
+            "description": {
+              "content": "Sets status = pending_delete. Hard delete (drop schema, drop Neo4j database, delete rows) is a Phase 4 background job. Cannot delete the seeded `default` tenant — that row is the migration backstop for single-tenant deployments.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "admin",
+                "tenants",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "AI",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "AI provider availability snapshot",
+          "request": {
+            "name": "AI provider availability snapshot",
+            "description": {
+              "content": "Returns whether the local provider (Ollama) and the cloud provider (Anthropic / OpenAI / Gemini / Azure) are reachable, plus model + baseUrl. Used by the UI to gate AI-feature affordances.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "status"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Plain-English explanation for a mapping suggestion",
+          "request": {
+            "name": "Plain-English explanation for a mapping suggestion",
+            "description": {
+              "content": "Given an Infra + a candidate Component mapping (output of `/discovery/suggest`), the local LLM produces a human-readable rationale. Useful for tooltips on suggestion cards.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "suggest",
+                "explain"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"infra\": {\n    \"key_0\": 4137.125292327255\n  },\n  \"suggestion\": {\n    \"key_0\": \"string\",\n    \"key_1\": 1070\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "AI-augmented Application/Component scoring for one Infra",
+          "request": {
+            "name": "AI-augmented Application/Component scoring for one Infra",
+            "description": {
+              "content": "Given an Infra id, returns LLM-scored candidate Applications. Complements the rule-based scores from the suggest engine; clients combine both.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "suggest",
+                "score"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"infraId\": \"90a84694-fbec-4e65-170a-a484267fdd28\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Plain-English blast-radius narrative for one Infra",
+          "request": {
+            "name": "Plain-English blast-radius narrative for one Infra",
+            "description": {
+              "content": "Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "infra",
+                ":id",
+                "impact"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "disabled": false,
+                  "type": "any",
+                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
+                  "key": "id",
+                  "description": "(Required) "
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "High-level architectural plan over the whole graph (cloud LLM)",
+          "request": {
+            "name": "High-level architectural plan over the whole graph (cloud LLM)",
+            "description": {
+              "content": "Fetches a graph snapshot (apps, infra summary, cross-app dependencies) and asks the configured cloud LLM for an architectural review. Returns 503 when no cloud AI is configured.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "architecture",
+                "plan"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Remediation plan for unmapped/drifted Infra (cloud LLM)",
+          "request": {
+            "name": "Remediation plan for unmapped/drifted Infra (cloud LLM)",
+            "description": {
+              "content": "Without a body, picks up to 50 unmapped discovered Infra nodes and asks the cloud LLM to propose mappings or tag changes. With a body, scores the supplied items.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "drift",
+                "remediation-plan"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"key_0\": 9513.867204077542\n    },\n    {\n      \"key_0\": 7431.726991198957,\n      \"key_1\": 7889.040012378246\n    }\n  ],\n  \"key_0\": 1882,\n  \"key_1\": 3238\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Cross-app dependency analysis (cloud LLM)",
+          "request": {
+            "name": "Cross-app dependency analysis (cloud LLM)",
+            "description": {
+              "content": "Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "dependencies",
+                "analysis"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Conversational chat with live graph context",
+          "request": {
+            "name": "Conversational chat with live graph context",
+            "description": {
+              "content": "Injects a fresh snapshot of applications + infra + unmapped resources + cross-app deps into the system prompt before forwarding the conversation. Returns the assistant's reply plus a reference to the context used.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "ai",
+                "chat"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "auth": null,
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    },\n    {\n      \"role\": \"system\",\n      \"content\": \"string\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    },
+    {
+      "name": "Health",
+      "description": {
+        "content": "",
+        "type": "text/plain"
+      },
+      "item": [
+        {
+          "name": "Prometheus metrics",
+          "request": {
+            "name": "Prometheus metrics",
+            "description": {
+              "content": "Plain-text Prometheus exposition for the API process. Open by convention — Prometheus scrapes pods over the cluster network where network policy provides isolation, not API keys. Audit-buffer saturation gauge `appcloud_audit_buffer_pending` and `appcloud_audit_buffer_dropped_total` are the high-leverage alert targets.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "metrics"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Liveness probe",
+          "request": {
+            "name": "Liveness probe",
+            "description": {},
+            "url": {
+              "path": [
+                "health"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Readiness probe",
+          "request": {
+            "name": "Readiness probe",
+            "description": {},
+            "url": {
+              "path": [
+                "ready"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "API banner",
+          "request": {
+            "name": "API banner",
+            "description": {},
+            "url": {
+              "path": [
+                ""
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ],
+      "event": []
+    }
+  ],
+  "event": [],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "info": {
+    "name": "AppCloud API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Generated from docs/openapi.yaml via `npm run openapi:export`.\n\n## Setup\n1. Set `baseUrl` (default `http://localhost:3000`) and `apiKey`\n2. Hit `Quickstart → GET /health`\n3. Walk the per-tag folders for full CRUD coverage\n\nFor narrative workflow recipes, see `docs/api-guide.md §13`."
+  }
+}

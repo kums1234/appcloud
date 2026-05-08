@@ -3,8 +3,8 @@
  *
  * Central schema constants for the discovery pipeline.
  * Defines typed Neo4j labels, typed relationship names, and promoted
- * properties — shared by discovery.js, discovery.azure.enrich.js,
- * and integrations.js.
+ * properties — shared by discovery.js, discovery.azure.js,
+ * discovery.azure.supplement.js, and integrations.js.
  *
  * Design: additive dual-label approach — every node keeps the :Infra
  * label for backward compatibility; typed labels are added alongside it.
@@ -45,6 +45,11 @@ export const RESOURCE_TYPE_LABELS = {
   'azure:cosmos_db':           ['AzureCosmosDB',      'DatabaseInstance'],
   'azure:postgres_server':     ['AzurePostgres',      'DatabaseInstance'],
   'azure:mysql_server':        ['AzureMySQL',         'DatabaseInstance'],
+  'azure:container_registry':  ['AzureACR',           'ContainerRegistry'],
+  'azure:nsg':                 ['AzureNSG',           'NetworkDevice'],
+  'azure:private_dns':         ['AzurePrivateDNS',    'DNSService'],
+  'azure:log_analytics':       ['AzureLogAnalytics',  'MonitoringService'],
+  'azure:static_web_app':      ['AzureStaticWebApp',  'WebService'],
   // Arc resources
   'azure:arc_server':          ['AzureArcServer',     'ComputeInstance'],
   'azure:arc_kubernetes':      ['AzureArcK8s',        'ContainerCluster'],
@@ -70,36 +75,6 @@ export const RESOURCE_TYPE_LABELS = {
   'gcp:cloud_run':             ['GCPCloudRun',         'ServerlessFunction'],
   'gcp:cloud_function':        ['GCPCloudFunction',    'ServerlessFunction'],
   'gcp:gcs_bucket':            ['GCSBucket',           'ObjectStorage'],
-}
-
-// ─── Typed Relationship Labels ───────────────────────────────────────────────
-//
-// Maps the `via` property on :CONNECTED_TO edges to a typed relationship name.
-// Both the typed rel AND the legacy :CONNECTED_TO are written (dual-write)
-// so existing queries continue to work.
-
-export const VIA_TO_REL_TYPE = {
-  'nic':                  'NETWORK_INTERFACE',
-  'disk':                 'ATTACHED_DISK',
-  'subnet':               'PART_OF_SUBNET',
-  'vnet':                 'MEMBER_OF_VNET',
-  'nsg':                  'SECURED_BY',
-  'public-ip':            'HAS_PUBLIC_IP',
-  'route-table':          'USES_ROUTE_TABLE',
-  'app-service-plan':     'HOSTED_ON_PLAN',
-  'vnet-integration':     'VNET_INTEGRATED',
-  'app-insights':         'MONITORED_BY',
-  'aks-node-subnet':      'AKS_NODE_SUBNET',
-  'sql-server':           'CHILD_OF_SERVER',
-  'redis-vnet-injection': 'VNET_INJECTED',
-  'private-endpoint':     'PRIVATE_ENDPOINT',
-  'keyvault-vnet-rule':   'KEYVAULT_ACL',
-  'lb-backend-nic':       'LB_BACKEND',
-  'agw-subnet':           'AGW_SUBNET',
-  'observed-tcp':         'OBSERVED_CONNECTION',
-  'monitors':             'MONITORS',
-  'contains':             'TOPOLOGY_CONTAINS',
-  'associated':           'TOPOLOGY_ASSOCIATED',
 }
 
 // ─── Promoted Raw Fields ─────────────────────────────────────────────────────
@@ -133,6 +108,10 @@ export const RAW_PROMOTED_FIELDS = {
     subnetwork:       'subnetwork',
     internalIp:       'private_ip',
     externalIp:       'public_ip',
+    caiName:          'cai_name',   // CAI canonical asset.name (//svc.googleapis.com/...)
+                                    // — used by IAM-policy supplement to resolve
+                                    // policy-target resources back to Infra nodes
+                                    // when their cloud_id is the REST self-link.
   },
 }
 
@@ -149,16 +128,6 @@ export const RAW_PROMOTED_FIELDS = {
 export function getLabelsForType(provider, resourceType) {
   const key = `${(provider || '').toLowerCase()}:${(resourceType || '').toLowerCase()}`
   return RESOURCE_TYPE_LABELS[key] || []
-}
-
-/**
- * Get the typed relationship name for a given `via` value.
- *
- *   getTypedRel('nic') → 'NETWORK_INTERFACE'
- *   getTypedRel('unknown') → null
- */
-export function getTypedRel(via) {
-  return VIA_TO_REL_TYPE[(via || '').toLowerCase()] || null
 }
 
 /**
@@ -189,6 +158,30 @@ export function buildLabelSetClause(provider, resourceType, alias = 'i') {
   return `SET ${alias}:${labels.join(':')}`
 }
 
+// ─── Component Typed Labels (telemetry-derived) ──────────────────────────────
+//
+// Components created from live telemetry (OTel spans, APM vendor service-maps,
+// service-mesh metrics) receive these labels on top of the base :Component.
+// Gives queries a clean way to pick workload-flavoured components out:
+//
+//   MATCH (s:TelemetryService)-[r:CONNECTS_TO]->(t:TelemetryService)
+//   WHERE r.source = 'otel' AND r.error_rate > 0.05
+//   RETURN s.name, t.name, r.p95_ms
+//
+// Manually-defined Components (via the UI or IaC mapping) do not get these
+// labels — keep the :TelemetryService label as a marker of "observed from
+// the outside" rather than "modelled deliberately".
+
+export const TELEMETRY_COMPONENT_LABELS = ['TelemetryService', 'Workload']
+
+/**
+ * Build the Cypher SET clause fragment for telemetry-component labels.
+ * Returns e.g. "SET c:TelemetryService:Workload".
+ */
+export function buildTelemetryComponentLabelClause(alias = 'c') {
+  return `SET ${alias}:${TELEMETRY_COMPONENT_LABELS.join(':')}`
+}
+
 // ─── Resource Classification ─────────────────────────────────────────────────
 //
 // Controls which resource types are treated as infrastructure plumbing vs
@@ -202,7 +195,7 @@ export function buildLabelSetClause(provider, resourceType, alias = 'i') {
  */
 export const INFRA_ONLY_TYPES = new Set([
   // Azure network plumbing
-  'vnet', 'app_service_plan',
+  'vnet', 'app_service_plan', 'nsg', 'private_dns',
   // AWS network plumbing
   'vpc', 'subnet', 'security_group',
   // Generic (may arrive via Terraform import)

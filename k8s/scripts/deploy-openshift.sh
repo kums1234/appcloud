@@ -47,7 +47,7 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
   oc registry login 2>/dev/null || \
     docker login -u "$(oc whoami)" -p "$(oc whoami -t)" "$OC_REGISTRY"
 
-  for svc in api ui; do
+  for svc in api; do
     echo "► Building and pushing appcloud-$svc..."
     docker build -t "$REGISTRY_PATH/appcloud-$svc:latest" "$ROOT_DIR/$svc"
     docker push "$REGISTRY_PATH/appcloud-$svc:latest"
@@ -66,9 +66,13 @@ oc -n "$OC_PROJECT" create secret generic appcloud-pg-credentials \
   --from-file=pg_username="$SECRETS_DIR/pg_username.txt" \
   --from-file=pg_password="$SECRETS_DIR/pg_password.txt"
 
-oc -n "$OC_PROJECT" delete secret appcloud-jwt-secret 2>/dev/null || true
-oc -n "$OC_PROJECT" create secret generic appcloud-jwt-secret \
-  --from-file=jwt_secret="$SECRETS_DIR/jwt_secret.txt"
+oc -n "$OC_PROJECT" delete secret appcloud-api-key 2>/dev/null || true
+oc -n "$OC_PROJECT" create secret generic appcloud-api-key \
+  --from-file=appcloud_api_key="$SECRETS_DIR/appcloud_api_key.txt"
+
+oc -n "$OC_PROJECT" delete secret appcloud-encryption-key 2>/dev/null || true
+oc -n "$OC_PROJECT" create secret generic appcloud-encryption-key \
+  --from-file=appcloud_encryption_key="$SECRETS_DIR/appcloud_encryption_key.txt"
 
 # ── Deploy ─────────────────────────────────────────────────────────────────────
 echo "► Applying kustomize overlay (openshift)..."
@@ -78,16 +82,14 @@ echo "► Waiting for rollouts..."
 kubectl -n "$OC_PROJECT" rollout status deployment/neo4j    --timeout=300s
 kubectl -n "$OC_PROJECT" rollout status deployment/postgres --timeout=180s
 kubectl -n "$OC_PROJECT" rollout status deployment/api      --timeout=180s
-kubectl -n "$OC_PROJECT" rollout status deployment/ui       --timeout=180s
 
 echo ""
-ROUTE=$(oc -n "$OC_PROJECT" get route appcloud-ui -o jsonpath='{.spec.host}' 2>/dev/null || echo "pending...")
+ROUTE=$(oc -n "$OC_PROJECT" get route appcloud-api -o jsonpath='{.spec.host}' 2>/dev/null || echo "pending...")
 echo "══════════════════════════════════════════════════"
 echo "  ✓  AppCloud is running on OpenShift!"
 echo "══════════════════════════════════════════════════"
 echo ""
-echo "  UI Route:  https://$ROUTE"
-echo "  API Route: $(oc -n $OC_PROJECT get route appcloud-api -o jsonpath='{.spec.host}' 2>/dev/null)"
+echo "  API Route: https://$ROUTE"
 echo ""
 echo "  Logs:     oc -n $OC_PROJECT logs -f deploy/api"
 echo "  All pods: oc -n $OC_PROJECT get pods"

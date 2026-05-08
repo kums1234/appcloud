@@ -24,43 +24,89 @@ export async function neo4jPlugin(fastify) {
            || process.env.NEO4J_URI  // fallback for docker-compose compatibility
            || 'bolt://localhost:7687'
 
+  // TLS — `bolt+s://` (verified) and `bolt+ssc://` (self-signed-cert
+  // tolerated) flip on driver-side encryption. The driver picks up the
+  // scheme on its own, so all we do here is warn when prod-shaped
+  // hostnames stay on plaintext bolt://. See DEVELOPMENT.md "Internal TLS
+  // posture" — current default is plaintext intra-cluster on K8s.
+  const isPlainBolt = /^bolt:\/\//.test(uri) || /^neo4j:\/\//.test(uri)
+  const looksRemote = !/(localhost|127\.0\.0\.1|::1|\bneo4j\b)/i.test(uri)
+  if (isPlainBolt && /^(true|1|yes)$/i.test(process.env.APPCLOUD_REQUIRE_TLS || '')) {
+    // Hard-fail: APPCLOUD_REQUIRE_TLS=true means refuse to start without
+    // an encrypted connection, regardless of host shape.
+    throw new Error(
+      `[neo4j] APPCLOUD_REQUIRE_TLS=true but URI ${uri} is plaintext — ` +
+      `switch APPCLOUD_NEO4J_URI to bolt+s:// (or neo4j+s://, or bolt+ssc:// for self-signed certs) ` +
+      `or unset APPCLOUD_REQUIRE_TLS`,
+    )
+  }
+  if (isPlainBolt && looksRemote) {
+    fastify.log.warn(
+      `[neo4j] ${uri} is unencrypted — switch to bolt+s:// (or neo4j+s://) when ` +
+      `the target is outside the cluster trust boundary`,
+    )
+  }
+
   fastify.log.info(`Neo4j connecting to: ${uri}`)
 
-  const driver = neo4j.driver(
-    uri,
-    neo4j.auth.basic(username, password)
-  )
-
+  // Graceful degradation: if Neo4j is unreachable at boot, decorate
+  // with a stub that returns 503 from query/write rather than crashing
+  // the entire API. The previous behaviour (throw on verifyConnectivity
+  // failure) meant a Neo4j rolling restart, version upgrade, or pre-
+  // ready-state during a fresh deploy would crash-loop the API pods.
+  // The /ready endpoint (server.js) probes connectivity per-request so
+  // K8s can route traffic away from a pod whose Neo4j is degraded.
+  let driver
+  let connected = false
   try {
+    driver = neo4j.driver(uri, neo4j.auth.basic(username, password))
     await driver.verifyConnectivity()
+    connected = true
     fastify.log.info('Neo4j connected successfully')
   } catch (err) {
-    fastify.log.error({ err }, 'Neo4j connection failed')
-    throw err
+    fastify.log.error({ err: err.message, uri }, 'Neo4j connection failed — decorating fastify.neo4j with a 503 stub')
+    if (driver) { try { await driver.close() } catch {} }
+    driver = null
   }
 
-  const query = async (cypher, params = {}) => {
-    const session = driver.session()
-    try {
-      const result = await session.run(cypher, params)
-      return result.records
-    } finally {
-      await session.close()
-    }
-  }
+  const unavailableErr = () => Object.assign(
+    new Error('neo4j unavailable'),
+    { code: 'NEO4J_UNAVAILABLE', statusCode: 503 },
+  )
 
-  const write = async (cypher, params = {}) => {
-    const session = driver.session({ defaultAccessMode: neo4j.session.WRITE })
-    try {
-      const result = await session.executeWrite(tx => tx.run(cypher, params))
-      return result.records
-    } finally {
-      await session.close()
-    }
-  }
+  const query = connected
+    ? async (cypher, params = {}) => {
+        const session = driver.session()
+        try {
+          const result = await session.run(cypher, params)
+          return result.records
+        } finally {
+          await session.close()
+        }
+      }
+    : async () => { throw unavailableErr() }
 
-  fastify.decorate('neo4j', { driver, query, write })
-  fastify.addHook('onClose', async () => { await driver.close() })
+  const write = connected
+    ? async (cypher, params = {}) => {
+        const session = driver.session({ defaultAccessMode: neo4j.session.WRITE })
+        try {
+          const result = await session.executeWrite(tx => tx.run(cypher, params))
+          return result.records
+        } finally {
+          await session.close()
+        }
+      }
+    : async () => { throw unavailableErr() }
+
+  // verifyConnectivity() called from /ready with a tight timeout; the
+  // stub returns immediately so a degraded pod stays unready instead
+  // of hanging until the probe deadline.
+  const ping = connected
+    ? async () => { await driver.verifyConnectivity(); return true }
+    : async () => { throw unavailableErr() }
+
+  fastify.decorate('neo4j', { driver, query, write, ping, connected })
+  fastify.addHook('onClose', async () => { if (driver) await driver.close() })
 
   // ── Ensure indexes on startup ──────────────────────────────────────────
   // Creates indexes for core Infra properties and typed labels.
@@ -97,11 +143,25 @@ export async function neo4jPlugin(fastify) {
     'CREATE INDEX IF NOT EXISTS FOR (c:Component) ON (c.name)',
   ]
 
-  // Run index creation in parallel, best-effort (never block startup)
-  try {
-    await Promise.allSettled(indexes.map(idx => write(idx)))
-    fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes)`)
-  } catch (err) {
-    fastify.log.warn(`Neo4j index creation: ${err.message}`)
+  // Run index creation in waves of 4. The previous shape fired all
+  // ~21 statements in a single Promise.allSettled, which works but
+  // briefly creates a 21-deep connection burst against the driver's
+  // pool right at startup — every other operation queues behind it.
+  // Waves of 4 cap the burst at the typical pool's burst capacity
+  // and add ~milliseconds of total time, which is invisible.
+  // Best-effort: never blocks startup on a transient index failure.
+  const INDEX_BATCH_SIZE = 4
+  if (connected) {
+    try {
+      for (let i = 0; i < indexes.length; i += INDEX_BATCH_SIZE) {
+        const wave = indexes.slice(i, i + INDEX_BATCH_SIZE)
+        await Promise.allSettled(wave.map(idx => write(idx)))
+      }
+      fastify.log.info(`Neo4j indexes ensured (${indexes.length} indexes, batched in waves of ${INDEX_BATCH_SIZE})`)
+    } catch (err) {
+      fastify.log.warn(`Neo4j index creation: ${err.message}`)
+    }
+  } else {
+    fastify.log.warn('[neo4j] index creation skipped — Neo4j unavailable (stub mode)')
   }
 }

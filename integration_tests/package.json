@@ -6,9 +6,7 @@
   "scripts": {
     "test":        "jest --runInBand --forceExit --verbose",
     "test:discovery": "jest --runInBand --forceExit --verbose tests/discovery.test.js",
-    "test:accounts":  "jest --runInBand --forceExit --verbose tests/accounts.test.js",
-    "test:workflows": "jest --runInBand --forceExit --verbose tests/workflows.test.js",
-    "test:governance":"jest --runInBand --forceExit --verbose tests/governance.test.js"
+    "test:accounts":  "jest --runInBand --forceExit --verbose tests/accounts.test.js"
   },
   "jest": {
     "testEnvironment": "node",

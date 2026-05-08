@@ -1,28 +1,98 @@
 #!/usr/bin/env node
 
+// Load agents/.env (APPCLOUD_API_KEY etc.) before reading process.env.
+// Other entrypoints get this transitively via lib/config.js; seed.js
+// doesn't import config and was silently ignoring .env.
+import 'dotenv/config';
+
 /**
  * Seed script for AppCloud Multi-Agent Pipeline demo.
  *
- * Populates the AppCloud graph with realistic infrastructure, applications,
- * components, connections, and changes — so the agents have data to work with
- * without needing real cloud accounts.
+ * Populates the `default` tenant — and ONLY that tenant — with realistic
+ * applications, components, connections, and infra so the agents have data to
+ * work against without real cloud accounts.
+ *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  TODO (Phase 1c follow-up branch — see docs/TODO-phase-1c.md):         ║
+ * ║                                                                        ║
+ * ║  This seed is *supposed* to write to a dedicated `default-test`        ║
+ * ║  tenant, isolated from `default`. The supporting plumbing already      ║
+ * ║  ships on this branch — `?allowReserved=true` on POST /admin/tenants,  ║
+ * ║  the reserved-slug list, the auto-create flow.                         ║
+ * ║                                                                        ║
+ * ║  But api/src/plugins/tenant-context.js:429 currently 503-gates every   ║
+ * ║  data write on non-default tenants because the per-tenant Postgres     ║
+ * ║  schema template only contains the minimal table set (integrations +   ║
+ * ║  cloud_accounts). Lifting that gate is Phase 1c — expanding the        ║
+ * ║  template to cover every data table.                                   ║
+ * ║                                                                        ║
+ * ║  Until Phase 1c lands we target `default` so the smoke flow (seed →    ║
+ * ║  map → blast-radius → chat) actually does something. The moment it     ║
+ * ║  lands, switch this back to 'default-test' (single-line change).       ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * Hard rules:
+ *   - The target tenant slug is hard-coded. Not configurable.
+ *   - Refuses to run when NODE_ENV=production.
  *
  * Usage:
- *   node seed.js              # Seed with default API URL
- *   node seed.js --clean      # Delete all seeded data first, then re-seed
+ *   node seed.js              # Seed
+ *   node seed.js --clean      # Delete previously seeded rows first
  *
- * Requires: AppCloud API running (docker-compose up)
+ * Requires: AppCloud API running, APPCLOUD_API_KEY set to a super-admin key.
  */
 
-const API = process.env.APPCLOUD_API_URL || 'http://localhost:3000';
-const doClean = process.argv.includes('--clean');
+// TODO(phase-1c): switch back to 'default-test' once the per-tenant schema
+// template is complete and tenant-context.js:429 no longer 503s data writes.
+const TENANT_SLUG   = 'default';
+const TENANT_NAME   = 'Default tenant';
+const API           = process.env.APPCLOUD_API_URL || 'http://localhost:3000';
+const API_KEY       = process.env.APPCLOUD_API_KEY  || '';
+const doClean       = process.argv.includes('--clean');
+
+if (process.env.NODE_ENV === 'production') {
+  console.error('ERROR: agents/seed.js refuses to run with NODE_ENV=production.');
+  console.error(`  This script writes to a hard-coded \`${TENANT_SLUG}\` tenant intended for dev/test only.`);
+  process.exit(1);
+}
+
+if (!API_KEY) {
+  console.error('ERROR: APPCLOUD_API_KEY is required (sets the X-API-Key header).');
+  console.error('  Use the bootstrap super-admin key from the API container.');
+  process.exit(1);
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-async function req(method, path, body = null) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (globalThis._token) headers['Authorization'] = `Bearer ${globalThis._token}`;
+// reqRaw() does not send X-Tenant-Slug — used for /admin/* calls that resolve
+// the target tenant from the body or path, not the header. req() pins every
+// other call to the seeded tenant.
+async function reqRaw(method, path, body = null) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-API-Key':    API_KEY,
+  };
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
 
+  const res = await fetch(`${API}${path}`, opts);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+
+  if (!res.ok && res.status !== 409) {
+    console.error(`  FAIL ${method} ${path} (${res.status}):`, typeof data === 'string' ? data.slice(0, 200) : data);
+    return null;
+  }
+  return data;
+}
+
+async function req(method, path, body = null) {
+  const headers = {
+    'Content-Type':  'application/json',
+    'X-API-Key':     API_KEY,
+    'X-Tenant-Slug': TENANT_SLUG,
+  };
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
@@ -40,32 +110,38 @@ async function req(method, path, body = null) {
 
 function log(icon, msg) { console.log(`  ${icon}  ${msg}`); }
 
-// ─── Auth ───────────────────────────────────────────────────────────────────
+// ─── Tenant + Auth ──────────────────────────────────────────────────────────
+// The target tenant is hard-coded to `default-test`. We auto-create it via
+// /admin/tenants?allowReserved=true (super-admin only) when missing, so a
+// fresh DB doesn't require any operator pre-step.
+
+async function ensureTenant() {
+  const tenants = await reqRaw('GET', '/admin/tenants');
+  if (!Array.isArray(tenants)) {
+    console.error('ERROR: could not list tenants — does APPCLOUD_API_KEY have super-admin scope?');
+    process.exit(1);
+  }
+  const existing = tenants.find(t => t.slug === TENANT_SLUG);
+  if (existing) {
+    log('🏢', `Tenant '${TENANT_SLUG}' already exists`);
+    return existing;
+  }
+  log('🏢', `Tenant '${TENANT_SLUG}' missing — creating via ?allowReserved=true`);
+  const created = await reqRaw(
+    'POST',
+    '/admin/tenants?allowReserved=true',
+    { slug: TENANT_SLUG, displayName: TENANT_NAME, metadata: { seededBy: 'agents/seed.js' } },
+  );
+  if (!created?.id) {
+    console.error(`ERROR: could not create tenant '${TENANT_SLUG}'.`);
+    process.exit(1);
+  }
+  return created;
+}
 
 async function ensureUser() {
-  log('👤', 'Registering seed user...');
-  // Try register; if already exists, login
-  let result = await req('POST', '/auth/register', {
-    name: 'seed-admin',
-    email: 'seed@appcloud.local',
-    password: 'SeedPass123!',
-  });
-
-  if (!result || !result.token) {
-    result = await req('POST', '/auth/login', {
-      email: 'seed@appcloud.local',
-      password: 'SeedPass123!',
-    });
-  }
-
-  if (result?.token) {
-    globalThis._token = result.token;
-    log('✓', `Authenticated as ${result.user?.name || 'seed-admin'}`);
-    return result.user;
-  }
-
-  // Auth might be disabled (no JWT_SECRET) — continue without token
-  log('⚠', 'Auth unavailable — proceeding without token (auth may be disabled)');
+  await ensureTenant();
+  log('👤', `Authenticated via X-API-Key (tenant=${TENANT_SLUG})`);
   return { id: 'seed-admin', name: 'seed-admin' };
 }
 
@@ -74,14 +150,8 @@ async function ensureUser() {
 async function clean() {
   log('🧹', 'Cleaning previous seed data...');
 
-  // Delete changes, then components, then apps, then infra
-  const changes = await req('GET', '/changes') || [];
-  for (const ch of changes) {
-    if (ch.title?.startsWith('[seed]')) {
-      await req('DELETE', `/changes/${ch.id}`);
-    }
-  }
-
+  // /changes was removed during the refocus — nothing to clean there.
+  // Delete components-by-cascade via /applications, then infra.
   const apps = await req('GET', '/applications') || [];
   for (const app of apps) {
     if (app.name?.startsWith('[seed]')) {
@@ -145,7 +215,7 @@ async function seed() {
     // Notification Hub
     { name: '[seed] notif-api',        type: 'api',      runtime: 'nodejs',  appName: '[seed] Notification Hub' },
     { name: '[seed] notif-queue',      type: 'queue',    runtime: 'docker',  appName: '[seed] Notification Hub' },
-    // Dev Sandbox — no components (left for onboarding agent to create)
+    // Dev Sandbox — no components (left for the Mapping agent's Pass 2 to propose)
   ];
 
   for (const def of compDefs) {
@@ -185,22 +255,27 @@ async function seed() {
     { from: '[seed] notif-api',       to: '[seed] notif-queue',      protocol: 'amqp',  port: 5672 },
   ];
 
+  let connectionsWritten = 0;
   for (const conn of connections) {
     const from = comps[conn.from];
     const to = comps[conn.to];
     if (from && to) {
-      await req('POST', `/components/${from.id}/connections`, {
+      const r = await req('POST', `/components/${from.id}/connections`, {
         targetId: to.id,
         protocol: conn.protocol,
         port: conn.port,
       });
-      log('✓', `${conn.from} → ${conn.to} (${conn.protocol}:${conn.port})`);
+      if (r) {
+        connectionsWritten++;
+        log('✓', `${conn.from} → ${conn.to} (${conn.protocol}:${conn.port})`);
+      }
     }
   }
 
   console.log('\n── Creating Infrastructure (mapped) ──');
 
   const infra = {};
+  let mappedInfraWritten = 0;
   const infraDefs = [
     // AWS — mapped to Payment Gateway
     { name: '[seed] prod-payment-api-1',     provider: 'aws', resource_type: 'ec2_instance',       region: 'us-east-1', deployTo: '[seed] payment-api' },
@@ -233,6 +308,7 @@ async function seed() {
     });
     if (node?.id) {
       infra[def.name] = node;
+      mappedInfraWritten++;
       // Deploy component to infra
       const comp = comps[def.deployTo];
       if (comp) {
@@ -244,6 +320,7 @@ async function seed() {
 
   console.log('\n── Creating Infrastructure (unmapped — for agents to discover/map) ──');
 
+  let unmappedInfraWritten = 0;
   const unmappedDefs = [
     // These have no deployTo — agents should figure out where they belong
     { name: '[seed] prod-mystery-vm-1',      provider: 'azure', resource_type: 'vm',              region: 'eastus' },
@@ -265,88 +342,34 @@ async function seed() {
     });
     if (node?.id) {
       infra[def.name] = node;
+      unmappedInfraWritten++;
       log('⚠', `Unmapped: ${def.name} (${def.provider}) — agents will handle this`);
     }
   }
 
-  console.log('\n── Creating Changes ──');
-
-  const changeDefs = [
-    {
-      title: '[seed] Upgrade Payment RDS to db.r6g.xlarge',
-      description: 'Scale up the payment database for Black Friday traffic. Requires 10-minute maintenance window.',
-      type: 'general',
-      riskScore: 8,
-      modifies: ['[seed] prod-payment-rds'],
-      affects: ['[seed] Payment Gateway'],
-    },
-    {
-      title: '[seed] Rotate Portal API TLS certificates',
-      description: 'Annual TLS cert rotation for portal-api instances. Rolling restart required.',
-      type: 'general',
-      riskScore: 5,
-      modifies: ['[seed] prod-portal-vm-1', '[seed] prod-portal-vm-2'],
-      affects: ['[seed] User Portal'],
-    },
-    {
-      title: '[seed] Migrate Analytics to new GKE node pool',
-      description: 'Move analytics workloads to ARM-based node pool for cost savings.',
-      type: 'migration',
-      riskScore: 6,
-      modifies: ['[seed] prod-analytics-gke'],
-      affects: ['[seed] Analytics Engine'],
-    },
-    {
-      title: '[seed] Decommission orphan S3 bucket',
-      description: 'Remove unused log bucket that has been idle for 6 months.',
-      type: 'general',
-      riskScore: 2,
-      modifies: ['[seed] orphan-s3-logs'],
-      affects: [],
-    },
-  ];
-
-  // We need a user node in Neo4j for SUBMITTED relationship
-  await req('POST', '/users', { name: 'seed-admin', email: 'seed@appcloud.local', role: 'admin' });
-
-  // Get the user ID from Neo4j
-  const users = await req('GET', '/users') || [];
-  const seedUser = users.find(u => u.name === 'seed-admin') || users[0];
-
-  if (seedUser) {
-    for (const def of changeDefs) {
-      const modifiesIds = def.modifies.map(n => infra[n]?.id).filter(Boolean);
-      const affectsIds = def.affects.map(n => apps[n]?.id).filter(Boolean);
-
-      const change = await req('POST', '/changes', {
-        title: def.title,
-        description: def.description,
-        type: def.type,
-        riskScore: def.riskScore,
-        submittedBy: seedUser.id,
-        modifiesIds,
-        affectsIds,
-      });
-      if (change?.id) {
-        log(def.riskScore >= 7 ? '🔴' : def.riskScore >= 4 ? '🟡' : '🟢',
-          `Change: ${def.title} (risk: ${def.riskScore})`);
-      }
-    }
-  } else {
-    log('⚠', 'Skipped changes — no user available for SUBMITTED relationship');
-  }
+  // /changes and /users were removed during the refocus. The blast-radius
+  // agent answers ad-hoc impact questions over the current graph rather
+  // than over a registry of pending changes — so the seed no longer needs
+  // to populate either domain.
 
   // ── Summary ─────────────────────────────────────────────────────────────
+
+  // Summary counters reflect actual successful POSTs, not the static def
+  // arrays — the seed used to print def-array lengths even when every write
+  // 503'd, so the summary lied. The "/N defined" suffix preserves visibility
+  // into how many were attempted vs. how many landed.
+  const ok = (got, want) => got === want
+    ? String(got)
+    : `${got}/${want} ⚠ — see FAIL lines above`;
 
   console.log('\n══════════════════════════════════════════════════════════');
   console.log('  SEED COMPLETE');
   console.log('══════════════════════════════════════════════════════════');
-  console.log(`  Applications:    ${Object.keys(apps).length}`);
-  console.log(`  Components:      ${Object.keys(comps).length}`);
-  console.log(`  Infra (mapped):  ${infraDefs.length}`);
-  console.log(`  Infra (unmapped): ${unmappedDefs.length} (for agents to handle)`);
-  console.log(`  Connections:     ${connections.length}`);
-  console.log(`  Changes:         ${changeDefs.length}`);
+  console.log(`  Applications:     ${ok(Object.keys(apps).length, appDefs.length)}`);
+  console.log(`  Components:       ${ok(Object.keys(comps).length, compDefs.length)}`);
+  console.log(`  Infra (mapped):   ${ok(mappedInfraWritten, infraDefs.length)}`);
+  console.log(`  Infra (unmapped): ${ok(unmappedInfraWritten, unmappedDefs.length)} (for the Mapping agent's Pass 2 to handle)`);
+  console.log(`  Connections:      ${ok(connectionsWritten, connections.length)}`);
   console.log('');
   console.log('  Next steps:');
   console.log('    cd agents');
@@ -358,6 +381,22 @@ async function seed() {
 // ─── Run ────────────────────────────────────────────────────────────────────
 
 seed().catch((err) => {
-  console.error('\nSeed failed:', err.message);
+  // Node's fetch wraps the underlying network error in `err.cause` and gives
+  // the outer Error a vague "fetch failed" message — surface the cause so a
+  // missing port-forward or wrong APPCLOUD_API_URL is obvious.
+  const cause = err?.cause;
+  const code  = cause?.code;
+  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT') {
+    console.error(`\nSeed failed: cannot reach the AppCloud API at ${API}`);
+    console.error(`  Cause: ${code}${cause.address ? ` ${cause.address}:${cause.port}` : ''}`);
+    console.error('  Is the API running and port-forwarded?');
+    console.error('    kubectl -n appcloud port-forward svc/api 3000:3000');
+    console.error('  Or set APPCLOUD_API_URL to the right base URL.');
+  } else {
+    console.error('\nSeed failed:', err.message);
+    if (cause?.message && cause.message !== err.message) {
+      console.error('  Cause:', cause.message);
+    }
+  }
   process.exit(1);
 });

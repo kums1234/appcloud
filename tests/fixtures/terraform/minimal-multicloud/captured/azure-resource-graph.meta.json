@@ -1,0 +1,6 @@
+{
+  "target": "azure-resource-graph.json",
+  "source_call": "az graph query -q \"Resources | project id, name, type, location, properties, tags, subscriptionId, resourceGroup\"",
+  "captured_from": "hand-crafted to mirror Terraform in tests/fixtures/terraform/minimal-multicloud/azure/main.tf",
+  "real_response_note": "Real ARG responses paginate via skipToken. This fixture is a single page (totalRecords <= count); test harness can either omit skipToken handling or simulate skipToken=null to assert end-of-stream."
+}

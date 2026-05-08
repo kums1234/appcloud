@@ -8,21 +8,30 @@ resources:
   - ingress.yaml
   - hpa.yaml
 
-
 # Images pulled from ACR — replace myregistry with your ACR name
 images:
   - name: appcloud-api
-    newName: myregistry.azurecr.io/appcloud-api
-    newTag: latest
-  - name: appcloud-ui
-    newName: myregistry.azurecr.io/appcloud-ui
+    newName: appcloudregistry.azurecr.io/appcloud-api
     newTag: latest
 
 patches:
-  # AKS managed-csi StorageClass (Azure Disk)
+  # AKS managed-csi StorageClass (Azure Disk) — scoped per PVC to avoid
+  # corrupting unrelated resources with an unscoped patch.
   - patch: |-
       - op: add
         path: /spec/storageClassName
         value: managed-csi
     target:
       kind: PersistentVolumeClaim
+      name: neo4j-data
+
+  - patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: managed-csi
+    target:
+      kind: PersistentVolumeClaim
+      name: postgres-data
+
+  # ollama-data PVC is excluded — already bound in cluster without a
+  # StorageClassName and Kubernetes forbids changing spec on bound PVCs.

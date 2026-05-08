@@ -17,21 +17,8 @@ spec:
     - host: appcloud.yourdomain.com    # replace with your domain
       http:
         paths:
+          # Headless API — all paths forwarded to api:3000
           - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: ui
-                port:
-                  number: 4000
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: api
-                port:
-                  number: 3000
-          - path: /health
             pathType: Prefix
             backend:
               service:

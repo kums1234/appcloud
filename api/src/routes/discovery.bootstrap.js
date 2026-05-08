@@ -1,10 +1,35 @@
 import { INFRA_ONLY_TYPES, PLATFORM_TYPES, hasExplicitAppTag } from './discovery.schema.js'
 
-export async function bootstrapDiscovery(fastify) {
+// Bootstrap accepts an optional `episodeId` so every
+// :CONNECTS_TO {via:'component-mapping'} edge it writes carries the
+// same provenance tag as the scan that triggered it.
+// Callers that invoke bootstrap directly (e.g. POST /discovery/bootstrap)
+// can omit it; the edges will still have their `source` tag.
+export async function bootstrapDiscovery(fastify, opts = {}) {
   const { write, query } = fastify.neo4j
+  const episodeId = opts.episodeId || null
 
   function parse(val) {
     try { return typeof val === 'string' ? JSON.parse(val) : val || {} } catch { return {} }
+  }
+
+  /**
+   * Normalize cloud-provider tag keys so that namespaced tags like
+   * `appcloud:app`, `appcloud-app`, `app:component` all resolve to
+   * their bare key (`app`, `component`, `env`, etc.).
+   */
+  function normalizeTags(tags) {
+    if (!tags || typeof tags !== 'object') return {}
+    const out = {}
+    for (const [k, v] of Object.entries(tags)) {
+      const norm = k.toLowerCase()
+        .replace(/^appcloud[:-]/, '')
+        .replace(/^app[:-]/, '')
+        .replace(/-/g, '_')
+        .trim()
+      if (!out[norm]) out[norm] = v
+    }
+    return out
   }
 
   /**
@@ -13,16 +38,15 @@ export async function bootstrapDiscovery(fastify) {
    * Priority:
    *   1. Explicit tags  (app / application / workload / project)
    *   2. Azure Resource Group — stored in raw.resourceGroup at scan time
-   *      for every Azure resource type (VM, AKS, SQL, App Service, Redis,
-   *      VNet, and all generic ARM resources)
    *   3. First hyphen-segment of the resource name — last resort for AWS/GCP
    */
   function resolveAppName(tags = {}, name = '', raw = {}) {
+    const nt = normalizeTags(tags)
     return (
-      tags.app          ||
-      tags.application  ||
-      tags.workload     ||
-      tags.project      ||
+      nt.app          ||
+      nt.application  ||
+      nt.workload     ||
+      nt.project      ||
       (raw.resourceGroup ? raw.resourceGroup.toLowerCase() : null) ||
       name.split('-')[0] ||
       'default-app'
@@ -34,27 +58,65 @@ export async function bootstrapDiscovery(fastify) {
    *
    * Priority:
    *   1. Explicit tags  (component / role / service / tier)
-   *   2. Full Azure resource type string
-   *   3. AWS / GCP resource type keywords
-   *   4. Resource name keywords
+   *   2. Short AppCloud resource type (vm, app_service, etc.)
+   *   3. Full Azure ARM resource type string
+   *   4. AWS / GCP resource type keywords
+   *   5. Resource name keywords
    */
-  function inferComponent(type = '', name = '', tags = {}) {
-    if (tags.component) return tags.component.toLowerCase()
-    if (tags.role)      return tags.role.toLowerCase()
-    if (tags.service)   return tags.service.toLowerCase()
-    if (tags.tier)      return tags.tier.toLowerCase()
+  function inferComponent(type = '', name = '', tags = {}, raw = {}) {
+    const nt = normalizeTags(tags)
+    if (nt.component) return nt.component.toLowerCase()
+    if (nt.role)      return nt.role.toLowerCase()
+    if (nt.service)   return nt.service.toLowerCase()
 
     const t = type.toLowerCase()
     const n = name.toLowerCase()
+    const kind = (raw.kind || '').toLowerCase()
 
-    // Azure
+    // Short AppCloud resource types (stored in i.resource_type by discovery)
+    if (t === 'sql_server' || t === 'sql_database'
+        || t === 'postgresql' || t === 'mysql')                      return 'database'
+    if (t === 'cosmos_db')                                           return 'database'
+    if (t === 'redis')                                               return 'cache'
+    if (t === 'function_app')                                        return 'function'
+    if (t === 'logic_app')                                           return 'function'
+    if (t === 'app_service' && (kind.includes('functionapp') || n.includes('func')))
+                                                                     return 'function'
+    if (t === 'app_service')                                         return n.includes('api') ? 'api' : 'frontend'
+    if (t === 'api_management')                                      return 'api-gateway'
+    if (t === 'aks_cluster')                                         return 'platform'
+    if (t === 'container_app')                                       return 'service'
+    if (t === 'application_gateway' || t === 'load_balancer'
+        || t === 'front_door' || t === 'cdn')                        return 'gateway'
+    if (t === 'vnet')                                                return 'network'
+    if (t === 'service_bus' || t === 'event_hub' || t === 'event_grid') return 'queue'
+    if (t === 'storage_account')                                     return 'storage'
+    if (t === 'app_insights')                                        return 'observability'
+    if (t === 'key_vault')                                           return 'secrets'
+    if (t === 'vm') {
+      if (n.includes('api'))                                         return 'api'
+      if (n.includes('worker'))                                      return 'worker'
+      if (n.includes('web'))                                         return 'frontend'
+      if (n.includes('db') || n.includes('sql') || n.includes('mongo')) return 'database'
+      if (n.includes('cache') || n.includes('redis'))                return 'cache'
+      return 'service'
+    }
+    if (t === 'app_service_plan')                                    return 'platform'
+    if (t === 'container_registry')                                  return 'registry'
+    if (t === 'nsg')                                                 return 'network'
+    if (t === 'private_dns')                                         return 'network'
+    if (t === 'log_analytics')                                       return 'observability'
+    if (t === 'static_web_app')                                      return 'frontend'
+
+    // Full Azure ARM type strings (for raw.type fallback)
     if (t === 'microsoft.sql/servers')                               return 'database'
     if (t === 'microsoft.sql/servers/databases')                     return 'database'
     if (t === 'microsoft.dbforpostgresql/servers')                   return 'database'
     if (t === 'microsoft.dbformysql/servers')                        return 'database'
     if (t === 'microsoft.documentdb/databaseaccounts')               return 'database'
     if (t === 'microsoft.cache/redis')                               return 'cache'
-    if (t === 'microsoft.web/sites' && n.includes('func'))           return 'function'
+    if (t === 'microsoft.web/sites' && (kind.includes('functionapp') || n.includes('func')))
+                                                                     return 'function'
     if (t === 'microsoft.logic/workflows')                           return 'function'
     if (t === 'microsoft.web/sites')                                 return n.includes('api') ? 'api' : 'frontend'
     if (t === 'microsoft.apimanagement/service')                     return 'api-gateway'
@@ -106,7 +168,7 @@ export async function bootstrapDiscovery(fastify) {
   const infraRecords = await query(`
     MATCH (i:Infra)
     WHERE i.source = 'discovery'
-      AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+      AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
     RETURN i
   `)
 
@@ -129,7 +191,7 @@ export async function bootstrapDiscovery(fastify) {
     }
 
     const appName       = resolveAppName(tags, name, raw)
-    const componentName = inferComponent(i.resource_type, name, tags)
+    const componentName = inferComponent(i.resource_type, name, tags, raw)
 
     if (!groups[appName]) groups[appName] = []
     groups[appName].push({ infra: i, componentName })
@@ -141,11 +203,18 @@ export async function bootstrapDiscovery(fastify) {
   const skipped         = []
 
   for (const [appName, items] of Object.entries(groups)) {
+    // Extract tier, owner, and environment from the first tagged resource
+    const firstTags = normalizeTags(parse(items[0]?.infra?.tags))
+    const appTier   = parseInt(firstTags.tier) || 3
+    const appOwner  = firstTags.owner || null
+    const appEnv    = firstTags.env || firstTags.environment || null
+
     const appRes = await write(`
       MERGE (a:Application {name: $appName})
-      ON CREATE SET a.id = randomUUID(), a.tier = 3
+      ON CREATE SET a.id = randomUUID(), a.tier = toInteger($appTier),
+                    a.owner = $appOwner, a.environment = $appEnv
       RETURN a, (a.createdAt IS NULL) AS isNew
-    `, { appName })
+    `, { appName, appTier, appOwner, appEnv })
 
     const appNode  = appRes[0].get('a').properties
     const appId    = appNode.id
@@ -168,9 +237,14 @@ export async function bootstrapDiscovery(fastify) {
         await write(`
           MATCH (c:Component {id: $compId})
           MATCH (i:Infra {id: $infraId})
-          MERGE (c)-[rel:DEPLOYED_ON]->(i)
-          ON CREATE SET rel.source = 'bootstrap', rel.mappedAt = datetime()
-        `, { compId, infraId: infra.id })
+          MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+          ON CREATE SET rel.discovered_at = datetime(),
+                        rel.source        = 'bootstrap',
+                        rel.confidence    = 80,
+                        rel.evidence      = 'bootstrap tag/RG grouping'
+          SET rel.last_seen = datetime(),
+              rel.episodeId = $episodeId
+        `, { compId, infraId: infra.id, episodeId })
 
         linked++
       } catch (err) {
@@ -198,7 +272,7 @@ export async function bootstrapDiscovery(fastify) {
       MATCH (i:Infra)
       WHERE i.provider = 'azure'
         AND i.source = 'discovery'
-        AND NOT (:Component)-[:DEPLOYED_ON]->(i)
+        AND NOT (:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
         AND i.raw IS NOT NULL
       RETURN i.id AS infraId, i.raw AS raw, i.name AS name
     `)
@@ -206,7 +280,7 @@ export async function bootstrapDiscovery(fastify) {
     if (stillUnmapped.length) {
       // Build RG → dominant component map from already-mapped Azure nodes
       const rgDominantRows = await query(`
-        MATCH (c:Component)-[:DEPLOYED_ON]->(i:Infra)
+        MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i:Infra)
         WHERE i.provider = 'azure' AND i.raw IS NOT NULL
         MATCH (a:Application)-[:CONTAINS]->(c)
         RETURN i.raw AS raw, c.id AS compId, c.name AS compName,
@@ -253,11 +327,15 @@ export async function bootstrapDiscovery(fastify) {
         try {
           await write(`
             MATCH (c:Component {id: $compId}), (i:Infra {id: $infraId})
-            MERGE (c)-[rel:DEPLOYED_ON]->(i)
-            ON CREATE SET rel.source = 'bootstrap-rg-propagation',
-                          rel.rgRatio = $ratio,
-                          rel.mappedAt = datetime()
-          `, { compId, infraId: row.get('infraId'), ratio })
+            MERGE (c)-[rel:CONNECTS_TO {via: 'component-mapping'}]->(i)
+            ON CREATE SET rel.discovered_at = datetime(),
+                          rel.source        = 'bootstrap-rg-propagation',
+                          rel.confidence    = toInteger(round($ratio * 100)),
+                          rel.rgRatio       = $ratio,
+                          rel.evidence      = 'RG-propagation (ratio=' + toString($ratio) + ')'
+            SET rel.last_seen = datetime(),
+                rel.episodeId = $episodeId
+          `, { compId, infraId: row.get('infraId'), ratio, episodeId })
           rgLinked++
         } catch (err) {
           skipped.push({ infraId: row.get('infraId'), error: err.message })

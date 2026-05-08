@@ -27,4 +27,5 @@ jest.mock('pg', () => ({
 
 // Mock environment variables for tests
 process.env.NODE_ENV = 'test'
-process.env.JWT_SECRET = 'test-jwt-secret-for-unit-tests'
+process.env.APPCLOUD_API_KEY = 'test-api-key-for-unit-tests'
+process.env.APPCLOUD_ENCRYPTION_KEY = 'test-encryption-key-for-unit-tests'

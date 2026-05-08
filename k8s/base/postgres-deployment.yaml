@@ -31,6 +31,8 @@ spec:
               value: /run/secrets/pg_username
             - name: POSTGRES_PASSWORD_FILE
               value: /run/secrets/pg_password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data

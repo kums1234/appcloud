@@ -1,6 +1,24 @@
 -- AppCloud PostgreSQL schema
 -- Handles everything that doesn't belong in the graph:
--- users/auth, audit logs, integration config, sync history, reporting events
+-- audit logs, integration config, sync history, reporting events.
+-- Authentication is a headless API-key gate (see api/src/plugins/auth.js),
+-- so there is no users table here.
+--
+-- ── Multi-tenancy note ───────────────────────────────────────────────────────
+-- The per-tenant data tables defined here (`integrations`, `sync_jobs`,
+-- `audit_log`, `terraform_imports`) are also defined in the per-tenant
+-- template at api/src/migrations/tenant-schema/001-base-tables.sql, which
+-- the runner applies to every newly-provisioned tenant schema.
+--
+-- The legacy single-tenant default tenant continues to use these public-schema
+-- tables in Phase 1b — the cutover (postgres-init/15-default-tenant-cutover.sql)
+-- moves only `cloud_accounts` to `tenant_default` for now; everything else
+-- here stays in `public` and resolves via the request's
+-- `search_path = tenant_default, public` fallback. Phase 1c finishes the
+-- cutover (moves integrations + sync_jobs together for the FK, then audit_log,
+-- terraform_imports, etc.) and retires these public-side creates.
+-- Until then, keep the DDL here in sync with the template — see
+-- docs/multi-tenant-design.md §6.
 
 -- ── Extensions ────────────────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -83,22 +101,4 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER integrations_updated_at
   BEFORE UPDATE ON integrations
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- ── Users — credentials and profile (moved from Neo4j) ───────────────────────
-CREATE TABLE IF NOT EXISTS users (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name          TEXT NOT NULL,
-  email         TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user' | 'viewer'
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_login_at TIMESTAMPTZ,
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
-CREATE TRIGGER users_updated_at
-  BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();

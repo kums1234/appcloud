@@ -1,0 +1,143 @@
+{
+  "assets": [
+    {
+      "name": "//compute.googleapis.com/projects/gcp-web-prod-001/global/networks/vpc-web",
+      "assetType": "compute.googleapis.com/Network",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "Network",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+        "data": {
+          "name": "vpc-web",
+          "selfLink": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/global/networks/vpc-web",
+          "autoCreateSubnetworks": false
+        }
+      }
+    },
+    {
+      "name": "//compute.googleapis.com/projects/gcp-web-prod-001/regions/us-central1/subnetworks/subnet-web",
+      "assetType": "compute.googleapis.com/Subnetwork",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "Subnetwork",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+        "location": "us-central1",
+        "data": {
+          "name": "subnet-web",
+          "selfLink": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/regions/us-central1/subnetworks/subnet-web",
+          "network": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/global/networks/vpc-web",
+          "ipCidrRange": "10.30.1.0/24",
+          "region": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/regions/us-central1"
+        }
+      }
+    },
+    {
+      "name": "//iam.googleapis.com/projects/gcp-web-prod-001/serviceAccounts/sa-web@gcp-web-prod-001.iam.gserviceaccount.com",
+      "assetType": "iam.googleapis.com/ServiceAccount",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "ServiceAccount",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+        "data": {
+          "name": "projects/gcp-web-prod-001/serviceAccounts/sa-web@gcp-web-prod-001.iam.gserviceaccount.com",
+          "email": "sa-web@gcp-web-prod-001.iam.gserviceaccount.com",
+          "displayName": "Web app service account"
+        }
+      }
+    },
+    {
+      "name": "//compute.googleapis.com/projects/gcp-web-prod-001/zones/us-central1-a/disks/disk-web",
+      "assetType": "compute.googleapis.com/Disk",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "Disk",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+        "location": "us-central1-a",
+        "data": {
+          "name": "disk-web",
+          "selfLink": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/zones/us-central1-a/disks/disk-web",
+          "sizeGb": "32",
+          "type": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/zones/us-central1-a/diskTypes/pd-standard",
+          "labels": { "component": "web-app" }
+        }
+      }
+    },
+    {
+      "name": "//compute.googleapis.com/projects/gcp-web-prod-001/zones/us-central1-a/instances/vm-web",
+      "assetType": "compute.googleapis.com/Instance",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "Instance",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+        "location": "us-central1-a",
+        "data": {
+          "name": "vm-web",
+          "selfLink": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/zones/us-central1-a/instances/vm-web",
+          "machineType": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/zones/us-central1-a/machineTypes/e2-micro",
+          "labels": { "component": "web-app", "env": "prod" },
+          "disks": [
+            { "boot": true,  "source": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/zones/us-central1-a/disks/vm-web-boot" },
+            { "boot": false, "source": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/zones/us-central1-a/disks/disk-web" }
+          ],
+          "networkInterfaces": [
+            {
+              "network":    "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/global/networks/vpc-web",
+              "subnetwork": "https://www.googleapis.com/compute/v1/projects/gcp-web-prod-001/regions/us-central1/subnetworks/subnet-web"
+            }
+          ],
+          "serviceAccounts": [
+            { "email": "sa-web@gcp-web-prod-001.iam.gserviceaccount.com", "scopes": ["https://www.googleapis.com/auth/cloud-platform"] }
+          ]
+        }
+      }
+    },
+    {
+      "name": "//storage.googleapis.com/projects/_/buckets/bucket-public-fixture-001",
+      "assetType": "storage.googleapis.com/Bucket",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "Bucket",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-web-prod-001",
+        "location": "US",
+        "data": {
+          "name": "bucket-public-fixture-001",
+          "selfLink": "https://www.googleapis.com/storage/v1/b/bucket-public-fixture-001",
+          "location": "US",
+          "labels": { "component": "web-app" }
+        }
+      }
+    },
+    {
+      "name": "//iam.googleapis.com/projects/gcp-batch-002/serviceAccounts/sa-batch@gcp-batch-002.iam.gserviceaccount.com",
+      "assetType": "iam.googleapis.com/ServiceAccount",
+      "resource": {
+        "version": "v1",
+        "discoveryName": "ServiceAccount",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-batch-002",
+        "data": {
+          "name": "projects/gcp-batch-002/serviceAccounts/sa-batch@gcp-batch-002.iam.gserviceaccount.com",
+          "email": "sa-batch@gcp-batch-002.iam.gserviceaccount.com",
+          "displayName": "Batch service account"
+        }
+      }
+    },
+    {
+      "name": "//run.googleapis.com/projects/gcp-batch-002/locations/us-central1/services/svc-batch",
+      "assetType": "run.googleapis.com/Service",
+      "resource": {
+        "version": "v2",
+        "discoveryName": "Service",
+        "parent": "//cloudresourcemanager.googleapis.com/projects/gcp-batch-002",
+        "location": "us-central1",
+        "data": {
+          "name": "projects/gcp-batch-002/locations/us-central1/services/svc-batch",
+          "template": {
+            "serviceAccount": "sa-batch@gcp-batch-002.iam.gserviceaccount.com",
+            "containers": [{ "image": "us-docker.pkg.dev/cloudrun/container/hello" }]
+          }
+        }
+      }
+    }
+  ],
+  "nextPageToken": null
+}

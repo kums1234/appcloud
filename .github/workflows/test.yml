@@ -1,0 +1,111 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Local equivalents (run these before pushing — same scripts CI runs):
+#   cd api && npm ci
+#   cd api && npm run test:unit          # ~2s, no Docker
+#   cd api && npm run test:integration   # ~30s, needs Docker + Node 18–22 LTS
+
+# The unit job is the canary for OpenAPI / Postman drift, route-schema
+# misalignment, and the auth default-deny invariant. It must pass on every PR.
+# The integration job exercises the Testcontainers-based CMDB and OTel
+# pipelines against real Neo4j + Postgres images.
+
+jobs:
+  unit:
+    name: Unit tests + drift + auth invariant
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: api/.nvmrc
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: api
+        run: npm run test:unit
+
+      # The unit tests already include the drift assertion, but it
+      # surfaces as a Jest failure with no diff context. Re-run the
+      # exporter and fail on any modification — this gives the PR
+      # author the actual line-level changes they need to commit.
+      - name: OpenAPI / Postman docs are up to date
+        working-directory: api
+        run: |
+          npm run openapi:export
+          if ! git -C "$GITHUB_WORKSPACE" diff --exit-code -- docs/openapi.json docs/openapi.yaml docs/api-postman-collection.json; then
+            echo
+            echo "::error::docs/openapi.{json,yaml} or docs/api-postman-collection.json drifted from the route registrations."
+            echo "Run 'cd api && npm run openapi:export' locally and commit the changes."
+            exit 1
+          fi
+
+  audit:
+    name: npm audit (severity baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: api/.nvmrc
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      # `npm ci --ignore-scripts` is enough — audit reads from the lockfile
+      # and the install tree, but doesn't need transitive build steps to
+      # run. Skipping scripts also avoids the prepare hook attempting to
+      # `git config` against a checkout the runner may discard.
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci --ignore-scripts
+
+      - name: Audit summary vs baseline
+        run: scripts/audit-summary.sh
+
+  integration:
+    name: Integration tests (Testcontainers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: api/.nvmrc
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      # Pre-pull container images in parallel before the test run starts.
+      # neo4j:5 is ~600 MB; on a cold GitHub runner with average bandwidth,
+      # the first Testcontainers `start()` can spend 60-90s pulling it,
+      # which used to blow past the per-hook beforeAll timeout. Doing it
+      # here moves the cost out of Jest's clock and lets Testcontainers
+      # find the image already cached. Postgres is small but pulling it
+      # in parallel costs nothing.
+      - name: Pre-pull Testcontainers images
+        run: |
+          docker pull neo4j:5 &
+          docker pull postgres:16-alpine &
+          wait
+
+      - name: Run integration tests
+        working-directory: api
+        run: npm run test:integration

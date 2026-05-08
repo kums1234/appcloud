@@ -1,0 +1,11 @@
+{
+  "target": "gcp-iam-policy.json",
+  "source_call": "gcloud asset list --content-type=iam-policy",
+  "captured_from": "hand-crafted to mirror Terraform in tests/fixtures/terraform/minimal-multicloud/gcp/main.tf",
+  "supplement_consumer": "discovery.gcp.supplement.js / source: 'gcp-iam-policy'",
+  "expected_writes": [
+    "Edge: bucket-public-fixture-001 ← allUsers (synthetic principal) with role=roles/storage.objectViewer; flips bucket node `public=true`, `public_via_iam=roles/storage.objectViewer`",
+    "Edge: bucket-public-fixture-001 ← sa-batch (existing iam.googleapis.com/ServiceAccount node) with via=iam-binding, role=roles/storage.objectAdmin",
+    "Edge: vm-web → sa-web (via=iam-binding) is implicit from the resource scan; the iam-policy supplement does NOT re-emit it."
+  ]
+}
