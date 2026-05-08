@@ -105,7 +105,7 @@ maybeDescribe('auth plugin → api_keys DB lookup (Testcontainers)', () => {
       return { ok: true }
     })
     await fastify.ready()
-  }, 180_000)
+  })
 
   afterAll(async () => {
     try { await fastify?.close() }    catch {}

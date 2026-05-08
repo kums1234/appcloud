@@ -46,7 +46,7 @@ maybeDescribe('audit_log partitioning lifecycle (Testcontainers)', () => {
       '11-audit-evolution.sql',
     ])
     runQuery = async (sql, params = []) => (await pgClient.query(sql, params)).rows
-  }, 180_000)
+  })
 
   afterAll(async () => {
     try { await pgClient?.end() }     catch {}

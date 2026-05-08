@@ -35,7 +35,7 @@ maybeDescribe('CMDB assessment → :CmdbCi scores + :REPRESENTS + :IngestionEpis
       log: { info() {}, warn() {}, error() {} },
       neo4j: wrapNeo4jDriver(neo4jDriver),
     }
-  }, 180_000)
+  })
 
   afterAll(async () => {
     try { await neo4jDriver?.close() }    catch {}

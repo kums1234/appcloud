@@ -84,7 +84,7 @@ maybeDescribe('OTel aggregator at-least-once + idempotency (Testcontainers)', ()
     // Test-side accessor for verification reads while the write-stub
     // is in failing mode. Not visible to runTick.
     fastify.realNeo4j = realNeo4j
-  }, 240_000)
+  })
 
   afterAll(async () => {
     try { await neo4jDriver?.close() }      catch {}

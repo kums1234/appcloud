@@ -61,7 +61,7 @@ maybeDescribe('audit retry buffer + retention cleanup (Testcontainers)', () => {
       log: { warn() {}, info() {} },               // silent in tests
       bufferMax: 1000,
     })
-  }, 180_000)
+  })
 
   afterAll(async () => {
     try { await pgClient?.end() }     catch {}

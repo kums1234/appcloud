@@ -93,6 +93,19 @@ jobs:
         working-directory: api
         run: npm ci
 
+      # Pre-pull container images in parallel before the test run starts.
+      # neo4j:5 is ~600 MB; on a cold GitHub runner with average bandwidth,
+      # the first Testcontainers `start()` can spend 60-90s pulling it,
+      # which used to blow past the per-hook beforeAll timeout. Doing it
+      # here moves the cost out of Jest's clock and lets Testcontainers
+      # find the image already cached. Postgres is small but pulling it
+      # in parallel costs nothing.
+      - name: Pre-pull Testcontainers images
+        run: |
+          docker pull neo4j:5 &
+          docker pull postgres:16-alpine &
+          wait
+
       - name: Run integration tests
         working-directory: api
         run: npm run test:integration

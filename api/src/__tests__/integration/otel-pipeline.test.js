@@ -47,7 +47,7 @@ maybeDescribe('OTel ingest → aggregator pipeline (Testcontainers)', () => {
       },
       neo4j: wrapNeo4jDriver(neo4jDriver),
     }
-  }, 180_000)
+  })
 
   afterAll(async () => {
     try { await pgClient?.end() }          catch {}
