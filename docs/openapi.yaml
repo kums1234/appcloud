@@ -4144,6 +4144,12 @@ paths:
                   format: date-time
                   description: Optional expiry. Omit (or pass null) for never-expires. The key
                     stops working at the moment now() crosses this instant.
+                tenantId:
+                  type: string
+                  format: uuid
+                  description: Issue the key for a specific tenant. Super-admin only — admin-scope
+                    callers can only mint keys for their own tenant. When
+                    omitted, the key inherits the issuer's tenant_id.
               example:
                 name: ci-deploy-bot
                 scopes:

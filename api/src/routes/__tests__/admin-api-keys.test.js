@@ -97,6 +97,16 @@ describe('POST /admin/api-keys', () => {
     expect(body.scopes).toEqual(['write'])
     expect(body.plaintext).toMatch(/^ak_/)             // generated key, shown once
     expect(body.plaintext.length).toBeGreaterThan(20)
+    // Phase 1d: api_keys.tenant_id is NOT NULL. Lock the SQL shape so a
+    // future schema-aware regression (column dropped from INSERT, fallback
+    // subquery removed) gets caught at unit level instead of slipping
+    // through to the integration suite. Also asserts the COALESCE fallback
+    // to control.tenants is in place — that's the safety net for callers
+    // whose principal has no tenantId.
+    const insert = stub.state.queries.find(q => /INSERT INTO api_keys/.test(q.sql))
+    expect(insert).toBeDefined()
+    expect(insert.sql).toMatch(/tenant_id/)
+    expect(insert.sql).toMatch(/COALESCE\(\$7::uuid, \(SELECT id FROM control\.tenants WHERE slug = 'default'\)\)/)
   })
 
   test('rejects names with special characters as 400', async () => {
@@ -147,6 +157,87 @@ describe('POST /admin/api-keys', () => {
     const r = await fastify.inject({
       method: 'POST', url: '/admin/api-keys',
       payload: { name: 'bad-scope', scopes: ['cosmic'] },
+    })
+    expect(r.statusCode).toBe(400)
+  })
+
+  // ── tenantId body field (Phase 1d cross-tenant minting) ──────────────────
+  // Auth-disabled mode grants the synthetic principal super-admin scope, so
+  // a request with body.tenantId reaches the tenant-existence check. We
+  // queue the rows that branch consumes (control.tenants lookup + the
+  // INSERT RETURNING) and assert the SQL shape includes the override.
+
+  test('body.tenantId — when tenant exists and active, INSERT uses the supplied id', async () => {
+    stub.state.queries.length = 0
+    // First query: SELECT status FROM control.tenants WHERE id = $1.
+    // Second: INSERT … RETURNING. The stub is FIFO, so we drain twice.
+    let call = 0
+    stub.pg.query = async (sql, params) => {
+      stub.state.queries.push({ sql, params })
+      call++
+      if (/SELECT status FROM control\.tenants/.test(sql)) {
+        return [{ status: 'active' }]
+      }
+      return [{
+        id: 'uuid-cross', name: 'cross-tenant-key', key_prefix: 'ak_x',
+        scopes: ['write'], created_at: new Date().toISOString(),
+        created_by: 'anonymous', last_used_at: null, revoked_at: null,
+        expires_at: null, is_bootstrap: false,
+      }]
+    }
+    const targetTenantId = '11111111-1111-1111-1111-111111111111'
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      payload: { name: 'cross-tenant-key', scopes: ['write'], tenantId: targetTenantId },
+    })
+    expect(r.statusCode).toBe(201)
+    const insert = stub.state.queries.find(q => /INSERT INTO api_keys/.test(q.sql))
+    expect(insert).toBeDefined()
+    // The INSERT's tenant_id parameter (position 7) is the body's tenantId,
+    // not the principal's — locking the cross-tenant minting path.
+    expect(insert.params[6]).toBe(targetTenantId)
+  })
+
+  test('body.tenantId — when tenant does not exist, returns 400 not 500', async () => {
+    stub.pg.query = async (sql, params) => {
+      stub.state.queries.push({ sql, params })
+      if (/SELECT status FROM control\.tenants/.test(sql)) return []
+      return []
+    }
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      payload: {
+        name: 'orphan', scopes: ['write'],
+        tenantId: '22222222-2222-2222-2222-222222222222',
+      },
+    })
+    expect(r.statusCode).toBe(400)
+    expect(r.body).toMatch(/tenant '.*' not found/)
+    // INSERT must NOT have been attempted — the existence check short-circuits.
+    expect(stub.state.queries.find(q => /INSERT INTO api_keys/.test(q.sql))).toBeUndefined()
+  })
+
+  test('body.tenantId — when tenant is suspended, returns 400 with status detail', async () => {
+    stub.pg.query = async (sql, params) => {
+      stub.state.queries.push({ sql, params })
+      if (/SELECT status FROM control\.tenants/.test(sql)) return [{ status: 'suspended' }]
+      return []
+    }
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      payload: {
+        name: 'into-suspended', scopes: ['write'],
+        tenantId: '33333333-3333-3333-3333-333333333333',
+      },
+    })
+    expect(r.statusCode).toBe(400)
+    expect(r.body).toMatch(/is not active.*status=suspended/)
+  })
+
+  test('rejects malformed tenantId at Ajv validation (uuid format)', async () => {
+    const r = await fastify.inject({
+      method: 'POST', url: '/admin/api-keys',
+      payload: { name: 'bad-uuid', scopes: ['write'], tenantId: 'not-a-uuid' },
     })
     expect(r.statusCode).toBe(400)
   })

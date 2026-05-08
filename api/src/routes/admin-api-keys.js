@@ -52,6 +52,7 @@ const CreateBodySchema = {
     name:      { type: 'string', pattern: '^[A-Za-z0-9._@:+-]{1,128}$', description: 'Human-readable identifier — appears in audit logs as the actor.' },
     scopes:    { type: 'array', minItems: 1, items: { type: 'string', enum: ['admin', 'write', 'read'] } },
     expiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Optional expiry. Omit (or pass null) for never-expires. The key stops working at the moment now() crosses this instant.' },
+    tenantId:  { type: 'string', format: 'uuid', description: 'Issue the key for a specific tenant. Super-admin only — admin-scope callers can only mint keys for their own tenant. When omitted, the key inherits the issuer\'s tenant_id.' },
   },
   example: {
     name:      'ci-deploy-bot',
@@ -100,7 +101,7 @@ export default async function adminApiKeyRoutes(fastify) {
     },
   }, async (req, reply) => {
     if (!pgOk()) return reply.serviceUnavailable('Postgres not available')
-    const { name, scopes, expiresAt } = req.body
+    const { name, scopes, expiresAt, tenantId: bodyTenantId } = req.body
     if (!NAME_RE.test(name)) return reply.badRequest('name must match [A-Za-z0-9._@:+-]{1,128}')
     // expiresAt is optional. If passed, it must be in the future; rejecting
     // a same-instant or already-past value at create time prevents a class
@@ -117,20 +118,41 @@ export default async function adminApiKeyRoutes(fastify) {
     try { normalised = normaliseScopes(scopes) }
     catch (e) { return reply.badRequest(e.message) }
 
+    // Cross-tenant key minting: when the body specifies an explicit
+    // tenantId, the caller must have super-admin scope. Admin-scope
+    // callers can only issue keys for their own tenant — they get the
+    // implicit fallback below. Validate the target tenant exists and is
+    // active here so the operator gets a clean 4xx instead of a 23503
+    // FK violation surfacing as 500 from the INSERT.
+    if (bodyTenantId) {
+      if (!req.principal?.scopes?.includes('super-admin')) {
+        return reply.forbidden('tenantId in body requires super-admin scope')
+      }
+      const tenantCheck = await fastify.pg.query(
+        `SELECT status FROM control.tenants WHERE id = $1`,
+        [bodyTenantId],
+      )
+      if (!tenantCheck.length) {
+        return reply.badRequest(`tenant '${bodyTenantId}' not found`)
+      }
+      if (tenantCheck[0].status !== 'active') {
+        return reply.badRequest(`tenant '${bodyTenantId}' is not active (status=${tenantCheck[0].status})`)
+      }
+    }
+
     // Generate the plaintext, derive hash + prefix, INSERT. The plaintext
     // never leaves this function except through the response body.
     const plaintext  = generateKey()
     const key_hash   = hashKey(plaintext)
     const key_prefix = prefixOf(plaintext)
 
-    // Phase 1d: api_keys.tenant_id is NOT NULL. Default to the issuer's
-    // tenant (the bootstrap admin key is tenant-bound to `default`, so
-    // operators get the obvious behaviour out of the box). Fall back to a
-    // subquery against control.tenants when the principal somehow has no
-    // tenantId — defensive; super-admin keys are also tenant-bound at
-    // bootstrap, but a request that authenticates without tenantId at all
-    // would otherwise NPE the INSERT.
-    const tenantId = req.principal?.tenantId || null
+    // Phase 1d: api_keys.tenant_id is NOT NULL. Resolution order:
+    //   1. Explicit body.tenantId  (super-admin only — checked above)
+    //   2. req.principal.tenantId  (admin keys are tenant-bound at bootstrap)
+    //   3. Subquery to seeded `default` tenant (defensive; principals
+    //      typically have tenantId set, but auth-disabled / dev modes
+    //      occasionally don't)
+    const tenantId = bodyTenantId || req.principal?.tenantId || null
 
     let rows
     try {
