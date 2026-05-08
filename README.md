@@ -46,7 +46,22 @@ AppCloud's job is to be the durable memory for that question. It runs alongside 
 
 ---
 
+## What AppCloud is — and isn't
+
+| It is | It isn't |
+|---|---|
+| A graph-backed memory layer that answers **structural** questions about your infrastructure | An **APM** — use Datadog / New Relic / Grafana for *behavioural* questions ("why is latency spiking *right now*?") |
+| A **blast-radius and dependency-mapping** tool | A **change-management workflow** — it tells you what a change would affect; it doesn't run the change |
+| An **ingestor** that pulls from cloud APIs, OpenTelemetry, and ServiceNow CMDB | A **replacement** for those systems — they remain authoritative |
+| **Read-only** on your cloud accounts (it never modifies a resource) | A **configuration tool** — it doesn't deploy or change anything |
+
+If your question starts with *"what depends on…"*, *"what would break if…"*, *"who owns…"*, or *"what's in this resource group that I forgot about?"* — AppCloud is the right tool.
+
+---
+
 ## Three scenarios
+
+> The examples below use the demo tenant produced by `node seed.js` — every resource name is prefixed `[seed]`. On your own data, the prefix won't be there; everything else works the same.
 
 ### 🛠️ Support — *"On-call: portal-api just paged"*
 
@@ -86,36 +101,71 @@ Every action is auditable: each new edge gets `source: 'auto-link'` or `'auto-cr
 
 ---
 
-## Architecture in one paragraph
+## How it works
 
-Three stores, one shape: **Neo4j** holds the topology graph (single edge label `:CONNECTS_TO`, provenance carried in `source`/`via`/`confidence`/`evidence` properties). **PostgreSQL** holds operational state — tenants, API keys, audit log, scheduler, episode tracking. **Per-cloud scanners** (`discovery.azure.js`, `discovery.gcp.js`, `discovery.aws.js`) each issue a single native-inventory query (Resource Graph / Cloud Asset Inventory / Config aggregator) plus optional **supplement layers** (Network Watcher, VM Insights, IAM Policy) for fidelity the primary query can't surface. Then **auto-link** (`discovery.autolink.js`) infers Component → Infra ownership through three layered rules (co-location, structural 1-hop, 2-hop neighbourhood) with a per-cloud score table that's locked by an invariant test.
+Three stages, three stores:
 
-A dedicated [`CLAUDE.md`](CLAUDE.md) covers the load-bearing graph conventions in detail.
+```mermaid
+flowchart LR
+  A["<b>1. Ingest</b><br/>Cloud APIs<br/>OpenTelemetry<br/>ServiceNow CMDB"] --> B["<b>2. Link</b><br/>Auto-link rules<br/>Bootstrap from tags<br/>Confidence scoring"]
+  B --> C["<b>3. Query</b><br/>REST API<br/>Agent CLI<br/>AI chat REPL"]
+  classDef ingest fill:#dbeafe,stroke:#1e40af,color:#0b1840
+  classDef link   fill:#fef3c7,stroke:#b45309,color:#3b1f00
+  classDef query  fill:#dcfce7,stroke:#166534,color:#052e16
+  class A ingest
+  class B link
+  class C query
+```
+
+1. **Ingest.** Per-cloud scanners (`/discovery/scan/{aws,azure,gcp}`) issue one native-inventory query each (AWS Config aggregator, Azure Resource Graph, GCP Cloud Asset Inventory) and write `(:Infra)` nodes. Optional supplement layers add Network Watcher topology, VPC flow logs, IAM bindings, and OpenTelemetry-observed connections on top.
+2. **Link.** Auto-link infers Component → Infra ownership from three signals — co-location (same RG / project / account+region), direct 1-hop structural edges, and 2-hop neighbourhood paths. Bootstrap fills in apps and components from cloud tags. Every inferred edge carries a confidence score and an evidence string.
+3. **Query.** Two stores back the answers — **Neo4j** holds the topology graph (every relationship is a `:CONNECTS_TO` edge with `source` / `via` / `confidence` / `evidence` properties); **PostgreSQL** holds operational state — tenants, API keys, audit log, ingestion episodes. The REST API, the CLI agents, and the chat REPL all read from the same graph.
+
+Engineers maintaining the load-bearing conventions (single edge label, scoring tables, why three stages and not two) — see [`CLAUDE.md`](CLAUDE.md).
 
 ---
 
 ## Quickstart
 
-The full deploy story is in `k8s/scripts/deploy-minikube.sh`. The 60-second version:
+### If AppCloud is already running on your cluster
+
+Most teams will hit this path — someone else has already deployed the API. You just need the agent CLI on your laptop pointed at it.
+
+```sh
+git clone <this repo> && cd appcloud/agents
+cp .env.example .env
+```
+
+Fill in `agents/.env`:
+- `APPCLOUD_API_URL` — your cluster's API base URL (e.g. `https://appcloud.acme.local`)
+- `APPCLOUD_API_KEY` — a key minted via `POST /admin/api-keys` (or the bootstrap super-admin secret if you're an operator)
+- `GEMINI_API_KEY` — free key from [aistudio.google.com](https://aistudio.google.com), no card required
+
+Then:
+
+```sh
+node run.js blast-radius --subject "what breaks if portal-api restarts?"
+node run.js chat        # interactive REPL — ask anything about the graph
+node run.js map         # two-pass: link orphan infra to apps/components
+```
+
+### If you're deploying AppCloud from scratch (operator path)
 
 ```sh
 # 1. Bring up the local cluster (postgres + neo4j + ollama + api)
 ./k8s/scripts/deploy-minikube.sh --api-only
 
-# 2. Port-forward + populate
+# 2. Port-forward + populate the demo tenant
 kubectl -n appcloud port-forward svc/api 3000:3000 &
 cd agents
-cp .env.example .env
-# Set APPCLOUD_API_KEY (super-admin secret) + GEMINI_API_KEY in .env
-node seed.js
+cp .env.example .env       # fill in APPCLOUD_API_KEY + GEMINI_API_KEY
+node seed.js               # populates the seeded `default` tenant with demo data
 
 # 3. Ask something
-node run.js blast-radius --subject "what breaks if [seed] portal-api restarts?"
-node run.js map           # two-pass: link existing + propose new
-node run.js chat          # interactive REPL
+node run.js blast-radius --subject "what breaks if [seed] prod-payment-rds restarts?"
 ```
 
-For a real cluster, the same Kustomize bases + per-environment overlays target AKS / EKS / OpenShift. See `k8s/overlays/{aks,eks,openshift}/`.
+For real clusters: the same Kustomize bases + per-environment overlays target AKS / EKS / OpenShift. See `k8s/overlays/{aks,eks,openshift}/`.
 
 ---
 
@@ -152,7 +202,7 @@ The chat REPL forwards your provider creds per request via `cloudOverride`, so t
 
 ## Status
 
-Pre-customer. Multi-tenant rollout is mid-flight: Phase 1a/1b/1d landed, **Phase 1c is tracked at [`docs/TODO-phase-1c.md`](docs/TODO-phase-1c.md)** (lift the data-write 503 gate by completing the per-tenant schema template). Until that lands, `agents/seed.js` writes to the seeded `default` tenant.
+Pre-customer. The multi-tenant control plane is in place — tenant CRUD, per-tenant API keys, isolated Postgres schemas, audit log with tenant attribution. **Per-tenant data writes are feature-flagged off** until the per-tenant table template lands; tracked in [`docs/TODO-phase-1c.md`](docs/TODO-phase-1c.md). Until then, `agents/seed.js` and the agents write to the seeded `default` tenant.
 
 ---
 
