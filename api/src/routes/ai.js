@@ -287,7 +287,7 @@ export default async function aiRoutes(fastify) {
     config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, // LLM cost guard
     schema: {
       summary:     'Cross-app dependency analysis (cloud LLM)',
-      description: 'Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.',
+      description: 'Pulls `/graph/topology` AND runs a bounded set of polymorphic `bfsWalk` inbound walks against each Tier-1 Application, then asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). The per-Tier-1 fan-in plus the rollup buckets each Application spans gives the model concrete signals — names of upstream apps, hop depth, shared resource-groups — instead of just edge counts. Returns 503 when no cloud AI is configured.',
       response:    { 200: { type: 'object', additionalProperties: true }, 503: StandardErrorResponses[503] },
     },
   }, async (req, reply) => {
@@ -300,9 +300,54 @@ export default async function aiRoutes(fastify) {
     const topoRes  = await fastify.inject({ method: 'GET', url: '/graph/topology' })
     const topology = JSON.parse(topoRes.body)
 
+    // For each Tier-1 Application (capped — every walk is a Neo4j
+    // round trip), run an inbound bfsWalk and project the upstream
+    // fan-in: unique upstream Applications + the rollup buckets the
+    // dependents span. This is the signal the LLM actually needs to
+    // call out "shared-resource-group hotspot" or "Tier-1 with 8
+    // upstream apps" — without it the model is guessing from edge
+    // counts alone.
+    const TIER1_FANIN_CAP = 10
+    const tier1Apps = (topology.apps || [])
+      .filter(a => a.tier === 1 && a.id)
+      .slice(0, TIER1_FANIN_CAP)
+    const tier1FanIn = await Promise.all(tier1Apps.map(async (a) => {
+      try {
+        const walk = await bfsWalk({
+          query,
+          rootId:        a.id,
+          direction:     'inbound',
+          maxDepth:      4,                 // keep it cheap — direct + 1-2 hops up
+          nodeCap:       100,
+          minConfidence: 0,
+        })
+        if (!walk) return null
+        const upstreamApps = new Map()
+        for (const n of walk.nodes) {
+          if (!n.ownerAppId || n.ownerAppId === a.id) continue
+          if (!upstreamApps.has(n.ownerAppId)) {
+            upstreamApps.set(n.ownerAppId, { name: n.ownerAppName, tier: n.ownerAppTier })
+          }
+        }
+        return {
+          app:           a.name,
+          tier:          a.tier,
+          upstreamApps:  [...upstreamApps.values()],
+          rollups:       walk.rollups,
+          reachedDepth:  walk.stats.reachedDepth,
+          truncated:     walk.truncated,
+        }
+      } catch (err) {
+        fastify.log.warn(`[ai/dependencies] tier-1 fan-in failed for ${a.name}: ${err.message}`)
+        return null
+      }
+    }))
+
     try {
-      const result = await ai.analyzeDependencies(topology)
-      return result
+      const result = await ai.analyzeDependencies(topology, {
+        tier1FanIn: tier1FanIn.filter(Boolean),
+      })
+      return { ...result, tier1FanIn: tier1FanIn.filter(Boolean) }
     } catch (err) {
       return handleAIError(err, reply)
     }

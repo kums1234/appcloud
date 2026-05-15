@@ -4476,7 +4476,7 @@
           "request": {
             "name": "Cross-app dependency analysis (cloud LLM)",
             "description": {
-              "content": "Pulls `/graph/topology` and asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). Returns 503 when no cloud AI is configured.",
+              "content": "Pulls `/graph/topology` AND runs a bounded set of polymorphic `bfsWalk` inbound walks against each Tier-1 Application, then asks the cloud LLM to flag risky dependency patterns (single points of failure, cycles, tier-skipping calls). The per-Tier-1 fan-in plus the rollup buckets each Application spans gives the model concrete signals — names of upstream apps, hop depth, shared resource-groups — instead of just edge counts. Returns 503 when no cloud AI is configured.",
               "type": "text/plain"
             },
             "url": {

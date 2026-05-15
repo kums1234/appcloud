@@ -148,9 +148,23 @@ Respond as structured JSON with keys: items (array), summary (object).`
   }
 }
 
-async function analyzeDependencies(cloud, topology) {
+async function analyzeDependencies(cloud, topology, walkContext = {}) {
   const { apps, connections, components } = topology
   const crossApp = connections?.filter(c => c.fromAppId !== c.toAppId) || []
+
+  // Per-Tier-1 fan-in (when supplied by the route). Each entry is a
+  // bfsWalk(inbound) projection: upstream Applications by name + tier,
+  // plus rollup buckets the dependents span. Gives the LLM concrete
+  // hotspot signals to call out instead of paraphrasing edge counts.
+  const fanInBlock = (walkContext.tier1FanIn || []).map(t1 => {
+    const upstream = t1.upstreamApps?.length
+      ? t1.upstreamApps.map(u => `${u.name} (tier ${u.tier || '?'})`).join(', ')
+      : 'none reached'
+    const rollups = t1.rollups?.length
+      ? t1.rollups.map(r => `${r.key}×${r.count}`).join(', ')
+      : 'none'
+    return `  - ${t1.app} (tier ${t1.tier}): upstream=[${upstream}], rollup-fan=[${rollups}], depth=${t1.reachedDepth}${t1.truncated ? ' (truncated)' : ''}`
+  }).join('\n')
 
   const prompt = `Analyse this application dependency topology for risks and improvement opportunities.
 
@@ -160,12 +174,14 @@ Applications: ${apps?.length || 0} total
 Cross-application connections: ${crossApp.length}
 Sample cross-app dependencies:
 ${crossApp.slice(0, 10).map(c => `  ${c.fromAppId} → ${c.toAppId} via ${c.protocol || 'unknown'}`).join('\n')}
+${fanInBlock ? `\nTier-1 fan-in (who depends on each Tier-1 app, up to depth 4):\n${fanInBlock}\n` : ''}
 
 Identify:
-1. Single points of failure (services many others depend on)
+1. Single points of failure (services many others depend on — the Tier-1 fan-in shows you which apps have the largest upstream blast radius)
 2. Circular or risky dependency chains
 3. Tier-1 apps with external dependencies that could cascade
-4. Recommendations to improve resilience
+4. Shared-resource-group hotspots (multiple Tier-1 apps with overlapping rollup-fan keys = blast radius beyond what edge counts show)
+5. Recommendations to improve resilience
 
 Be specific. Reference the topology data provided.`
 
@@ -327,8 +343,8 @@ export async function aiPlugin(fastify) {
       planArchitecture(getCloud(), ctx),
     planDriftRemediation: (items) =>
       planDriftRemediation(getCloud(), items),
-    analyzeDependencies: (topo) =>
-      analyzeDependencies(getCloud(), topo),
+    analyzeDependencies: (topo, walkContext) =>
+      analyzeDependencies(getCloud(), topo, walkContext),
 
     // Safe variants — return { error } instead of throwing (for optional enrichment)
     safe: {

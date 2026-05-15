@@ -32,7 +32,22 @@ export const WALK_DEFAULT_MAX_DEPTH = 10
 export const WALK_DEFAULT_NODE_CAP  = 500
 export const WALK_MAX_NODE_CAP      = 5000
 
-export async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, minConfidence }) {
+// Default set of labels the BFS will traverse THROUGH. Applications
+// are container nodes joined back as metadata (via owner-app
+// annotation), never used as a frontier — so they're absent here.
+// Callers can override when (and only when) they need different
+// reachability rules; the route surfaces all default to this.
+export const WALK_DEFAULT_PROPAGATE_LABELS = ['Component', 'Infra']
+
+export async function bfsWalk({
+  query,
+  rootId,
+  direction,
+  maxDepth,
+  nodeCap,
+  minConfidence,
+  propagateLabels = WALK_DEFAULT_PROPAGATE_LABELS,
+}) {
   const validRootLabels = direction === 'outbound'
     ? '(root:Application OR root:Component)'
     : '(root:Application OR root:Component OR root:Infra)'
@@ -114,9 +129,7 @@ export async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, min
         visited.set(toId, { props: toProps, label, depth })
         reachedDepth = Math.max(reachedDepth, depth)
         if (visited.size >= nodeCap) { truncated = true; break }
-        // Only Components and Infra propagate the walk — Applications
-        // are container nodes joined back as metadata, never a frontier.
-        if (label === 'Component' || label === 'Infra') nextFrontier.push(toId)
+        if (propagateLabels.includes(label)) nextFrontier.push(toId)
       }
     }
     if (!layerHadHit) break
