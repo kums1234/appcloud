@@ -321,48 +321,6 @@
           "protocolProfileBehavior": {
             "disableBodyPruning": true
           }
-        },
-        {
-          "name": "Cross-application dependencies for one Application",
-          "request": {
-            "name": "Cross-application dependencies for one Application",
-            "description": {
-              "content": "Walks each Component in the Application and lists Components in *other* Applications it has a `:CONNECTS_TO` edge to. Used by the impact-radius views.",
-              "type": "text/plain"
-            },
-            "url": {
-              "path": [
-                "applications",
-                ":id",
-                "dependencies"
-              ],
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "query": [],
-              "variable": [
-                {
-                  "disabled": false,
-                  "type": "any",
-                  "value": "string",
-                  "key": "id",
-                  "description": "(Required) Resource UUID or unique name"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "method": "GET",
-            "auth": null
-          },
-          "event": [],
-          "protocolProfileBehavior": {
-            "disableBodyPruning": true
-          }
         }
       ],
       "event": []
@@ -575,7 +533,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": 6865\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": \"string\",\n  \"key_1\": 819\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1059,7 +1017,7 @@
           "request": {
             "name": "Counts: applications, components, infra, connections, public-exposed",
             "description": {
-              "content": "A single-shot summary of the graph: total counts plus components-by-type and infra-by-provider histograms. Used by dashboard tiles.",
+              "content": "A single-shot summary of the graph: total counts, components-by-type, infra-by-provider, and infra-by-rollup-bucket (resource-group / GCP project / AWS account+region). Used by dashboard tiles.",
               "type": "text/plain"
             },
             "url": {
@@ -1381,7 +1339,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\"\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": \"string\",\n  \"key_1\": 5224\n}",
               "options": {
                 "raw": {
                   "language": "json"

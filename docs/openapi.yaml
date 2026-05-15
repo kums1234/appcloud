@@ -640,35 +640,6 @@ paths:
                   message:
                     type: string
                     example: infraId required
-  /applications/{id}/dependencies:
-    get:
-      summary: Cross-application dependencies for one Application
-      tags:
-        - Applications
-      description: Walks each Component in the Application and lists Components in
-        *other* Applications it has a `:CONNECTS_TO` edge to. Used by the
-        impact-radius views.
-      parameters:
-        - schema:
-            type: string
-            minLength: 1
-          in: path
-          name: id
-          required: true
-          description: Resource UUID or unique name
-      responses:
-        "200":
-          description: Default Response
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  dependencies:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
   /components/metadata:
     get:
       summary: Component taxonomy + enum metadata
@@ -1595,8 +1566,9 @@ paths:
       summary: "Counts: applications, components, infra, connections, public-exposed"
       tags:
         - Graph
-      description: "A single-shot summary of the graph: total counts plus
-        components-by-type and infra-by-provider histograms. Used by dashboard
+      description: "A single-shot summary of the graph: total counts,
+        components-by-type, infra-by-provider, and infra-by-rollup-bucket
+        (resource-group / GCP project / AWS account+region). Used by dashboard
         tiles."
       responses:
         "200":
@@ -1626,6 +1598,16 @@ paths:
                       additionalProperties: true
                   infraByProvider:
                     type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  infraByRollup:
+                    type: array
+                    description: Per-rollup-bucket Infra counts
+                      (kind=azure-resource-group/gcp-project/aws-account-region,
+                      key=bucket id). Sorted by count desc. Cheap because the
+                      per-cloud parsers run in JS over the same Infra list
+                      `infraByProvider` already needs.
                     items:
                       type: object
                       additionalProperties: true

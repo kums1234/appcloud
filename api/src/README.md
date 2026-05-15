@@ -152,7 +152,6 @@ route registrations would produce. CI fails the PR otherwise.
 | PATCH | `/applications/:id` | Update application |
 | DELETE | `/applications/:id` | Delete application |
 | GET | `/applications/:id/topology` | Full topology with connections |
-| GET | `/applications/:id/dependencies` | Cross-app dependencies |
 
 **POST /applications body:**
 ```json

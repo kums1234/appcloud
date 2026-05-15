@@ -2,6 +2,12 @@ import neo4j from 'neo4j-driver'
 import { props, serialize } from '../utils/serialize.js'
 import { actorFromReq } from '../utils/audit.js'
 import { rollupForInfra } from '../utils/cloud-rollup.js'
+import {
+  bfsWalk,
+  WALK_DEFAULT_MAX_DEPTH,
+  WALK_DEFAULT_NODE_CAP,
+  WALK_MAX_NODE_CAP,
+} from '../services/graph-walk.js'
 
 // Neo4j requires `LIMIT $x` parameters to be Integer (not Number).
 // Convert here so route-level params can stay plain JS ints.
@@ -11,15 +17,6 @@ import {
   GraphWalkResponseSchema,
   StandardErrorResponses,
 } from '../schemas/openapi.js'
-
-// BFS defaults shared by /graph/impact (inbound) and /graph/dependencies
-// (outbound). maxDepth=10 covers realistic structural chains
-// (VM→NIC→Subnet→VNet→…) plus a few service-to-service hops; nodeCap=500
-// keeps a single response payload reasonable even for a noisy shared
-// resource. Whichever fires first sets `truncated: true`.
-const WALK_DEFAULT_MAX_DEPTH = 10
-const WALK_DEFAULT_NODE_CAP  = 500
-const WALK_MAX_NODE_CAP      = 5000
 
 const WALK_QUERYSTRING = {
   type: 'object',
@@ -32,188 +29,6 @@ const WALK_QUERYSTRING = {
   },
 }
 
-// Shared BFS implementation for `/graph/impact` (inbound) and
-// `/graph/dependencies` (outbound). One Cypher round-trip per depth
-// layer keeps the cap behaviour predictable and avoids the exponential
-// blow-up of unbounded variable-length patterns. Edges are returned in
-// the writer-emitted direction (`from` → `to`) regardless of BFS
-// direction — that way an SRE consuming the JSON sees the structural
-// arrow the way the scanner wrote it, not the reverse of however we
-// happened to walk.
-//
-// Exported so /ai/infra/:id/impact (and any future LLM-narrative
-// endpoints) can run the same walk instead of re-implementing the
-// 1-hop-only Cypher.
-export async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, minConfidence }) {
-  const validRootLabels = direction === 'outbound'
-    ? '(root:Application OR root:Component)'
-    : '(root:Application OR root:Component OR root:Infra)'
-
-  const rootRecords = await query(`
-    MATCH (root {id: $id})
-    WHERE ${validRootLabels}
-    OPTIONAL MATCH (root)-[:CONTAINS]->(c:Component)
-    WITH root, labels(root) AS lbls,
-         CASE WHEN root:Application THEN collect(DISTINCT c) ELSE [root] END AS seeds
-    RETURN root, lbls, seeds
-  `, { id: rootId })
-  if (!rootRecords.length) return null
-
-  const rootNode   = rootRecords[0].get('root')
-  const rootLabels = rootRecords[0].get('lbls') || []
-  const rootLabel  = ['Application', 'Component', 'Infra'].find(l => rootLabels.includes(l)) || rootLabels[0] || 'Node'
-  const seedNodes  = rootRecords[0].get('seeds') || []
-  const seeds      = seedNodes.map(n => props(n))
-  // Application root fans out to Components; otherwise the seed label
-  // matches the root's own label.
-  const seedLabel  = rootLabel === 'Application' ? 'Component' : rootLabel
-
-  const visited  = new Map()   // id -> { props, label, depth }
-  const edges    = []
-  const edgeKeys = new Set()
-  let truncated  = false
-  let reachedDepth = 0
-
-  // Seeds are depth-0 so a seed that's also reachable from another seed
-  // doesn't get re-walked or counted as a dependency of itself.
-  for (const seed of seedNodes) {
-    const sp = props(seed)
-    if (sp?.id) visited.set(sp.id, { props: sp, label: seedLabel, depth: 0 })
-  }
-  let frontier = seedNodes.map(n => n.properties.id).filter(Boolean)
-
-  const stepCypher = direction === 'outbound'
-    ? `UNWIND $fromIds AS fromId
-       MATCH (from {id: fromId})-[r:CONNECTS_TO]->(to)
-       WHERE coalesce(r.confidence, 0) >= $minConfidence
-       RETURN fromId, to, r, labels(to) AS toLabels`
-    : `UNWIND $fromIds AS fromId
-       MATCH (from {id: fromId})<-[r:CONNECTS_TO]-(to)
-       WHERE coalesce(r.confidence, 0) >= $minConfidence
-       RETURN fromId, to, r, labels(to) AS toLabels`
-
-  for (let depth = 1; depth <= maxDepth && frontier.length; depth++) {
-    if (visited.size >= nodeCap) { truncated = true; break }
-    const records = await query(stepCypher, { fromIds: frontier, minConfidence })
-    const nextFrontier = []
-    let layerHadHit = false
-    for (const rec of records) {
-      const fromId      = rec.get('fromId')
-      const toNode      = rec.get('to')
-      const edgeRel     = rec.get('r')
-      const toLabelsArr = rec.get('toLabels') || []
-      const toProps     = props(toNode)
-      const toId        = toProps?.id
-      if (!toId) continue
-      layerHadHit = true
-
-      // Dedup edges on the writer-MERGE key analogue: from/to/via/source
-      // (+ role for IAM grants, + protocol for OTEL flows). Edges always
-      // get presented in the structural direction the writer emitted
-      // them, so for an inbound walk we swap the frontier/neighbour
-      // pair when building from/to.
-      const semanticFrom = direction === 'outbound' ? fromId : toId
-      const semanticTo   = direction === 'outbound' ? toId   : fromId
-      const edgeProps    = serialize(edgeRel.properties || {})
-      const edgeKey = `${semanticFrom}::${semanticTo}::${edgeProps.via || ''}::${edgeProps.source || ''}::${edgeProps.role || ''}::${edgeProps.protocol || ''}`
-      if (!edgeKeys.has(edgeKey)) {
-        edgeKeys.add(edgeKey)
-        edges.push({ from: semanticFrom, to: semanticTo, ...edgeProps })
-      }
-
-      if (!visited.has(toId)) {
-        const label = toLabelsArr.find(l => ['Application', 'Component', 'Infra'].includes(l)) || toLabelsArr[0] || 'Node'
-        visited.set(toId, { props: toProps, label, depth })
-        reachedDepth = Math.max(reachedDepth, depth)
-        if (visited.size >= nodeCap) { truncated = true; break }
-        // Only Components and Infra propagate the walk — Applications
-        // are container nodes joined back as metadata, never a frontier.
-        if (label === 'Component' || label === 'Infra') nextFrontier.push(toId)
-      }
-    }
-    if (!layerHadHit) break
-    if (truncated) break
-    frontier = nextFrontier
-  }
-  if (frontier.length && reachedDepth === maxDepth) truncated = true
-
-  // Join back the owning Application for every reached Component (an
-  // incident responder cares which app a leaked-in service belongs to).
-  const componentIds = [...visited.entries()]
-    .filter(([, v]) => v.label === 'Component' && v.depth > 0)
-    .map(([id]) => id)
-  if (componentIds.length) {
-    const owners = await query(`
-      UNWIND $ids AS cid
-      MATCH (a:Application)-[:CONTAINS]->(c:Component {id: cid})
-      RETURN cid AS id, a.id AS appId, a.name AS appName, a.tier AS appTier
-    `, { ids: componentIds })
-    for (const o of owners) {
-      const v = visited.get(o.get('id'))
-      if (!v) continue
-      v.props.ownerAppId   = o.get('appId')
-      v.props.ownerAppName = o.get('appName')
-      v.props.ownerAppTier = serialize(o.get('appTier'))
-    }
-  }
-
-  // Per-Infra rollup annotation. Each Infra node carries the
-  // co-location bucket it lives in (Azure resource group, GCP project,
-  // AWS account+region) — the same key the autolink Rule-1 uses. This
-  // is how incident responders ask "show me everything in rg-prod"
-  // without a second query.
-  for (const v of visited.values()) {
-    if (v.label !== 'Infra') continue
-    const rollup = rollupForInfra({
-      provider: v.props.provider,
-      cloud_id: v.props.cloud_id,
-    })
-    if (rollup) {
-      v.props.rollupKind = rollup.kind
-      v.props.rollupKey  = rollup.key
-    }
-  }
-
-  const rootProps = props(rootNode)
-  const nodes = [...visited.entries()]
-    .filter(([, v]) => v.depth > 0)
-    .map(([, v]) => ({ ...v.props, label: v.label, depth: v.depth }))
-    .sort((a, b) => a.depth - b.depth || (a.name || '').localeCompare(b.name || ''))
-
-  // Aggregate rollup: a quick histogram of buckets reached, so a
-  // dashboard or LLM prompt can lead with "this hits 3 resource groups
-  // and 1 cross-cloud project" without re-grouping the node list.
-  const rollupHist = new Map()
-  for (const n of nodes) {
-    if (!n.rollupKey) continue
-    const k = `${n.rollupKind}::${n.rollupKey}`
-    const prev = rollupHist.get(k)
-    if (prev) prev.count += 1
-    else rollupHist.set(k, { kind: n.rollupKind, key: n.rollupKey, count: 1 })
-  }
-
-  return {
-    root: {
-      id:    rootProps?.id,
-      label: rootLabel,
-      name:  rootProps?.name,
-      tier:  serialize(rootProps?.tier),
-    },
-    seeds,
-    nodes,
-    edges,
-    rollups: [...rollupHist.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)),
-    truncated,
-    stats: {
-      nodesReturned: nodes.length,
-      edgesReturned: edges.length,
-      reachedDepth,
-      maxDepth,
-      nodeCap,
-    },
-  }
-}
-
 export default async function graphRoutes(fastify) {
   const actor = actorFromReq
   const { query } = fastify.neo4j
@@ -222,7 +37,7 @@ export default async function graphRoutes(fastify) {
   fastify.get('/summary', {
     schema: {
       summary:     'Counts: applications, components, infra, connections, public-exposed',
-      description: 'A single-shot summary of the graph: total counts plus components-by-type and infra-by-provider histograms. Used by dashboard tiles.',
+      description: 'A single-shot summary of the graph: total counts, components-by-type, infra-by-provider, and infra-by-rollup-bucket (resource-group / GCP project / AWS account+region). Used by dashboard tiles.',
       response:    {
         200: {
           type: 'object', additionalProperties: true,
@@ -235,12 +50,22 @@ export default async function graphRoutes(fastify) {
             connections:      { type: 'integer' },
             componentsByType: { type: 'array', items: { type: 'object', additionalProperties: true } },
             infraByProvider:  { type: 'array', items: { type: 'object', additionalProperties: true } },
+            infraByRollup: {
+              type: 'array',
+              description: 'Per-rollup-bucket Infra counts (kind=azure-resource-group/gcp-project/aws-account-region, key=bucket id). Sorted by count desc. Cheap because the per-cloud parsers run in JS over the same Infra list `infraByProvider` already needs.',
+              items: { type: 'object', additionalProperties: true },
+            },
           },
         },
       },
     },
   }, async (req, reply) => {
-    const [countRecords, compTypeRecords, infraProviderRecords, connRecords] = await Promise.all([
+    // `infraForRollup` pulls (provider, cloud_id) for every Infra node so
+    // the per-cloud parsers can compute the rollup bucket in JS. Cheap at
+    // graph sizes we run at (thousands, not millions) — and the same
+    // parsers feed the bfsWalk per-node annotations, so the dashboard
+    // and the incident walk agree on bucket names.
+    const [countRecords, compTypeRecords, infraProviderRecords, connRecords, infraForRollup] = await Promise.all([
       query(`
         OPTIONAL MATCH (a:Application)
         OPTIONAL MATCH (c:Component)
@@ -256,8 +81,24 @@ export default async function graphRoutes(fastify) {
       query(`MATCH (c:Component) RETURN c.type AS type, count(c) AS cnt ORDER BY cnt DESC`),
       query(`MATCH (i:Infra) RETURN i.provider AS provider, count(i) AS cnt ORDER BY cnt DESC`),
       query(`OPTIONAL MATCH ()-[r:CONNECTS_TO]->() RETURN count(r) AS connCount`),
+      query(`MATCH (i:Infra) RETURN i.provider AS provider, i.cloud_id AS cloud_id`),
     ])
     const r = countRecords[0]
+
+    // Histogram of rollup buckets across every Infra node.
+    const rollupHist = new Map()
+    for (const rec of infraForRollup) {
+      const rollup = rollupForInfra({
+        provider: rec.get('provider'),
+        cloud_id: rec.get('cloud_id'),
+      })
+      if (!rollup) continue
+      const k = `${rollup.kind}::${rollup.key}`
+      const prev = rollupHist.get(k)
+      if (prev) prev.count += 1
+      else rollupHist.set(k, { kind: rollup.kind, key: rollup.key, count: 1 })
+    }
+
     return {
       applications:     serialize(r.get('appCount')),
       components:       serialize(r.get('componentCount')),
@@ -271,6 +112,9 @@ export default async function graphRoutes(fastify) {
       infraByProvider: infraProviderRecords.map(r => ({
         provider: r.get('provider') || 'unknown', count: serialize(r.get('cnt'))
       })),
+      infraByRollup: [...rollupHist.values()].sort((a, b) =>
+        b.count - a.count || a.key.localeCompare(b.key)
+      ),
     }
   })
 

@@ -3,7 +3,7 @@
 import { props, serialize } from '../utils/serialize.js'
 import { createCloudProviderFromOptions } from '../utils/ai-providers.js'
 import { StandardErrorResponses } from '../schemas/openapi.js'
-import { bfsWalk } from './graph.js'
+import { bfsWalk } from '../services/graph-walk.js'
 
 export default async function aiRoutes(fastify) {
   const { query } = fastify.neo4j

@@ -82,17 +82,6 @@ const tools = [
     },
   },
   {
-    name: 'get_app_dependencies',
-    description: 'For a given Application id, return every other Application it depends on (via cross-app component connections). This is the answer to "if I change this app, who downstream cares?"',
-    input_schema: {
-      type: 'object',
-      properties: {
-        appId: { type: 'string', description: 'Application UUID' },
-      },
-      required: ['appId'],
-    },
-  },
-  {
     name: 'get_app_topology',
     description: 'For a given Application id, return its components, internal connections, and deployed infra. Use to describe the surface area of an app before reasoning about a change to it.',
     input_schema: {
@@ -127,7 +116,6 @@ async function toolHandler(toolName, input) {
     case 'list_infra':                return await api.listInfra();
     case 'get_impact':                return await api.getImpact(input.id);
     case 'get_dependencies':          return await api.getDependencies(input.id);
-    case 'get_app_dependencies':      return await api.getAppDependencies(input.appId);
     case 'get_app_topology':          return await api.getAppTopology(input.appId);
     case 'get_cross_app_dependencies': return await api.getCrossAppDeps();
     case 'get_public_exposed_infra':  return await api.getPublicExposed();
@@ -153,8 +141,9 @@ export async function runBlastRadiusAgent(context = '', subject = '') {
     userMessage =
       `User asked: ${subject}\n\n` +
       `Use the available tools to answer. Resolve names to ids via list_applications / list_infra ` +
-      `before calling get_impact / get_dependencies / get_app_dependencies. Answer in plain English with the ` +
-      `BLAST_RADIUS_RESULT tail.`;
+      `before calling get_impact / get_dependencies. Answer in plain English with the ` +
+      `BLAST_RADIUS_RESULT tail. Cross-app rollups (e.g., "who else does this app depend on") can be ` +
+      `derived from the ownerAppId / ownerAppName annotations get_dependencies attaches to every reached Component.`;
   } else if (context) {
     userMessage =
       `Previous context from Onboarding Agent:\n${context}\n\n` +

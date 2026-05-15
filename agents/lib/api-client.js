@@ -78,7 +78,8 @@ export class AppCloudClient {
   listApplications()        { return this.request('GET', '/applications'); }
   getApplication(id)        { return this.request('GET', `/applications/${id}`); }
   getAppTopology(id)        { return this.request('GET', `/applications/${id}/topology`); }
-  getAppDependencies(id)    { return this.request('GET', `/applications/${id}/dependencies`); }
+  // /applications/:id/dependencies was removed — use getDependencies(id) on
+  // /graph/dependencies for the polymorphic, depth-aware tree.
   createApplication(data)   { return this.request('POST', '/applications', data); }
   updateApplication(id, data) { return this.request('PATCH', `/applications/${id}`, data); }
 

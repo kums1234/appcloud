@@ -57,6 +57,73 @@ function buildFastify({ rootRecords, layerResponses, ownerRecords = [] }) {
 
 const record = (obj) => ({ get: (k) => obj[k] })
 
+// ── /graph/summary (now includes infraByRollup) ─────────────────────────────
+
+describe('GET /graph/summary — infraByRollup aggregate', () => {
+  test('every Infra is bucketed by its rollup; histogram sorted by count desc', async () => {
+    const query = jest.fn(async (cypher) => {
+      if (cypher.includes('count(DISTINCT a)') && cypher.includes('appCount')) {
+        return [record({ appCount: 1, componentCount: 1, infraCount: 4, userCount: 0, publicInfra: 0 })]
+      }
+      if (cypher.includes('c.type AS type')) return []
+      if (cypher.includes('i.provider AS provider, count(i) AS cnt')) {
+        return [record({ provider: 'azure', cnt: 4 })]
+      }
+      if (cypher.includes('count(r) AS connCount')) return [record({ connCount: 0 })]
+      // Per-Infra (provider, cloud_id) feed for the rollup histogram —
+      // three in rg-prod, one in rg-network.
+      if (cypher.includes('i.provider AS provider, i.cloud_id AS cloud_id')) {
+        return [
+          record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-1' }),
+          record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/d-1' }),
+          record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/n-1' }),
+          record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-1/subnets/s-1' }),
+        ]
+      }
+      return []
+    })
+    const fastify = Fastify({ logger: false })
+    fastify.register(sensible)
+    fastify.decorate('neo4j', { query, write: async () => [], ping: async () => true })
+    fastify.register(graphRoutes, { prefix: '/graph' })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/summary' })
+    await fastify.close()
+    const body = JSON.parse(res.body)
+    expect(res.statusCode).toBe(200)
+    expect(body.infraByRollup).toEqual([
+      { kind: 'azure-resource-group', key: 'rg-prod',    count: 3 },
+      { kind: 'azure-resource-group', key: 'rg-network', count: 1 },
+    ])
+  })
+
+  test('Infra without a parseable cloud_id is dropped from the histogram (no nulls)', async () => {
+    const query = jest.fn(async (cypher) => {
+      if (cypher.includes('count(DISTINCT a)') && cypher.includes('appCount')) {
+        return [record({ appCount: 0, componentCount: 0, infraCount: 2, userCount: 0, publicInfra: 0 })]
+      }
+      if (cypher.includes('c.type AS type')) return []
+      if (cypher.includes('i.provider AS provider, count(i) AS cnt')) return []
+      if (cypher.includes('count(r) AS connCount')) return [record({ connCount: 0 })]
+      if (cypher.includes('i.provider AS provider, i.cloud_id AS cloud_id')) {
+        return [
+          record({ provider: 'azure', cloud_id: '/subscriptions/abc/providers/Microsoft.Subscription/aliases/foo' }),  // no rg
+          record({ provider: 'unknown', cloud_id: 'whatever' }),
+        ]
+      }
+      return []
+    })
+    const fastify = Fastify({ logger: false })
+    fastify.register(sensible)
+    fastify.decorate('neo4j', { query, write: async () => [], ping: async () => true })
+    fastify.register(graphRoutes, { prefix: '/graph' })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/summary' })
+    await fastify.close()
+    expect(JSON.parse(res.body).infraByRollup).toEqual([])
+  })
+})
+
 // ── Outbound walk (/graph/dependencies) ──────────────────────────────────────
 
 describe('GET /graph/dependencies — root resolution', () => {

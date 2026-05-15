@@ -262,31 +262,9 @@ export default async function applicationRoutes(fastify) {
     }
   })
 
-  // GET /applications/:id/dependencies
-  fastify.get('/:id/dependencies', {
-    schema: {
-      summary:     'Cross-application dependencies for one Application',
-      description: 'Walks each Component in the Application and lists Components in *other* Applications it has a `:CONNECTS_TO` edge to. Used by the impact-radius views.',
-      params:      IdParamSchema,
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            dependencies: { type: 'array', items: { type: 'object', additionalProperties: true } },
-          },
-        },
-      },
-    },
-  }, async (req, reply) => {
-    const appId = await resolveApplicationId(req.params.id)
-    if (!appId) return reply.notFound('Application not found')
-
-    const records = await query(`
-      MATCH (a:Application {id: $id})-[:CONTAINS]->(c:Component)
-      OPTIONAL MATCH (c)-[:CONNECTS_TO]->(dep:Component)<-[:CONTAINS]-(depApp:Application)
-      WHERE depApp.id <> $id
-      RETURN collect(DISTINCT {app: depApp.name, component: dep.name}) AS deps
-    `, { id: appId })
-    return { dependencies: serialize(records[0]?.get('deps') ?? []) }
-  })
+  // GET /applications/:id/dependencies was removed in favour of the
+  // polymorphic /graph/dependencies?id=<appId>, which returns the
+  // depth-aware tree (Component-Component cross-app calls plus the
+  // transitively-chased infra chain) the legacy endpoint was a flat,
+  // less informative subset of. Callers should use /graph/dependencies.
 }

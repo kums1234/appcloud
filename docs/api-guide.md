@@ -296,8 +296,11 @@ curl -s -X DELETE -H "X-API-Key: $KEY" "$BASE/applications/<id>"
 # Topology — Application + its Components + their Infra + cross-component connections
 curl -s -H "X-API-Key: $KEY" "$BASE/applications/<id>/topology"
 
-# Cross-application dependencies
-curl -s -H "X-API-Key: $KEY" "$BASE/applications/<id>/dependencies"
+# Cross-app + structural dependencies — use the polymorphic /graph/dependencies.
+# The legacy /applications/<id>/dependencies was removed; its narrow [{app, component}]
+# shape is a strict subset of what /graph/dependencies returns (with depth + edge
+# contract + rollup annotations).
+curl -s -H "X-API-Key: $KEY" "$BASE/graph/dependencies?id=<app-id>"
 ```
 
 ---
