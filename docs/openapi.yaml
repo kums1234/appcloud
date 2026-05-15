@@ -2131,6 +2131,131 @@ paths:
                   message:
                     type: string
                     example: infraId required
+  /graph/visualize:
+    get:
+      summary: Render a dependency/impact walk as Mermaid or DOT for inline
+        visualisation
+      tags:
+        - Graph
+      description: >-
+        Runs the same polymorphic `bfsWalk` as `/graph/{dependencies,impact}`,
+        then renders the result as text in one of two graph formats:
+
+
+        - `mermaid` (default): GitHub renders this natively. Wrap the response
+        in ```` ```mermaid ```` fences and commit alongside an incident runbook
+        or design doc.
+
+        - `dot`: Graphviz source. Pipe through `dot -Tpng > impact.png` or `dot
+        -Tsvg > impact.svg` to produce a static image.
+
+
+        Both formats group Components into per-Application subgraphs, group
+        Infra into per-rollup-bucket clusters when multiple resources share a
+        bucket, label edges with the `via` property, and highlight the root +
+        seeds. Response is `text/plain`; status codes and error envelopes match
+        `/graph/{dependencies,impact}`.
+      parameters:
+        - schema:
+            type: string
+          in: query
+          name: id
+          required: true
+          description: Root node id (UUID).
+        - schema:
+            type: string
+            enum:
+              - outbound
+              - inbound
+            default: outbound
+          in: query
+          name: direction
+          required: false
+          description: "`outbound` walks dependencies (what this leans on); `inbound`
+            walks impact (what depends on this)."
+        - schema:
+            type: string
+            enum:
+              - mermaid
+              - dot
+            default: mermaid
+          in: query
+          name: format
+          required: false
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+          in: query
+          name: maxDepth
+          required: false
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+          in: query
+          name: nodeCap
+          required: false
+        - schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+            default: 0
+          in: query
+          name: minConfidence
+          required: false
+      responses:
+        "200":
+          description: Rendered graph text. Content-Type is text/plain.
+          content:
+            application/json:
+              schema:
+                type: string
+                description: Rendered graph text. Content-Type is text/plain.
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - statusCode
+                  - error
+                  - message
+                additionalProperties: true
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  error:
+                    type: string
+                    example: Bad Request
+                  message:
+                    type: string
+                    example: infraId required
+        "404":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - statusCode
+                  - error
+                  - message
+                additionalProperties: true
+                properties:
+                  statusCode:
+                    type: integer
+                    example: 400
+                  error:
+                    type: string
+                    example: Bad Request
+                  message:
+                    type: string
+                    example: infraId required
   /graph/cross-app-dependencies:
     get:
       summary: Every Component → Component edge that crosses an Application boundary

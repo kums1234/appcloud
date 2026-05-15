@@ -15,7 +15,7 @@ $ node agents/run.js blast-radius --subject \
     "What apps are affected if [seed] prod-payment-rds restarts?"
 
 [Blast Radius] Tool: list_infra
-[Blast Radius] Tool: get_infra_impact { infraId: a546ed4a-... }
+[Blast Radius] Tool: get_impact { id: a546ed4a-... }
 [Blast Radius] Response:
 
 Changing [seed] prod-payment-rds affects 1 component across 1 application,
@@ -33,6 +33,57 @@ BLAST_RADIUS_RESULT:
 ```
 
 That's the Blast Radius agent — one of three that ride on top of the graph. Every claim is backed by `:CONNECTS_TO` edges with `source`, `via`, `confidence`, and `evidence` properties; nothing is hallucinated.
+
+---
+
+## The same answer, as a picture
+
+The agent's narrative comes from a graph walk. You can ask for the walk directly and render it inline — `GET /graph/visualize?id=<app-or-component-or-infra>` returns Mermaid (or DOT, `?format=dot`) you can paste into a runbook, design doc, or incident ticket. GitHub renders Mermaid natively, so the dependency picture lives wherever the conversation is:
+
+```mermaid
+%%{init: {"theme":"default","flowchart":{"curve":"basis"}}}%%
+flowchart LR
+  %% Dependencies walk from Application "payments"
+  subgraph n_app__app_payments["payments tier 1"]
+    direction TB
+    n_c_api("api (root)")
+    n_c_worker("worker (root)")
+  end
+  subgraph n_app__app_billing["Billing tier 2"]
+    direction TB
+    n_c_billing("billing-svc (d1)")
+  end
+  subgraph n_rg__azure_resource_group__rg_prod_payments["rg-prod-payments (azure-resource-group)"]
+    direction TB
+    n_inf_vm[("prod-payment-vm (d1)")]
+    n_inf_nic[("prod-payment-nic (d2)")]
+    n_inf_disk[("prod-payment-disk (d2)")]
+    n_inf_rds[("prod-payment-rds (d1)")]
+  end
+    n_inf_subnet[("web-subnet (d3)")]
+  n_c_api -->|component-mapping| n_inf_vm
+  n_c_worker -->|component-mapping| n_inf_vm
+  n_c_api -->|component-mapping| n_inf_rds
+  n_c_api -->|otel-http| n_c_billing
+  n_inf_vm -->|nic| n_inf_nic
+  n_inf_vm -->|disk| n_inf_disk
+  n_inf_nic -->|subnet| n_inf_subnet
+  classDef appNode   fill:#e3f2fd,stroke:#1976d2,stroke-width:1px
+  classDef compNode  fill:#fff3e0,stroke:#f57c00,stroke-width:1px
+  classDef infraNode fill:#e8f5e9,stroke:#388e3c,stroke-width:1px
+  classDef rootNode  stroke:#c2185b,stroke-width:3px,font-weight:bold
+  class n_c_api,n_c_worker,n_c_billing compNode
+  class n_inf_vm,n_inf_nic,n_inf_disk,n_inf_subnet,n_inf_rds infraNode
+  class n_c_api,n_c_worker rootNode
+```
+
+Components are grouped by Application, Infra is grouped by resource-group / project / account-region, edges are labelled with the structural `via` (`nic`, `subnet`, `component-mapping`, `otel-http`, …), and the root nodes are emphasised. Same shape works for the inverse direction:
+
+```sh
+# What breaks if prod-payment-rds restarts? Inbound walk, piped into Graphviz.
+curl -sH "X-API-Key: $KEY" \
+  "$BASE/graph/visualize?id=$RDS_ID&direction=inbound&format=dot" | dot -Tpng > impact.png
+```
 
 ---
 

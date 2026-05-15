@@ -385,6 +385,12 @@ curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?id=<app-component-or-infra-id>&
 # as /impact, useful for "this app spans N resource groups" dashboards.
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/dependencies?id=<app-or-component-id>&maxDepth=10&nodeCap=500"
 
+# Render either walk as a diagram. `format=mermaid` (default) returns text that
+# GitHub will render inline; `format=dot` returns Graphviz source for `dot -T…`.
+# `direction=outbound` (default) for dependencies; `direction=inbound` for impact.
+curl -s -H "X-API-Key: $KEY" "$BASE/graph/visualize?id=<id>&direction=outbound&format=mermaid"
+curl -s -H "X-API-Key: $KEY" "$BASE/graph/visualize?id=<id>&direction=inbound&format=dot" | dot -Tpng > impact.png
+
 # All cross-application dependencies
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/cross-app-dependencies"
 

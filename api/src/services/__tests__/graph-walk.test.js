@@ -1,10 +1,5 @@
 import { describe, test, expect, jest } from '@jest/globals'
-import {
-  bfsWalk,
-  WALK_DEFAULT_MAX_DEPTH,
-  WALK_DEFAULT_NODE_CAP,
-  WALK_DEFAULT_PROPAGATE_LABELS,
-} from '../graph-walk.js'
+import { bfsWalk, WALK_DEFAULTS } from '../graph-walk.js'
 
 // Service-level unit tests for the shared BFS helper used by
 // /graph/dependencies, /graph/impact, and /ai/infra/:id/impact. Lives
@@ -53,8 +48,8 @@ function makeQueryMock({ rootRecords = [], layerResponses = [], ownerRecords = [
 const callBfs = (opts) => bfsWalk({
   rootId:        opts.rootId       ?? 'r-1',
   direction:     opts.direction    ?? 'outbound',
-  maxDepth:      opts.maxDepth     ?? WALK_DEFAULT_MAX_DEPTH,
-  nodeCap:       opts.nodeCap      ?? WALK_DEFAULT_NODE_CAP,
+  maxDepth:      opts.maxDepth     ?? WALK_DEFAULTS.maxDepth,
+  nodeCap:       opts.nodeCap      ?? WALK_DEFAULTS.nodeCap,
   minConfidence: opts.minConfidence ?? 0,
   ...opts,
 })
@@ -366,7 +361,7 @@ describe('bfsWalk — Infra rollup annotation', () => {
 
 describe('bfsWalk — propagateLabels controls frontier propagation', () => {
   test('default exports the Component+Infra set', () => {
-    expect(WALK_DEFAULT_PROPAGATE_LABELS).toEqual(['Component', 'Infra'])
+    expect(WALK_DEFAULTS.propagateLabels).toEqual(['Component', 'Infra'])
   })
 
   test('default propagates through Component and Infra, but NOT Application', async () => {

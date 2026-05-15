@@ -2,12 +2,8 @@ import neo4j from 'neo4j-driver'
 import { props, serialize } from '../utils/serialize.js'
 import { actorFromReq } from '../utils/audit.js'
 import { rollupForInfra } from '../utils/cloud-rollup.js'
-import {
-  bfsWalk,
-  WALK_DEFAULT_MAX_DEPTH,
-  WALK_DEFAULT_NODE_CAP,
-  WALK_MAX_NODE_CAP,
-} from '../services/graph-walk.js'
+import { bfsWalk, WALK_DEFAULTS } from '../services/graph-walk.js'
+import { toMermaid, toDot } from '../services/graph-visualize.js'
 
 // Neo4j requires `LIMIT $x` parameters to be Integer (not Number).
 // Convert here so route-level params can stay plain JS ints.
@@ -23,8 +19,8 @@ const WALK_QUERYSTRING = {
   required: ['id'],
   properties: {
     id:            { type: 'string', description: 'Root node id (UUID).' },
-    maxDepth:      { type: 'integer', minimum: 1, maximum: 20,   default: WALK_DEFAULT_MAX_DEPTH },
-    nodeCap:       { type: 'integer', minimum: 1, maximum: WALK_MAX_NODE_CAP, default: WALK_DEFAULT_NODE_CAP },
+    maxDepth:      { type: 'integer', minimum: 1, maximum: 20,   default: WALK_DEFAULTS.maxDepth },
+    nodeCap:       { type: 'integer', minimum: 1, maximum: WALK_DEFAULTS.maxNodeCap, default: WALK_DEFAULTS.nodeCap },
     minConfidence: { type: 'integer', minimum: 0, maximum: 100, default: 0 },
   },
 }
@@ -60,12 +56,13 @@ export default async function graphRoutes(fastify) {
       },
     },
   }, async (req, reply) => {
-    // `infraForRollup` pulls (provider, cloud_id) for every Infra node so
-    // the per-cloud parsers can compute the rollup bucket in JS. Cheap at
-    // graph sizes we run at (thousands, not millions) — and the same
-    // parsers feed the bfsWalk per-node annotations, so the dashboard
-    // and the incident walk agree on bucket names.
-    const [countRecords, compTypeRecords, infraProviderRecords, connRecords, infraForRollup] = await Promise.all([
+    // Single `infraRows` pass pulls (provider, cloud_id) for every
+    // Infra node; both `infraByProvider` and `infraByRollup` are
+    // computed in JS over that one result set instead of two separate
+    // MATCH (i:Infra) scans. The per-cloud rollup parsers run client-
+    // side, so the dashboard and bfsWalk's per-node annotation agree on
+    // bucket names.
+    const [countRecords, compTypeRecords, connRecords, infraRows] = await Promise.all([
       query(`
         OPTIONAL MATCH (a:Application)
         OPTIONAL MATCH (c:Component)
@@ -79,19 +76,19 @@ export default async function graphRoutes(fastify) {
                count(DISTINCT i2)  AS publicInfra
       `),
       query(`MATCH (c:Component) RETURN c.type AS type, count(c) AS cnt ORDER BY cnt DESC`),
-      query(`MATCH (i:Infra) RETURN i.provider AS provider, count(i) AS cnt ORDER BY cnt DESC`),
       query(`OPTIONAL MATCH ()-[r:CONNECTS_TO]->() RETURN count(r) AS connCount`),
       query(`MATCH (i:Infra) RETURN i.provider AS provider, i.cloud_id AS cloud_id`),
     ])
     const r = countRecords[0]
 
-    // Histogram of rollup buckets across every Infra node.
-    const rollupHist = new Map()
-    for (const rec of infraForRollup) {
-      const rollup = rollupForInfra({
-        provider: rec.get('provider'),
-        cloud_id: rec.get('cloud_id'),
-      })
+    // Two histograms over the same Infra rows.
+    const providerHist = new Map()
+    const rollupHist   = new Map()
+    for (const rec of infraRows) {
+      const provider = rec.get('provider')
+      providerHist.set(provider, (providerHist.get(provider) || 0) + 1)
+
+      const rollup = rollupForInfra({ provider, cloud_id: rec.get('cloud_id') })
       if (!rollup) continue
       const k = `${rollup.kind}::${rollup.key}`
       const prev = rollupHist.get(k)
@@ -109,9 +106,9 @@ export default async function graphRoutes(fastify) {
       componentsByType: compTypeRecords.map(r => ({
         type: r.get('type') || 'Unknown', count: serialize(r.get('cnt'))
       })),
-      infraByProvider: infraProviderRecords.map(r => ({
-        provider: r.get('provider') || 'unknown', count: serialize(r.get('cnt'))
-      })),
+      infraByProvider: [...providerHist.entries()]
+        .map(([provider, count]) => ({ provider: provider || 'unknown', count }))
+        .sort((a, b) => b.count - a.count || a.provider.localeCompare(b.provider)),
       infraByRollup: [...rollupHist.values()].sort((a, b) =>
         b.count - a.count || a.key.localeCompare(b.key)
       ),
@@ -217,8 +214,8 @@ export default async function graphRoutes(fastify) {
       query,
       rootId:        id,
       direction:     'inbound',
-      maxDepth:      req.query.maxDepth      ?? WALK_DEFAULT_MAX_DEPTH,
-      nodeCap:       Math.min(req.query.nodeCap ?? WALK_DEFAULT_NODE_CAP, WALK_MAX_NODE_CAP),
+      maxDepth:      req.query.maxDepth      ?? WALK_DEFAULTS.maxDepth,
+      nodeCap:       Math.min(req.query.nodeCap ?? WALK_DEFAULTS.nodeCap, WALK_DEFAULTS.maxNodeCap),
       minConfidence: req.query.minConfidence  ?? 0,
     })
     if (!result) return reply.notFound('No Application, Component, or Infra with that id')
@@ -255,12 +252,66 @@ export default async function graphRoutes(fastify) {
       query,
       rootId:        id,
       direction:     'outbound',
-      maxDepth:      req.query.maxDepth      ?? WALK_DEFAULT_MAX_DEPTH,
-      nodeCap:       Math.min(req.query.nodeCap ?? WALK_DEFAULT_NODE_CAP, WALK_MAX_NODE_CAP),
+      maxDepth:      req.query.maxDepth      ?? WALK_DEFAULTS.maxDepth,
+      nodeCap:       Math.min(req.query.nodeCap ?? WALK_DEFAULTS.nodeCap, WALK_DEFAULTS.maxNodeCap),
       minConfidence: req.query.minConfidence  ?? 0,
     })
     if (!result) return reply.notFound('No Application or Component with that id (Infra ids use /graph/impact)')
     return result
+  })
+
+  // GET /graph/visualize?id=&direction=&format=&maxDepth=&nodeCap=&minConfidence=
+  fastify.get('/visualize', {
+    schema: {
+      summary:     'Render a dependency/impact walk as Mermaid or DOT for inline visualisation',
+      description: [
+        'Runs the same polymorphic `bfsWalk` as `/graph/{dependencies,impact}`, then renders the result as text in one of two graph formats:',
+        '',
+        '- `mermaid` (default): GitHub renders this natively. Wrap the response in ```` ```mermaid ```` fences and commit alongside an incident runbook or design doc.',
+        '- `dot`: Graphviz source. Pipe through `dot -Tpng > impact.png` or `dot -Tsvg > impact.svg` to produce a static image.',
+        '',
+        'Both formats group Components into per-Application subgraphs, group Infra into per-rollup-bucket clusters when multiple resources share a bucket, label edges with the `via` property, and highlight the root + seeds. Response is `text/plain`; status codes and error envelopes match `/graph/{dependencies,impact}`.',
+      ].join('\n'),
+      querystring: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id:            { type: 'string', description: 'Root node id (UUID).' },
+          direction:     { type: 'string', enum: ['outbound', 'inbound'], default: 'outbound', description: '`outbound` walks dependencies (what this leans on); `inbound` walks impact (what depends on this).' },
+          format:        { type: 'string', enum: ['mermaid', 'dot'],      default: 'mermaid' },
+          maxDepth:      { type: 'integer', minimum: 1, maximum: 20,   default: WALK_DEFAULTS.maxDepth },
+          nodeCap:       { type: 'integer', minimum: 1, maximum: WALK_DEFAULTS.maxNodeCap, default: WALK_DEFAULTS.nodeCap },
+          minConfidence: { type: 'integer', minimum: 0, maximum: 100, default: 0 },
+        },
+      },
+      response: {
+        200: { type: 'string', description: 'Rendered graph text. Content-Type is text/plain.' },
+        400: StandardErrorResponses[400],
+        404: StandardErrorResponses[404],
+      },
+    },
+  }, async (req, reply) => {
+    const { id } = req.query
+    const direction = req.query.direction ?? 'outbound'
+    const format    = req.query.format    ?? 'mermaid'
+    if (!id) return reply.badRequest('id required')
+
+    const result = await bfsWalk({
+      query,
+      rootId:        id,
+      direction,
+      maxDepth:      req.query.maxDepth      ?? WALK_DEFAULTS.maxDepth,
+      nodeCap:       Math.min(req.query.nodeCap ?? WALK_DEFAULTS.nodeCap, WALK_DEFAULTS.maxNodeCap),
+      minConfidence: req.query.minConfidence  ?? 0,
+    })
+    if (!result) {
+      return reply.notFound(direction === 'outbound'
+        ? 'No Application or Component with that id (Infra ids use direction=inbound)'
+        : 'No Application, Component, or Infra with that id')
+    }
+    const text = format === 'dot' ? toDot(result, { direction }) : toMermaid(result, { direction })
+    reply.type('text/plain; charset=utf-8')
+    return text
   })
 
   // GET /graph/cross-app-dependencies

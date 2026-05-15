@@ -28,16 +28,25 @@ import { rollupForInfra }     from '../utils/cloud-rollup.js'
 // (VM→NIC→Subnet→VNet→…) plus a few service-to-service hops; nodeCap=500
 // keeps a single response payload reasonable even for a noisy shared
 // resource. Whichever fires first sets `truncated: true`.
-export const WALK_DEFAULT_MAX_DEPTH = 10
-export const WALK_DEFAULT_NODE_CAP  = 500
-export const WALK_MAX_NODE_CAP      = 5000
-
-// Default set of labels the BFS will traverse THROUGH. Applications
-// are container nodes joined back as metadata (via owner-app
-// annotation), never used as a frontier — so they're absent here.
-// Callers can override when (and only when) they need different
-// reachability rules; the route surfaces all default to this.
-export const WALK_DEFAULT_PROPAGATE_LABELS = ['Component', 'Infra']
+// BFS defaults shared by /graph/impact (inbound) and /graph/dependencies
+// (outbound). maxDepth=10 covers realistic structural chains
+// (VM→NIC→Subnet→VNet→…) plus a few service-to-service hops; nodeCap=500
+// keeps a single response payload reasonable even for a noisy shared
+// resource. Whichever fires first sets `truncated: true`.
+//
+// One bag so route querystring schemas can pull defaults + caps from a
+// single import; AI callers that pass explicit values don't need this.
+export const WALK_DEFAULTS = Object.freeze({
+  maxDepth:        10,
+  nodeCap:         500,
+  maxNodeCap:      5000,
+  // Default set of labels the BFS will traverse THROUGH. Applications
+  // are container nodes joined back as metadata (via owner-app
+  // annotation), never used as a frontier — so they're absent here.
+  // Callers can override when (and only when) they need different
+  // reachability rules; the route surfaces all default to this.
+  propagateLabels: Object.freeze(['Component', 'Infra']),
+})
 
 export async function bfsWalk({
   query,
@@ -46,7 +55,7 @@ export async function bfsWalk({
   maxDepth,
   nodeCap,
   minConfidence,
-  propagateLabels = WALK_DEFAULT_PROPAGATE_LABELS,
+  propagateLabels = WALK_DEFAULTS.propagateLabels,
 }) {
   const validRootLabels = direction === 'outbound'
     ? '(root:Application OR root:Component)'

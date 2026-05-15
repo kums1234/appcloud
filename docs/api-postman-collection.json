@@ -533,7 +533,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": \"string\",\n  \"key_1\": 819\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1189,6 +1189,72 @@
           }
         },
         {
+          "name": "Render a dependency/impact walk as Mermaid or DOT for inline visualisation",
+          "request": {
+            "name": "Render a dependency/impact walk as Mermaid or DOT for inline visualisation",
+            "description": {
+              "content": "Runs the same polymorphic `bfsWalk` as `/graph/{dependencies,impact}`, then renders the result as text in one of two graph formats:\n\n- `mermaid` (default): GitHub renders this natively. Wrap the response in ```` ```mermaid ```` fences and commit alongside an incident runbook or design doc.\n- `dot`: Graphviz source. Pipe through `dot -Tpng > impact.png` or `dot -Tsvg > impact.svg` to produce a static image.\n\nBoth formats group Components into per-Application subgraphs, group Infra into per-rollup-bucket clusters when multiple resources share a bucket, label edges with the `via` property, and highlight the root + seeds. Response is `text/plain`; status codes and error envelopes match `/graph/{dependencies,impact}`.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "visualize"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "id",
+                  "value": "string",
+                  "description": "(Required) Root node id (UUID)."
+                },
+                {
+                  "disabled": false,
+                  "key": "direction",
+                  "value": "outbound",
+                  "description": "`outbound` walks dependencies (what this leans on); `inbound` walks impact (what depends on this)."
+                },
+                {
+                  "disabled": false,
+                  "key": "format",
+                  "value": "mermaid"
+                },
+                {
+                  "disabled": false,
+                  "key": "maxDepth",
+                  "value": "10"
+                },
+                {
+                  "disabled": false,
+                  "key": "nodeCap",
+                  "value": "500"
+                },
+                {
+                  "disabled": false,
+                  "key": "minConfidence",
+                  "value": "0"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
           "name": "Every Component → Component edge that crosses an Application boundary",
           "request": {
             "name": "Every Component → Component edge that crosses an Application boundary",
@@ -1339,7 +1405,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": \"string\",\n  \"key_1\": 5224\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 6563\n}",
               "options": {
                 "raw": {
                   "language": "json"

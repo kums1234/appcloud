@@ -29,9 +29,9 @@ function buildFastify({ rootRecords = [], layerResponses = [], ownerRecords = []
       return summaryRecords.counts ?? [record({ appCount: 0, componentCount: 0, infraCount: 0, userCount: 0, publicInfra: 0 })]
     }
     if (cypher.includes('c.type AS type')) return summaryRecords.compTypes ?? []
-    if (cypher.includes('i.provider AS provider, count(i) AS cnt')) return summaryRecords.infraProvider ?? []
     if (cypher.includes('count(r) AS connCount')) return summaryRecords.conn ?? [record({ connCount: 0 })]
-    if (cypher.includes('i.provider AS provider, i.cloud_id AS cloud_id')) return summaryRecords.infraForRollup ?? []
+    // Single Infra-scan now feeds both byProvider and byRollup.
+    if (cypher.includes('i.provider AS provider, i.cloud_id AS cloud_id')) return summaryRecords.infraRows ?? []
     // bfsWalk queries
     if (cypher.includes('WHERE (root:Application')) return rootRecords
     if (cypher.includes('MATCH (a:Application)-[:CONTAINS]->(c:Component {id: cid})')) return ownerRecords
@@ -155,6 +155,69 @@ describe('GET /graph/impact — route-level', () => {
   })
 })
 
+// ── /graph/visualize route plumbing ──────────────────────────────────────────
+
+describe('GET /graph/visualize — route-level', () => {
+  test('400 when id is missing', async () => {
+    const { fastify } = buildFastify({})
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/visualize' })
+    await fastify.close()
+    expect(res.statusCode).toBe(400)
+  })
+
+  test('404 when root not found', async () => {
+    const { fastify } = buildFastify({ rootRecords: [] })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/visualize?id=missing' })
+    await fastify.close()
+    expect(res.statusCode).toBe(404)
+  })
+
+  test('default format=mermaid returns text/plain with flowchart header', async () => {
+    const comp = node('c-1', 'api', 'Component')
+    const { fastify } = buildFastify({
+      rootRecords: [record({ root: comp, lbls: ['Component'], seeds: [comp] })],
+      layerResponses: [[]],
+    })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/visualize?id=c-1' })
+    await fastify.close()
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toMatch(/^text\/plain/)
+    expect(res.body).toMatch(/^%%{init/m)
+    expect(res.body).toMatch(/^flowchart LR$/m)
+  })
+
+  test('format=dot returns Graphviz digraph text', async () => {
+    const comp = node('c-1', 'api', 'Component')
+    const { fastify } = buildFastify({
+      rootRecords: [record({ root: comp, lbls: ['Component'], seeds: [comp] })],
+      layerResponses: [[]],
+    })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/visualize?id=c-1&format=dot' })
+    await fastify.close()
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatch(/^digraph appcloud_outbound \{/)
+  })
+
+  test('direction=inbound routes through the impact walk', async () => {
+    const inf = node('inf-1', 'subnet-1', 'Infra')
+    const { fastify, query } = buildFastify({
+      rootRecords: [record({ root: inf, lbls: ['Infra'], seeds: [inf] })],
+      layerResponses: [[]],
+    })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/visualize?id=inf-1&direction=inbound&format=dot' })
+    await fastify.close()
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatch(/^digraph appcloud_inbound \{/)
+    // The bfsWalk fired uses the inbound arrow
+    expect(query.mock.calls.some(c => c[0].includes('<-[r:CONNECTS_TO]-(to)'))).toBe(true)
+  })
+})
+
 // ── /graph/summary infraByRollup ─────────────────────────────────────────────
 
 describe('GET /graph/summary — infraByRollup aggregate', () => {
@@ -162,21 +225,27 @@ describe('GET /graph/summary — infraByRollup aggregate', () => {
     const { fastify } = buildFastify({
       summaryRecords: {
         counts: [record({ appCount: 1, componentCount: 1, infraCount: 4, userCount: 0, publicInfra: 0 })],
-        infraProvider: [record({ provider: 'azure', cnt: 4 })],
-        infraForRollup: [
+        infraRows: [
           record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-1' }),
           record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/d-1' }),
           record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/n-1' }),
-          record({ provider: 'azure', cloud_id: '/subscriptions/abc/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-1/subnets/s-1' }),
+          record({ provider: 'gcp',   cloud_id: 'https://www.googleapis.com/compute/v1/projects/proj-x/zones/us-central1-a/instances/inst-1' }),
         ],
       },
     })
     await fastify.ready()
     const res = await fastify.inject({ method: 'GET', url: '/graph/summary' })
     await fastify.close()
-    expect(JSON.parse(res.body).infraByRollup).toEqual([
-      { kind: 'azure-resource-group', key: 'rg-prod',    count: 3 },
-      { kind: 'azure-resource-group', key: 'rg-network', count: 1 },
+    const body = JSON.parse(res.body)
+    // byRollup histogram from the same scan
+    expect(body.infraByRollup).toEqual([
+      { kind: 'azure-resource-group', key: 'rg-prod', count: 3 },
+      { kind: 'gcp-project',          key: 'proj-x',  count: 1 },
+    ])
+    // byProvider also computed from the single scan now
+    expect(body.infraByProvider).toEqual([
+      { provider: 'azure', count: 3 },
+      { provider: 'gcp',   count: 1 },
     ])
   })
 
@@ -184,7 +253,7 @@ describe('GET /graph/summary — infraByRollup aggregate', () => {
     const { fastify } = buildFastify({
       summaryRecords: {
         counts: [record({ appCount: 0, componentCount: 0, infraCount: 2, userCount: 0, publicInfra: 0 })],
-        infraForRollup: [
+        infraRows: [
           record({ provider: 'azure',   cloud_id: '/subscriptions/abc/providers/Microsoft.Subscription/aliases/foo' }),
           record({ provider: 'unknown', cloud_id: 'whatever' }),
         ],
