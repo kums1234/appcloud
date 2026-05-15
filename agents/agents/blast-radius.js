@@ -61,13 +61,24 @@ const tools = [
   },
   {
     name: 'get_infra_impact',
-    description: 'For a given Infra id, return every Component and Application that depends on it. This is the answer to "what breaks if I change this infra?" Applications are returned tier-first.',
+    description: 'For a given Application, Component, or Infra id, return every node that depends on it as a depth-aware tree (nodes carry `depth`, edges carry source/via/confidence/evidence). This is the answer to "what breaks if I change this?" Reached Components are annotated with their owning Application for cross-app context.',
     input_schema: {
       type: 'object',
       properties: {
-        infraId: { type: 'string', description: 'Infra UUID' },
+        infraId: { type: 'string', description: 'Application, Component, or Infra UUID (the param name is legacy; any of the three is accepted).' },
       },
       required: ['infraId'],
+    },
+  },
+  {
+    name: 'get_dependencies',
+    description: 'Inverse of `get_infra_impact`. For a given Application or Component id, returns the outbound dependency subgraph — what this thing leans on. Use for incident drill-down: an impacted service can be expanded into the chain of components, infra deployments, and transitively-chased structural infra it relies on.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Application or Component UUID' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -115,6 +126,7 @@ async function toolHandler(toolName, input) {
     case 'list_applications':         return await api.listApplications();
     case 'list_infra':                return await api.listInfra();
     case 'get_infra_impact':          return await api.getImpact(input.infraId);
+    case 'get_dependencies':          return await api.getDependencies(input.id);
     case 'get_app_dependencies':      return await api.getAppDependencies(input.appId);
     case 'get_app_topology':          return await api.getAppTopology(input.appId);
     case 'get_cross_app_dependencies': return await api.getCrossAppDeps();

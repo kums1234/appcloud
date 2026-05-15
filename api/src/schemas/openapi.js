@@ -377,7 +377,7 @@ export const SuggestApplyAllBodySchema = {
   },
 }
 
-// ── Graph topology + impact ──────────────────────────────────────────────────
+// ── Graph topology + walk (impact / dependencies) ───────────────────────────
 export const GraphTopologyResponseSchema = {
   type: 'object',
   additionalProperties: true,
@@ -390,20 +390,11 @@ export const GraphTopologyResponseSchema = {
   },
 }
 
-export const GraphImpactResponseSchema = {
-  type: 'object',
-  additionalProperties: true,
-  properties: {
-    infra:        { type: 'string' },
-    components:   { type: 'array', items: { type: 'object', additionalProperties: true } },
-    applications: { type: 'array', items: { type: 'object', additionalProperties: true } },
-  },
-}
-
-// Inverse of /graph/impact — given an Application or Component, return the
-// outbound dependency subgraph (Component→Component, Component→Infra,
-// transitively chased Infra→Infra) as a depth-aware tree.
-export const GraphDependenciesResponseSchema = {
+// Shared shape for /graph/impact (inbound walk) and /graph/dependencies
+// (outbound walk). Both endpoints BFS over `:CONNECTS_TO`, dedup nodes
+// + edges, annotate each node with `depth`, and return the full edge
+// contract per traversed edge.
+export const GraphWalkResponseSchema = {
   type: 'object',
   additionalProperties: true,
   properties: {
@@ -412,26 +403,26 @@ export const GraphDependenciesResponseSchema = {
       additionalProperties: true,
       properties: {
         id:    { type: 'string' },
-        label: { type: 'string', description: 'Application or Component' },
+        label: { type: 'string', description: 'Application, Component, or Infra (Infra is only valid on /graph/impact).' },
         name:  { type: 'string' },
       },
     },
-    startComponents: {
+    seeds: {
       type: 'array',
-      description: 'Components used as BFS seeds. For a Component root this is just the root; for an Application root it is every contained Component.',
+      description: 'BFS seed nodes. Application root → contained Components; Component root → the Component itself; Infra root (impact only) → the Infra itself.',
       items: { type: 'object', additionalProperties: true },
     },
     nodes: {
       type: 'array',
-      description: 'Every reachable dependency node, deduped by id, annotated with `depth` (1 = direct dependency).',
+      description: 'Every reachable node, deduped by id, annotated with `depth` (1 = direct neighbour of a seed).',
       items: { type: 'object', additionalProperties: true },
     },
     edges: {
       type: 'array',
-      description: 'Every :CONNECTS_TO edge traversed during the walk. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).',
+      description: 'Every :CONNECTS_TO edge traversed during the walk. Always presented in the writer-emitted direction (`from` → `to`), regardless of BFS direction. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).',
       items: { type: 'object', additionalProperties: true },
     },
-    truncated: { type: 'boolean', description: 'True when the BFS hit `nodeCap` before exhausting the reachable subgraph.' },
+    truncated: { type: 'boolean', description: 'True when the BFS hit `nodeCap` or `maxDepth` before exhausting the reachable subgraph.' },
     stats: {
       type: 'object',
       additionalProperties: true,

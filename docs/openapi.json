@@ -2476,93 +2476,11 @@
     },
     "/graph/impact": {
       "get": {
-        "summary": "Blast-radius for a single Infra resource",
+        "summary": "Blast-radius — what is impacted if this Application, Component, or Infra changes",
         "tags": [
           "Graph"
         ],
-        "description": "Walks Infra ← Component ← Application and returns every Component / Application that depends on the given Infra. Applications come back sorted by tier (1 = critical first).",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "query",
-            "name": "infraId",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "properties": {
-                    "infra": {
-                      "type": "string"
-                    },
-                    "components": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": true
-                      }
-                    },
-                    "applications": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": true
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/graph/dependencies": {
-      "get": {
-        "summary": "Inverse of /graph/impact — what an Application or Component depends on",
-        "tags": [
-          "Graph"
-        ],
-        "description": "Given an impacted Application or Component, returns the outbound dependency subgraph\nreachable via `:CONNECTS_TO` edges as a depth-aware tree.\n\nWalk semantics:\n- Root is auto-detected. When an Application id is supplied, every contained Component is used as a BFS seed; when a Component id is supplied, that Component is the only seed.\n- Edges followed: any `:CONNECTS_TO` outbound from a seed. This naturally covers Component→Component service calls, Component→Infra `via: component-mapping` deployments, and the transitive Infra→Infra structural chain (VM→NIC→Subnet→VNet on Azure, Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on AWS).\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold, useful for filtering out auto-link suggestions when only structural certainty matters.\n\nEvery node carries its `depth` (1 = direct dependency); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras (protocol, port, role, observed-tcp stats…). Application owners of reached Components are joined back in for context.",
+        "description": "Given an impacted root node, returns the inbound subgraph reachable via\n`:CONNECTS_TO` as a depth-aware tree — every node that *depends on* the root,\ntransitively. This is the symmetric inverse of `/graph/dependencies`.\n\nWalk semantics:\n- Root is auto-detected: Application fans out to contained Components as BFS seeds; Component or Infra seeds itself.\n- Edges followed: any `:CONNECTS_TO` inbound to the frontier. For an Infra root this surfaces every Component deployed on it and every upstream Infra that uses it (a NIC root surfaces the VM, a subnet root surfaces every NIC in it). For a Component root it surfaces every other Component calling it.\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold.\n\nEvery node carries its `depth` (1 = direct dependent); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras. Edges are always presented in the writer-emitted direction (`from` → `to`), not the BFS direction. Reached Components are annotated with their owning Application.",
         "parameters": [
           {
             "schema": {
@@ -2571,7 +2489,7 @@
             "in": "query",
             "name": "id",
             "required": true,
-            "description": "Application or Component id (UUID)."
+            "description": "Root node id (UUID)."
           },
           {
             "schema": {
@@ -2625,16 +2543,16 @@
                         },
                         "label": {
                           "type": "string",
-                          "description": "Application or Component"
+                          "description": "Application, Component, or Infra (Infra is only valid on /graph/impact)."
                         },
                         "name": {
                           "type": "string"
                         }
                       }
                     },
-                    "startComponents": {
+                    "seeds": {
                       "type": "array",
-                      "description": "Components used as BFS seeds. For a Component root this is just the root; for an Application root it is every contained Component.",
+                      "description": "BFS seed nodes. Application root → contained Components; Component root → the Component itself; Infra root (impact only) → the Infra itself.",
                       "items": {
                         "type": "object",
                         "additionalProperties": true
@@ -2642,7 +2560,7 @@
                     },
                     "nodes": {
                       "type": "array",
-                      "description": "Every reachable dependency node, deduped by id, annotated with `depth` (1 = direct dependency).",
+                      "description": "Every reachable node, deduped by id, annotated with `depth` (1 = direct neighbour of a seed).",
                       "items": {
                         "type": "object",
                         "additionalProperties": true
@@ -2650,7 +2568,7 @@
                     },
                     "edges": {
                       "type": "array",
-                      "description": "Every :CONNECTS_TO edge traversed during the walk. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).",
+                      "description": "Every :CONNECTS_TO edge traversed during the walk. Always presented in the writer-emitted direction (`from` → `to`), regardless of BFS direction. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).",
                       "items": {
                         "type": "object",
                         "additionalProperties": true
@@ -2658,7 +2576,7 @@
                     },
                     "truncated": {
                       "type": "boolean",
-                      "description": "True when the BFS hit `nodeCap` before exhausting the reachable subgraph."
+                      "description": "True when the BFS hit `nodeCap` or `maxDepth` before exhausting the reachable subgraph."
                     },
                     "stats": {
                       "type": "object",
@@ -2692,9 +2610,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
                   "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
                     "error": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
                     }
                   }
                 }
@@ -2707,9 +2640,217 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
                   "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
                     "error": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graph/dependencies": {
+      "get": {
+        "summary": "Inverse of /graph/impact — what an Application or Component depends on",
+        "tags": [
+          "Graph"
+        ],
+        "description": "Given an impacted Application or Component, returns the outbound dependency subgraph\nreachable via `:CONNECTS_TO` edges as a depth-aware tree.\n\nWalk semantics:\n- Root is auto-detected. When an Application id is supplied, every contained Component is used as a BFS seed; when a Component id is supplied, that Component is the only seed. Infra ids 404 here — use `/graph/impact` for the inbound direction.\n- Edges followed: any `:CONNECTS_TO` outbound from a seed. This naturally covers Component→Component service calls, Component→Infra `via: component-mapping` deployments, and the transitive Infra→Infra structural chain (VM→NIC→Subnet→VNet on Azure, Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on AWS).\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold, useful for filtering out auto-link suggestions when only structural certainty matters.\n\nEvery node carries its `depth` (1 = direct dependency); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras (protocol, port, role, observed-tcp stats…). Reached Components are annotated with their owning Application.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "description": "Root node id (UUID)."
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 10
+            },
+            "in": "query",
+            "name": "maxDepth",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 500
+            },
+            "in": "query",
+            "name": "nodeCap",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 0
+            },
+            "in": "query",
+            "name": "minConfidence",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "root": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "Application, Component, or Infra (Infra is only valid on /graph/impact)."
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "seeds": {
+                      "type": "array",
+                      "description": "BFS seed nodes. Application root → contained Components; Component root → the Component itself; Infra root (impact only) → the Infra itself.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "description": "Every reachable node, deduped by id, annotated with `depth` (1 = direct neighbour of a seed).",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "description": "Every :CONNECTS_TO edge traversed during the walk. Always presented in the writer-emitted direction (`from` → `to`), regardless of BFS direction. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean",
+                      "description": "True when the BFS hit `nodeCap` or `maxDepth` before exhausting the reachable subgraph."
+                    },
+                    "stats": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "nodesReturned": {
+                          "type": "integer"
+                        },
+                        "edgesReturned": {
+                          "type": "integer"
+                        },
+                        "reachedDepth": {
+                          "type": "integer"
+                        },
+                        "maxDepth": {
+                          "type": "integer"
+                        },
+                        "nodeCap": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
                     }
                   }
                 }
@@ -2793,15 +2934,60 @@
               }
             }
           },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
                   "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
                     "error": {
-                      "type": "string"
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
                     }
                   }
                 }
@@ -7378,7 +7564,7 @@
         "tags": [
           "AI"
         ],
-        "description": "Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
+        "description": "Walks Infra ← Component ← Application directly (a focused 1-hop inbound query, narrower than the polymorphic `/graph/impact` BFS), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
         "parameters": [
           {
             "schema": {

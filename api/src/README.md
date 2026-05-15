@@ -201,7 +201,8 @@ route registrations would produce. CI fails the PR otherwise.
 |---|---|---|
 | GET | `/graph/summary` | Node counts and high-level stats |
 | GET | `/graph/topology` | Application / component / infra topology with connections |
-| GET | `/graph/impact?infraId=id` | What breaks if this infra goes down |
+| GET | `/graph/impact?id=id` | What breaks if this Application, Component, or Infra changes — depth-aware inbound tree |
+| GET | `/graph/dependencies?id=id` | Inverse — what an Application or Component leans on (outbound) |
 | GET | `/graph/snapshots` | List snapshots |
 | POST | `/graph/snapshots` | Create a new snapshot |
 

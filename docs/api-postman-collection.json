@@ -575,7 +575,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": \"string\",\n  \"key_0\": false\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1121,11 +1121,11 @@
           }
         },
         {
-          "name": "Blast-radius for a single Infra resource",
+          "name": "Blast-radius — what is impacted if this Application, Component, or Infra changes",
           "request": {
-            "name": "Blast-radius for a single Infra resource",
+            "name": "Blast-radius — what is impacted if this Application, Component, or Infra changes",
             "description": {
-              "content": "Walks Infra ← Component ← Application and returns every Component / Application that depends on the given Infra. Applications come back sorted by tier (1 = critical first).",
+              "content": "Given an impacted root node, returns the inbound subgraph reachable via\n`:CONNECTS_TO` as a depth-aware tree — every node that *depends on* the root,\ntransitively. This is the symmetric inverse of `/graph/dependencies`.\n\nWalk semantics:\n- Root is auto-detected: Application fans out to contained Components as BFS seeds; Component or Infra seeds itself.\n- Edges followed: any `:CONNECTS_TO` inbound to the frontier. For an Infra root this surfaces every Component deployed on it and every upstream Infra that uses it (a NIC root surfaces the VM, a subnet root surfaces every NIC in it). For a Component root it surfaces every other Component calling it.\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold.\n\nEvery node carries its `depth` (1 = direct dependent); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras. Edges are always presented in the writer-emitted direction (`from` → `to`), not the BFS direction. Reached Components are annotated with their owning Application.",
               "type": "text/plain"
             },
             "url": {
@@ -1139,9 +1139,24 @@
               "query": [
                 {
                   "disabled": false,
-                  "key": "infraId",
-                  "value": "14d7fc7c-44ef-280e-24e4-24c5d0d0810a",
-                  "description": "(Required) "
+                  "key": "id",
+                  "value": "string",
+                  "description": "(Required) Root node id (UUID)."
+                },
+                {
+                  "disabled": false,
+                  "key": "maxDepth",
+                  "value": "10"
+                },
+                {
+                  "disabled": false,
+                  "key": "nodeCap",
+                  "value": "500"
+                },
+                {
+                  "disabled": false,
+                  "key": "minConfidence",
+                  "value": "0"
                 }
               ],
               "variable": []
@@ -1165,7 +1180,7 @@
           "request": {
             "name": "Inverse of /graph/impact — what an Application or Component depends on",
             "description": {
-              "content": "Given an impacted Application or Component, returns the outbound dependency subgraph\nreachable via `:CONNECTS_TO` edges as a depth-aware tree.\n\nWalk semantics:\n- Root is auto-detected. When an Application id is supplied, every contained Component is used as a BFS seed; when a Component id is supplied, that Component is the only seed.\n- Edges followed: any `:CONNECTS_TO` outbound from a seed. This naturally covers Component→Component service calls, Component→Infra `via: component-mapping` deployments, and the transitive Infra→Infra structural chain (VM→NIC→Subnet→VNet on Azure, Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on AWS).\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold, useful for filtering out auto-link suggestions when only structural certainty matters.\n\nEvery node carries its `depth` (1 = direct dependency); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras (protocol, port, role, observed-tcp stats…). Application owners of reached Components are joined back in for context.",
+              "content": "Given an impacted Application or Component, returns the outbound dependency subgraph\nreachable via `:CONNECTS_TO` edges as a depth-aware tree.\n\nWalk semantics:\n- Root is auto-detected. When an Application id is supplied, every contained Component is used as a BFS seed; when a Component id is supplied, that Component is the only seed. Infra ids 404 here — use `/graph/impact` for the inbound direction.\n- Edges followed: any `:CONNECTS_TO` outbound from a seed. This naturally covers Component→Component service calls, Component→Infra `via: component-mapping` deployments, and the transitive Infra→Infra structural chain (VM→NIC→Subnet→VNet on Azure, Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on AWS).\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold, useful for filtering out auto-link suggestions when only structural certainty matters.\n\nEvery node carries its `depth` (1 = direct dependency); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras (protocol, port, role, observed-tcp stats…). Reached Components are annotated with their owning Application.",
               "type": "text/plain"
             },
             "url": {
@@ -1181,7 +1196,7 @@
                   "disabled": false,
                   "key": "id",
                   "value": "string",
-                  "description": "(Required) Application or Component id (UUID)."
+                  "description": "(Required) Root node id (UUID)."
                 },
                 {
                   "disabled": false,
@@ -1366,7 +1381,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 5820,\n  \"key_1\": false,\n  \"key_2\": false,\n  \"key_3\": \"string\"\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 5514.019464608282\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4379,7 +4394,7 @@
           "request": {
             "name": "Plain-English blast-radius narrative for one Infra",
             "description": {
-              "content": "Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
+              "content": "Walks Infra ← Component ← Application directly (a focused 1-hop inbound query, narrower than the polymorphic `/graph/impact` BFS), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
               "type": "text/plain"
             },
             "url": {

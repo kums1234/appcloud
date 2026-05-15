@@ -367,14 +367,16 @@ curl -s -H "X-API-Key: $KEY" "$BASE/graph/topology"
 # Counts by node type / edge type
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/summary"
 
-# Blast-radius for a given Infra node — which Components / Apps depend on it
-curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?infraId=<id>"
+# Blast-radius — given an Application, Component, or Infra, who depends on it?
+# Inbound walk over :CONNECTS_TO, depth-aware tree, full edge contract. For an
+# Infra root this transitively surfaces both the Components deployed on it AND
+# the upstream Infra that uses it (a NIC root surfaces the VM; a subnet root
+# surfaces every NIC in it).
+curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?id=<app-component-or-infra-id>&maxDepth=10&nodeCap=500"
 
 # Inverse of /impact — given an Application or Component, what does it depend on?
-# Returns a depth-aware tree: Component→Component service calls + Component→Infra
-# deployments + transitively chased Infra→Infra structural edges. Each node carries
-# `depth` (1 = direct dep); each edge carries the full :CONNECTS_TO contract
-# (source, via, confidence, evidence). For incident-response drill-down.
+# Outbound walk: Component→Component service calls + Component→Infra deployments
+# + transitively chased Infra→Infra structural edges.
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/dependencies?id=<app-or-component-id>&maxDepth=10&nodeCap=500"
 
 # All cross-application dependencies
@@ -652,8 +654,8 @@ curl -s -X POST -H "X-API-Key: $KEY" "$BASE/discovery/link" \
 ### C) Run impact analysis on a single resource
 
 ```bash
-# Direct
-curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?infraId=<id>"
+# Direct (Application, Component, or Infra id all accepted)
+curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?id=<id>"
 
 # Plain-English narrative (requires AI provider configured)
 curl -s -H "X-API-Key: $KEY" "$BASE/ai/infra/<id>/impact"

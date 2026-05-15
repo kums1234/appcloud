@@ -113,7 +113,7 @@ export default async function aiRoutes(fastify) {
   fastify.get('/infra/:id/impact', {
     schema: {
       summary:     'Plain-English blast-radius narrative for one Infra',
-      description: 'Walks the impact graph (same shape as `/graph/impact`), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.',
+      description: 'Walks Infra ← Component ← Application directly (a focused 1-hop inbound query, narrower than the polymorphic `/graph/impact` BFS), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.',
       params:      { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
       response:    { 200: { type: 'object', additionalProperties: true } },
     },

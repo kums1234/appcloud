@@ -100,7 +100,8 @@ export class AppCloudClient {
   getTopology()             { return this.request('GET', '/graph/topology'); }
   getGraphSummary()         { return this.request('GET', '/graph/summary'); }
   getCrossAppDeps()         { return this.request('GET', '/graph/cross-app-dependencies'); }
-  getImpact(infraId)        { return this.request('GET', `/graph/impact?infraId=${encodeURIComponent(infraId)}`); }
+  getImpact(id)             { return this.request('GET', `/graph/impact?id=${encodeURIComponent(id)}`); }
+  getDependencies(id)       { return this.request('GET', `/graph/dependencies?id=${encodeURIComponent(id)}`); }
 
   // AI assistant chat
   aiStatus()                { return this.request('GET', '/ai/status'); }
