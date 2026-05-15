@@ -60,19 +60,19 @@ const tools = [
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'get_infra_impact',
-    description: 'For a given Application, Component, or Infra id, return every node that depends on it as a depth-aware tree (nodes carry `depth`, edges carry source/via/confidence/evidence). This is the answer to "what breaks if I change this?" Reached Components are annotated with their owning Application for cross-app context.',
+    name: 'get_impact',
+    description: 'For a given Application, Component, or Infra id, return every node that depends on it as a depth-aware tree (nodes carry `depth`, edges carry source/via/confidence/evidence; the response also includes a `rollups` histogram of resource-groups / projects / account-region buckets reached). This is the answer to "what breaks if I change this?" Reached Components are annotated with their owning Application for cross-app context.',
     input_schema: {
       type: 'object',
       properties: {
-        infraId: { type: 'string', description: 'Application, Component, or Infra UUID (the param name is legacy; any of the three is accepted).' },
+        id: { type: 'string', description: 'Application, Component, or Infra UUID' },
       },
-      required: ['infraId'],
+      required: ['id'],
     },
   },
   {
     name: 'get_dependencies',
-    description: 'Inverse of `get_infra_impact`. For a given Application or Component id, returns the outbound dependency subgraph — what this thing leans on. Use for incident drill-down: an impacted service can be expanded into the chain of components, infra deployments, and transitively-chased structural infra it relies on.',
+    description: 'Inverse of `get_impact`. For a given Application or Component id, returns the outbound dependency subgraph — what this thing leans on. Use for incident drill-down: an impacted service can be expanded into the chain of components, infra deployments, and transitively-chased structural infra it relies on.',
     input_schema: {
       type: 'object',
       properties: {
@@ -125,7 +125,7 @@ async function toolHandler(toolName, input) {
     case 'get_graph_summary':         return await api.getGraphSummary();
     case 'list_applications':         return await api.listApplications();
     case 'list_infra':                return await api.listInfra();
-    case 'get_infra_impact':          return await api.getImpact(input.infraId);
+    case 'get_impact':                return await api.getImpact(input.id);
     case 'get_dependencies':          return await api.getDependencies(input.id);
     case 'get_app_dependencies':      return await api.getAppDependencies(input.appId);
     case 'get_app_topology':          return await api.getAppTopology(input.appId);
@@ -153,7 +153,7 @@ export async function runBlastRadiusAgent(context = '', subject = '') {
     userMessage =
       `User asked: ${subject}\n\n` +
       `Use the available tools to answer. Resolve names to ids via list_applications / list_infra ` +
-      `before calling get_infra_impact / get_app_dependencies. Answer in plain English with the ` +
+      `before calling get_impact / get_dependencies / get_app_dependencies. Answer in plain English with the ` +
       `BLAST_RADIUS_RESULT tail.`;
   } else if (context) {
     userMessage =

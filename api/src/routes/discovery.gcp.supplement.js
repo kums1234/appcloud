@@ -32,7 +32,10 @@
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function projectFromCloudId(cid = '') {
+// Exported so utils/cloud-rollup.js can use the same parse the autolink
+// co-location bucket relies on — keeps the "what project is this in"
+// answer consistent across the codebase.
+export function projectFromCloudId(cid = '') {
   // GCP self-links: https://www.googleapis.com/<svc>/<ver>/projects/<id>/...
   // CAI names:     //service.googleapis.com/projects/<id>/...
   const m = (cid || '').match(/\/projects\/([^/]+)\//)

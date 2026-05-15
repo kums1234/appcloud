@@ -2574,6 +2574,25 @@
                         "additionalProperties": true
                       }
                     },
+                    "rollups": {
+                      "type": "array",
+                      "description": "Histogram of per-Infra rollup buckets reached during the walk (Azure resource group / GCP project / AWS account+region). Each entry is `{kind, key, count}`, sorted by count desc. Lets a dashboard or LLM prompt lead with \"this hits N resource groups\" without re-grouping the node list. Every Infra node also carries its own `rollupKind` / `rollupKey` so clients can join individually.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
                     "truncated": {
                       "type": "boolean",
                       "description": "True when the BFS hit `nodeCap` or `maxDepth` before exhausting the reachable subgraph."
@@ -2765,6 +2784,25 @@
                       "items": {
                         "type": "object",
                         "additionalProperties": true
+                      }
+                    },
+                    "rollups": {
+                      "type": "array",
+                      "description": "Histogram of per-Infra rollup buckets reached during the walk (Azure resource group / GCP project / AWS account+region). Each entry is `{kind, key, count}`, sorted by count desc. Lets a dashboard or LLM prompt lead with \"this hits N resource groups\" without re-grouping the node list. Every Infra node also carries its own `rollupKind` / `rollupKey` so clients can join individually.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        }
                       }
                     },
                     "truncated": {
@@ -7564,7 +7602,7 @@
         "tags": [
           "AI"
         ],
-        "description": "Walks Infra ← Component ← Application directly (a focused 1-hop inbound query, narrower than the polymorphic `/graph/impact` BFS), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
+        "description": "Runs the full polymorphic /graph/impact BFS for the supplied Infra (inbound walk, depth-aware, transitively chased up the structural chain), then asks the local LLM to summarise the change risk in one paragraph. Returns the underlying walk result alongside the narrative.",
         "parameters": [
           {
             "schema": {
@@ -7584,6 +7622,36 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "statusCode": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Bad Request"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "infraId required"
+                    }
+                  }
                 }
               }
             }

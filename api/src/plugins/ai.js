@@ -63,17 +63,33 @@ Ordered by confidence descending. Include only candidates where you see a genuin
   }
 }
 
-async function explainImpact(local, infraName, components, apps) {
+async function explainImpact(local, infraName, components, apps, walkContext = {}) {
   const appList  = apps.map(a => `${a.name} (tier ${a.tier || '?'}, env: ${a.environment || '?'})`).join(', ')
-  const compList = components.map(c => `${c.name} (${c.type || 'service'})`).join(', ')
+  // depth is optional and only set when callers feed the polymorphic
+  // bfsWalk result through; older 1-hop callers omit it and the
+  // direct-deployment label is implicit.
+  const compList = components.map(c => {
+    const tag = c.depth ? ` @depth ${c.depth}` : ''
+    return `${c.name} (${c.type || 'service'}${tag})`
+  }).join(', ')
+
+  const rollupNote = (walkContext.rollups || []).length
+    ? `Cross-bucket reach: ${walkContext.rollups.map(r => `${r.key} (${r.count} resources)`).join(', ')}.`
+    : ''
+  const reachedNote = walkContext.reachedDepth
+    ? `Walk reached depth ${walkContext.reachedDepth}${walkContext.truncated ? ' (truncated, more downstream)' : ''}.`
+    : ''
 
   const prompt = `Summarise the business impact if this infrastructure resource became unavailable.
 
 Infrastructure: ${infraName}
-Components deployed on it: ${compList || 'none mapped'}
+Components affected: ${compList || 'none mapped'}
 Applications affected: ${appList || 'none mapped'}
+${reachedNote}
+${rollupNote}
 
 Write 2-3 sentences on likely user/business impact and which teams would be affected.
+Components shown with `@depth N` are reached N hops up the structural chain — call out the difference between directly-deployed (depth 1) and transitively-affected (depth >1) where it matters.
 Be direct — no hedging language.`
 
   const r = await local.chat([
@@ -303,8 +319,8 @@ export async function aiPlugin(fastify) {
       explainMapping(await getLocal(), infra, suggestion),
     scoreMapping: async (infra, apps) =>
       scoreMapping(await getLocal(), infra, apps),
-    explainImpact: async (infraName, comps, apps) =>
-      explainImpact(await getLocal(), infraName, comps, apps),
+    explainImpact: async (infraName, comps, apps, walkContext) =>
+      explainImpact(await getLocal(), infraName, comps, apps, walkContext),
 
     // Cloud helpers — throw 503 if not configured
     planArchitecture: (ctx) =>
@@ -318,7 +334,7 @@ export async function aiPlugin(fastify) {
     safe: {
       explainMapping: safe(async (infra, s) => explainMapping(await getLocal(), infra, s)),
       scoreMapping:   safe(async (infra, apps) => scoreMapping(await getLocal(), infra, apps)),
-      explainImpact:  safe(async (n, c, a) => explainImpact(await getLocal(), n, c, a)),
+      explainImpact:  safe(async (n, c, a, wc) => explainImpact(await getLocal(), n, c, a, wc)),
     },
   })
 

@@ -371,12 +371,15 @@ curl -s -H "X-API-Key: $KEY" "$BASE/graph/summary"
 # Inbound walk over :CONNECTS_TO, depth-aware tree, full edge contract. For an
 # Infra root this transitively surfaces both the Components deployed on it AND
 # the upstream Infra that uses it (a NIC root surfaces the VM; a subnet root
-# surfaces every NIC in it).
+# surfaces every NIC in it). Each Infra node carries `rollupKind` / `rollupKey`
+# (resource-group / GCP project / AWS account+region), and the top-level
+# `rollups` field is a count histogram of those buckets.
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?id=<app-component-or-infra-id>&maxDepth=10&nodeCap=500"
 
 # Inverse of /impact — given an Application or Component, what does it depend on?
 # Outbound walk: Component→Component service calls + Component→Infra deployments
-# + transitively chased Infra→Infra structural edges.
+# + transitively chased Infra→Infra structural edges. Same rollup annotations
+# as /impact, useful for "this app spans N resource groups" dashboards.
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/dependencies?id=<app-or-component-id>&maxDepth=10&nodeCap=500"
 
 # All cross-application dependencies

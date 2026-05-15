@@ -189,6 +189,49 @@ describe('GET /graph/dependencies — nodeCap truncation', () => {
   })
 })
 
+describe('GET /graph/dependencies — Infra rollup annotation', () => {
+  test('every reached Infra node carries rollupKind + rollupKey; response includes rollups histogram', async () => {
+    const comp = node('c-1', 'api', 'Component')
+    const vm = node('inf-vm', 'vm-1', 'Infra', {
+      provider: 'azure',
+      cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-1',
+    })
+    const disk = node('inf-disk', 'disk-1', 'Infra', {
+      provider: 'azure',
+      cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/disk-1',
+    })
+    const subnet = node('inf-subnet', 'subnet-1', 'Infra', {
+      provider: 'azure',
+      cloud_id: '/subscriptions/abc/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-1/subnets/subnet-1',
+    })
+    const rootRecords = [record({ root: comp, lbls: ['Component'], seeds: [comp] })]
+    const layerResponses = [
+      [
+        record({ fromId: 'c-1',    to: vm,     r: rel({ source: 'auto-link',            via: 'component-mapping', confidence: 75, evidence: 'x' }), toLabels: ['Infra'] }),
+      ],
+      [
+        record({ fromId: 'inf-vm', to: disk,   r: rel({ source: 'azure-resource-graph', via: 'disk',              confidence: 80, evidence: 'x' }), toLabels: ['Infra'] }),
+        record({ fromId: 'inf-vm', to: subnet, r: rel({ source: 'azure-resource-graph', via: 'subnet',            confidence: 80, evidence: 'x' }), toLabels: ['Infra'] }),
+      ],
+      [],
+    ]
+    const { fastify } = buildFastify({ rootRecords, layerResponses })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/dependencies?id=c-1' })
+    await fastify.close()
+    const body = JSON.parse(res.body)
+    // Each Infra node carries its rollup bucket
+    expect(body.nodes.find(n => n.id === 'inf-vm')).toMatchObject({   rollupKind: 'azure-resource-group', rollupKey: 'rg-prod' })
+    expect(body.nodes.find(n => n.id === 'inf-disk')).toMatchObject({ rollupKind: 'azure-resource-group', rollupKey: 'rg-prod' })
+    expect(body.nodes.find(n => n.id === 'inf-subnet')).toMatchObject({ rollupKind: 'azure-resource-group', rollupKey: 'rg-network' })
+    // Aggregate histogram — rg-prod has 2 resources, rg-network has 1
+    expect(body.rollups).toEqual([
+      { kind: 'azure-resource-group', key: 'rg-prod',    count: 2 },
+      { kind: 'azure-resource-group', key: 'rg-network', count: 1 },
+    ])
+  })
+})
+
 describe('GET /graph/dependencies — owner Application join-back', () => {
   test('reached Components are annotated with their owning Application', async () => {
     const comp = node('c-1', 'api', 'Component')

@@ -1,6 +1,7 @@
 import neo4j from 'neo4j-driver'
 import { props, serialize } from '../utils/serialize.js'
 import { actorFromReq } from '../utils/audit.js'
+import { rollupForInfra } from '../utils/cloud-rollup.js'
 
 // Neo4j requires `LIMIT $x` parameters to be Integer (not Number).
 // Convert here so route-level params can stay plain JS ints.
@@ -39,7 +40,11 @@ const WALK_QUERYSTRING = {
 // direction — that way an SRE consuming the JSON sees the structural
 // arrow the way the scanner wrote it, not the reverse of however we
 // happened to walk.
-async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, minConfidence }) {
+//
+// Exported so /ai/infra/:id/impact (and any future LLM-narrative
+// endpoints) can run the same walk instead of re-implementing the
+// 1-hop-only Cypher.
+export async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, minConfidence }) {
   const validRootLabels = direction === 'outbound'
     ? '(root:Application OR root:Component)'
     : '(root:Application OR root:Component OR root:Infra)'
@@ -152,11 +157,40 @@ async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, minConfide
     }
   }
 
+  // Per-Infra rollup annotation. Each Infra node carries the
+  // co-location bucket it lives in (Azure resource group, GCP project,
+  // AWS account+region) — the same key the autolink Rule-1 uses. This
+  // is how incident responders ask "show me everything in rg-prod"
+  // without a second query.
+  for (const v of visited.values()) {
+    if (v.label !== 'Infra') continue
+    const rollup = rollupForInfra({
+      provider: v.props.provider,
+      cloud_id: v.props.cloud_id,
+    })
+    if (rollup) {
+      v.props.rollupKind = rollup.kind
+      v.props.rollupKey  = rollup.key
+    }
+  }
+
   const rootProps = props(rootNode)
   const nodes = [...visited.entries()]
     .filter(([, v]) => v.depth > 0)
     .map(([, v]) => ({ ...v.props, label: v.label, depth: v.depth }))
     .sort((a, b) => a.depth - b.depth || (a.name || '').localeCompare(b.name || ''))
+
+  // Aggregate rollup: a quick histogram of buckets reached, so a
+  // dashboard or LLM prompt can lead with "this hits 3 resource groups
+  // and 1 cross-cloud project" without re-grouping the node list.
+  const rollupHist = new Map()
+  for (const n of nodes) {
+    if (!n.rollupKey) continue
+    const k = `${n.rollupKind}::${n.rollupKey}`
+    const prev = rollupHist.get(k)
+    if (prev) prev.count += 1
+    else rollupHist.set(k, { kind: n.rollupKind, key: n.rollupKey, count: 1 })
+  }
 
   return {
     root: {
@@ -168,6 +202,7 @@ async function bfsWalk({ query, rootId, direction, maxDepth, nodeCap, minConfide
     seeds,
     nodes,
     edges,
+    rollups: [...rollupHist.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)),
     truncated,
     stats: {
       nodesReturned: nodes.length,

@@ -60,10 +60,14 @@ maybeDescribe('GET /graph/{dependencies,impact} against real Neo4j (Testcontaine
         (cApi:Component      { id: 'c-api',     name: 'api',     type: 'service' }),
         (cWorker:Component   { id: 'c-worker',  name: 'worker',  type: 'service' }),
         (cBilling:Component  { id: 'c-billing', name: 'billing', type: 'service' }),
-        (vm:Infra            { id: 'inf-vm',     name: 'vm-1',      provider: 'azure', resource_type: 'VirtualMachines' }),
-        (nic:Infra           { id: 'inf-nic',    name: 'vm-1-nic',  provider: 'azure', resource_type: 'NetworkInterfaces' }),
-        (subnet:Infra        { id: 'inf-subnet', name: 'web-subnet',provider: 'azure', resource_type: 'Subnets' }),
-        (disk:Infra          { id: 'inf-disk',   name: 'vm-1-disk', provider: 'azure', resource_type: 'Disks' }),
+        (vm:Infra     { id: 'inf-vm',     name: 'vm-1',       provider: 'azure', resource_type: 'VirtualMachines',
+                        cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-1' }),
+        (nic:Infra    { id: 'inf-nic',    name: 'vm-1-nic',   provider: 'azure', resource_type: 'NetworkInterfaces',
+                        cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/vm-1-nic' }),
+        (subnet:Infra { id: 'inf-subnet', name: 'web-subnet', provider: 'azure', resource_type: 'Subnets',
+                        cloud_id: '/subscriptions/abc/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-1/subnets/web-subnet' }),
+        (disk:Infra   { id: 'inf-disk',   name: 'vm-1-disk',  provider: 'azure', resource_type: 'Disks',
+                        cloud_id: '/subscriptions/abc/resourceGroups/rg-prod/providers/Microsoft.Compute/disks/vm-1-disk' }),
 
         (appPay)-[:CONTAINS]->(cApi),
         (appPay)-[:CONTAINS]->(cWorker),
@@ -142,6 +146,17 @@ maybeDescribe('GET /graph/{dependencies,impact} against real Neo4j (Testcontaine
 
     expect(body.truncated).toBe(false)
     expect(body.stats.reachedDepth).toBe(3)
+
+    // Rollup annotation: every Infra node parsed against its provider
+    // contributes to the histogram. rg-prod hits 3 (vm + nic + disk),
+    // rg-network hits 1 (subnet).
+    expect(body.nodes.find(n => n.id === 'inf-vm')).toMatchObject({
+      rollupKind: 'azure-resource-group', rollupKey: 'rg-prod',
+    })
+    expect(body.rollups).toEqual([
+      { kind: 'azure-resource-group', key: 'rg-prod',    count: 3 },
+      { kind: 'azure-resource-group', key: 'rg-network', count: 1 },
+    ])
   })
 
   test('/graph/impact of an Infra (subnet) walks INBOUND to surface every dependent VM, Component, Application', async () => {

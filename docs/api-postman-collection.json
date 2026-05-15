@@ -575,7 +575,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": 6865\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1381,7 +1381,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 5514.019464608282\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4394,7 +4394,7 @@
           "request": {
             "name": "Plain-English blast-radius narrative for one Infra",
             "description": {
-              "content": "Walks Infra ← Component ← Application directly (a focused 1-hop inbound query, narrower than the polymorphic `/graph/impact` BFS), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.",
+              "content": "Runs the full polymorphic /graph/impact BFS for the supplied Infra (inbound walk, depth-aware, transitively chased up the structural chain), then asks the local LLM to summarise the change risk in one paragraph. Returns the underlying walk result alongside the narrative.",
               "type": "text/plain"
             },
             "url": {

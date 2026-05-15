@@ -422,6 +422,19 @@ export const GraphWalkResponseSchema = {
       description: 'Every :CONNECTS_TO edge traversed during the walk. Always presented in the writer-emitted direction (`from` → `to`), regardless of BFS direction. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).',
       items: { type: 'object', additionalProperties: true },
     },
+    rollups: {
+      type: 'array',
+      description: 'Histogram of per-Infra rollup buckets reached during the walk (Azure resource group / GCP project / AWS account+region). Each entry is `{kind, key, count}`, sorted by count desc. Lets a dashboard or LLM prompt lead with "this hits N resource groups" without re-grouping the node list. Every Infra node also carries its own `rollupKind` / `rollupKey` so clients can join individually.',
+      items: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          kind:  { type: 'string' },
+          key:   { type: 'string' },
+          count: { type: 'integer' },
+        },
+      },
+    },
     truncated: { type: 'boolean', description: 'True when the BFS hit `nodeCap` or `maxDepth` before exhausting the reachable subgraph.' },
     stats: {
       type: 'object',

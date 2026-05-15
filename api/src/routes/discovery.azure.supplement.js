@@ -37,7 +37,10 @@
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function rgFromId(id = '') {
+// Exported so utils/cloud-rollup.js can produce a single source of truth
+// for "this resource lives in resource group X" — same parsing the
+// autolink co-location bucket already uses.
+export function rgFromId(id = '') {
   const parts = id.split('/')
   const idx   = parts.findIndex(p => p.toLowerCase() === 'resourcegroups')
   return idx !== -1 ? parts[idx + 1].toLowerCase() : ''

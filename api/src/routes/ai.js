@@ -3,6 +3,7 @@
 import { props, serialize } from '../utils/serialize.js'
 import { createCloudProviderFromOptions } from '../utils/ai-providers.js'
 import { StandardErrorResponses } from '../schemas/openapi.js'
+import { bfsWalk } from './graph.js'
 
 export default async function aiRoutes(fastify) {
   const { query } = fastify.neo4j
@@ -113,31 +114,60 @@ export default async function aiRoutes(fastify) {
   fastify.get('/infra/:id/impact', {
     schema: {
       summary:     'Plain-English blast-radius narrative for one Infra',
-      description: 'Walks Infra ← Component ← Application directly (a focused 1-hop inbound query, narrower than the polymorphic `/graph/impact` BFS), then asks the local LLM to summarise the change risk in one paragraph. Use this in the impact-review surface.',
+      description: 'Runs the full polymorphic /graph/impact BFS for the supplied Infra (inbound walk, depth-aware, transitively chased up the structural chain), then asks the local LLM to summarise the change risk in one paragraph. Returns the underlying walk result alongside the narrative.',
       params:      { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
-      response:    { 200: { type: 'object', additionalProperties: true } },
+      response:    { 200: { type: 'object', additionalProperties: true }, 404: StandardErrorResponses[404] },
     },
   }, async (req, reply) => {
     const { id } = req.params
 
-    const records = await query(`
-      MATCH (i:Infra {id: $id})
-      OPTIONAL MATCH (c:Component)-[:CONNECTS_TO {via: 'component-mapping'}]->(i)
-      OPTIONAL MATCH (a:Application)-[:CONTAINS]->(c)
-      RETURN i,
-             collect(DISTINCT {name: c.name, type: c.type}) AS components,
-             collect(DISTINCT {name: a.name, tier: a.tier, environment: a.environment, owner: a.owner}) AS applications
-    `, { id })
+    const walk = await bfsWalk({
+      query,
+      rootId:        id,
+      direction:     'inbound',
+      maxDepth:      10,
+      nodeCap:       500,
+      minConfidence: 0,
+    })
+    if (!walk) return reply.notFound('No Application, Component, or Infra with that id')
+    if (walk.root.label !== 'Infra') {
+      return reply.badRequest('Root is not an Infra node — this endpoint narrates Infra blast-radius only')
+    }
 
-    if (!records.length) return reply.notFound('Infra node not found')
-    const r          = records[0]
-    const infraName  = props(r.get('i'))?.name || id
-    const components = serialize(r.get('components')).filter(c => c.name)
-    const apps       = serialize(r.get('applications')).filter(a => a.name)
+    // Project the rich walk into the components/apps shape explainImpact
+    // already accepts. Components carry depth so the LLM can call out
+    // "directly deployed" vs "downstream via NIC at depth 2" instead of
+    // flattening every hop to "deployed on it". Applications are deduped
+    // from owner annotations and tier-sorted for the prompt.
+    const components = walk.nodes
+      .filter(n => n.label === 'Component')
+      .map(n => ({ name: n.name, type: n.type, depth: n.depth }))
+    const appMap = new Map()
+    for (const n of walk.nodes) {
+      if (!n.ownerAppName) continue
+      if (!appMap.has(n.ownerAppId)) {
+        appMap.set(n.ownerAppId, {
+          name:        n.ownerAppName,
+          tier:        n.ownerAppTier,
+          environment: n.environment,
+        })
+      }
+    }
+    const apps = [...appMap.values()].sort((a, b) => (a.tier || 9) - (b.tier || 9))
 
     try {
-      const narrative = await ai.explainImpact(infraName, components, apps)
-      return { infraId: id, infraName, components, applications: apps, narrative, provider: 'ollama', model: ai.local?.model }
+      const narrative = await ai.explainImpact(walk.root.name, components, apps, {
+        reachedDepth: walk.stats.reachedDepth,
+        rollups:      walk.rollups,
+        truncated:    walk.truncated,
+      })
+      return {
+        infraId: id, infraName: walk.root.name,
+        components, applications: apps,
+        rollups:  walk.rollups,
+        stats:    walk.stats,
+        narrative, provider: 'ollama', model: ai.local?.model,
+      }
     } catch (err) {
       return handleAIError(err, reply)
     }
