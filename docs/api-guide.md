@@ -370,6 +370,13 @@ curl -s -H "X-API-Key: $KEY" "$BASE/graph/summary"
 # Blast-radius for a given Infra node — which Components / Apps depend on it
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/impact?infraId=<id>"
 
+# Inverse of /impact — given an Application or Component, what does it depend on?
+# Returns a depth-aware tree: Component→Component service calls + Component→Infra
+# deployments + transitively chased Infra→Infra structural edges. Each node carries
+# `depth` (1 = direct dep); each edge carries the full :CONNECTS_TO contract
+# (source, via, confidence, evidence). For incident-response drill-down.
+curl -s -H "X-API-Key: $KEY" "$BASE/graph/dependencies?id=<app-or-component-id>&maxDepth=10&nodeCap=500"
+
 # All cross-application dependencies
 curl -s -H "X-API-Key: $KEY" "$BASE/graph/cross-app-dependencies"
 

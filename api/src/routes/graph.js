@@ -8,7 +8,16 @@ const neo4jInt = (n) => neo4j.int(n)
 import {
   GraphTopologyResponseSchema,
   GraphImpactResponseSchema,
+  GraphDependenciesResponseSchema,
 } from '../schemas/openapi.js'
+
+// /graph/dependencies defaults. BFS is bounded by both — whichever caps first
+// wins. maxDepth=10 covers realistic structural chains (VM→NIC→Subnet→VNet→…)
+// plus a few service-to-service hops; nodeCap=500 keeps a single response
+// payload reasonable even for a noisy shared resource.
+const DEPS_DEFAULT_MAX_DEPTH = 10
+const DEPS_DEFAULT_NODE_CAP  = 500
+const DEPS_MAX_NODE_CAP      = 5000
 
 export default async function graphRoutes(fastify) {
   const actor = actorFromReq
@@ -161,6 +170,184 @@ export default async function graphRoutes(fastify) {
       infra:                r.get('infra'),
       impactedComponents:   r.get('components'),
       impactedApplications: serialize(r.get('applications')).sort((a,b) => (a.tier||9) - (b.tier||9)),
+    }
+  })
+
+  // GET /graph/dependencies?id=<uuid>&maxDepth=&nodeCap=&minConfidence=
+  fastify.get('/dependencies', {
+    schema: {
+      summary:     'Inverse of /graph/impact — what an Application or Component depends on',
+      description: [
+        'Given an impacted Application or Component, returns the outbound dependency subgraph',
+        'reachable via `:CONNECTS_TO` edges as a depth-aware tree.',
+        '',
+        'Walk semantics:',
+        '- Root is auto-detected. When an Application id is supplied, every contained Component is used as a BFS seed; when a Component id is supplied, that Component is the only seed.',
+        '- Edges followed: any `:CONNECTS_TO` outbound from a seed. This naturally covers Component→Component service calls, Component→Infra `via: component-mapping` deployments, and the transitive Infra→Infra structural chain (VM→NIC→Subnet→VNet on Azure, Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on AWS).',
+        '- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.',
+        '- Optional `minConfidence` skips edges below the threshold, useful for filtering out auto-link suggestions when only structural certainty matters.',
+        '',
+        'Every node carries its `depth` (1 = direct dependency); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras (protocol, port, role, observed-tcp stats…). Application owners of reached Components are joined back in for context.',
+      ].join('\n'),
+      querystring: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id:            { type: 'string', description: 'Application or Component id (UUID).' },
+          maxDepth:      { type: 'integer', minimum: 1, maximum: 20,   default: DEPS_DEFAULT_MAX_DEPTH },
+          nodeCap:       { type: 'integer', minimum: 1, maximum: DEPS_MAX_NODE_CAP, default: DEPS_DEFAULT_NODE_CAP },
+          minConfidence: { type: 'integer', minimum: 0, maximum: 100, default: 0 },
+        },
+      },
+      response: {
+        200: GraphDependenciesResponseSchema,
+        400: { type: 'object', properties: { error: { type: 'string' } } },
+        404: { type: 'object', properties: { error: { type: 'string' } } },
+      },
+    },
+  }, async (req, reply) => {
+    const { id } = req.query
+    const maxDepth      = req.query.maxDepth      ?? DEPS_DEFAULT_MAX_DEPTH
+    const nodeCap       = Math.min(req.query.nodeCap ?? DEPS_DEFAULT_NODE_CAP, DEPS_MAX_NODE_CAP)
+    const minConfidence = req.query.minConfidence ?? 0
+    if (!id) return reply.badRequest('id required')
+
+    // Resolve the root and expand to BFS seeds. Application → contained
+    // Components; Component → itself. Anything else is a 404 — Infra has
+    // /graph/impact (the forward direction), not /dependencies.
+    const rootRecords = await query(`
+      MATCH (root {id: $id})
+      WHERE root:Application OR root:Component
+      OPTIONAL MATCH (root)-[:CONTAINS]->(c:Component)
+      WITH root, labels(root) AS lbls,
+           CASE WHEN root:Application THEN collect(DISTINCT c) ELSE [root] END AS seeds
+      RETURN root, lbls, seeds
+    `, { id })
+    if (!rootRecords.length) {
+      return reply.notFound('No Application or Component with that id (Infra ids use /graph/impact)')
+    }
+
+    const rootNode  = rootRecords[0].get('root')
+    const rootLabels = rootRecords[0].get('lbls') || []
+    const rootLabel = rootLabels.includes('Application') ? 'Application' : 'Component'
+    const seedNodes = rootRecords[0].get('seeds') || []
+    const startComponents = seedNodes.map(n => ({
+      ...props(n),
+    }))
+
+    // BFS frontier — one Cypher round-trip per depth layer. Predictable
+    // cap behaviour, no exponential blow-up from variable-length paths,
+    // and we get to enforce nodeCap mid-layer without truncating
+    // mid-relationship.
+    const visited  = new Map()   // id -> { props, label, depth }
+    const edges    = []
+    const edgeKeys = new Set()
+    let truncated = false
+    let reachedDepth = 0
+
+    // Seed the visited set with the start components themselves at depth 0,
+    // so a seed that's also a downstream dependency doesn't get re-walked.
+    for (const seed of seedNodes) {
+      const sp = props(seed)
+      if (sp?.id) visited.set(sp.id, { props: sp, label: 'Component', depth: 0 })
+    }
+
+    let frontier = seedNodes.map(n => n.properties.id).filter(Boolean)
+
+    for (let depth = 1; depth <= maxDepth && frontier.length; depth++) {
+      if (visited.size >= nodeCap) { truncated = true; break }
+      const records = await query(`
+        UNWIND $fromIds AS fromId
+        MATCH (from {id: fromId})-[r:CONNECTS_TO]->(to)
+        WHERE coalesce(r.confidence, 0) >= $minConfidence
+        RETURN fromId, to, r, labels(to) AS toLabels
+      `, { fromIds: frontier, minConfidence })
+
+      const nextFrontier = []
+      let layerHadHit = false
+      for (const rec of records) {
+        const fromId  = rec.get('fromId')
+        const toNode  = rec.get('to')
+        const edgeRel = rec.get('r')
+        const toLabelsArr = rec.get('toLabels') || []
+        const toProps = props(toNode)
+        const toId    = toProps?.id
+        if (!toId) continue
+        layerHadHit = true
+
+        // Dedup edges on the writer-MERGE key analogue: from/to/via/source.
+        // (Role/role-level grants and per-protocol observed flows stay
+        // distinct as a result, matching how the writers emit them.)
+        const edgeProps = serialize(edgeRel.properties || {})
+        const edgeKey = `${fromId}::${toId}::${edgeProps.via || ''}::${edgeProps.source || ''}::${edgeProps.role || ''}::${edgeProps.protocol || ''}`
+        if (!edgeKeys.has(edgeKey)) {
+          edgeKeys.add(edgeKey)
+          edges.push({ from: fromId, to: toId, ...edgeProps })
+        }
+
+        if (!visited.has(toId)) {
+          const label = toLabelsArr.find(l => ['Application', 'Component', 'Infra'].includes(l)) || toLabelsArr[0] || 'Node'
+          visited.set(toId, { props: toProps, label, depth })
+          reachedDepth = Math.max(reachedDepth, depth)
+          if (visited.size >= nodeCap) { truncated = true; break }
+          // Only Components and Infra propagate the walk — Applications are
+          // join-back metadata, not a BFS frontier.
+          if (label === 'Component' || label === 'Infra') nextFrontier.push(toId)
+        }
+      }
+      if (!layerHadHit) break
+      if (truncated) break
+      frontier = nextFrontier
+    }
+    if (frontier.length && reachedDepth === maxDepth) {
+      // We hit maxDepth and the frontier wasn't empty — more reachable.
+      truncated = true
+    }
+
+    // Join back the owning Application for every reached Component (incident
+    // responders care which app a leaked-in service belongs to).
+    const componentIds = [...visited.entries()]
+      .filter(([, v]) => v.label === 'Component' && v.depth > 0)
+      .map(([id]) => id)
+    if (componentIds.length) {
+      const owners = await query(`
+        UNWIND $ids AS cid
+        MATCH (a:Application)-[:CONTAINS]->(c:Component {id: cid})
+        RETURN cid AS id, a.id AS appId, a.name AS appName, a.tier AS appTier
+      `, { ids: componentIds })
+      for (const o of owners) {
+        const v = visited.get(o.get('id'))
+        if (!v) continue
+        v.props.ownerAppId   = o.get('appId')
+        v.props.ownerAppName = o.get('appName')
+        v.props.ownerAppTier = serialize(o.get('appTier'))
+      }
+    }
+
+    const rootProps = props(rootNode)
+    const nodes = [...visited.entries()]
+      .filter(([, v]) => v.depth > 0)            // exclude seeds from the dependency list
+      .map(([, v]) => ({ ...v.props, label: v.label, depth: v.depth }))
+      .sort((a, b) => a.depth - b.depth || (a.name || '').localeCompare(b.name || ''))
+
+    return {
+      root: {
+        id:    rootProps?.id,
+        label: rootLabel,
+        name:  rootProps?.name,
+        tier:  serialize(rootProps?.tier),
+      },
+      startComponents,
+      nodes,
+      edges,
+      truncated,
+      stats: {
+        nodesReturned: nodes.length,
+        edgesReturned: edges.length,
+        reachedDepth,
+        maxDepth,
+        nodeCap,
+      },
     }
   })
 

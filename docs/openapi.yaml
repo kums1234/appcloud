@@ -1814,6 +1814,155 @@ paths:
                 properties:
                   error:
                     type: string
+  /graph/dependencies:
+    get:
+      summary: Inverse of /graph/impact — what an Application or Component depends on
+      tags:
+        - Graph
+      description: >-
+        Given an impacted Application or Component, returns the outbound
+        dependency subgraph
+
+        reachable via `:CONNECTS_TO` edges as a depth-aware tree.
+
+
+        Walk semantics:
+
+        - Root is auto-detected. When an Application id is supplied, every
+        contained Component is used as a BFS seed; when a Component id is
+        supplied, that Component is the only seed.
+
+        - Edges followed: any `:CONNECTS_TO` outbound from a seed. This
+        naturally covers Component→Component service calls, Component→Infra
+        `via: component-mapping` deployments, and the transitive Infra→Infra
+        structural chain (VM→NIC→Subnet→VNet on Azure,
+        Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on
+        AWS).
+
+        - BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500,
+        max 5000). Whichever fires first sets `truncated: true` in the stats.
+
+        - Optional `minConfidence` skips edges below the threshold, useful for
+        filtering out auto-link suggestions when only structural certainty
+        matters.
+
+
+        Every node carries its `depth` (1 = direct dependency); every edge
+        carries the full `:CONNECTS_TO` property contract (`source`, `via`,
+        `confidence`, `evidence`) plus writer-specific extras (protocol, port,
+        role, observed-tcp stats…). Application owners of reached Components are
+        joined back in for context.
+      parameters:
+        - schema:
+            type: string
+          in: query
+          name: id
+          required: true
+          description: Application or Component id (UUID).
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+          in: query
+          name: maxDepth
+          required: false
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+          in: query
+          name: nodeCap
+          required: false
+        - schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+            default: 0
+          in: query
+          name: minConfidence
+          required: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  root:
+                    type: object
+                    additionalProperties: true
+                    properties:
+                      id:
+                        type: string
+                      label:
+                        type: string
+                        description: Application or Component
+                      name:
+                        type: string
+                  startComponents:
+                    type: array
+                    description: Components used as BFS seeds. For a Component root this is just the
+                      root; for an Application root it is every contained
+                      Component.
+                    items:
+                      type: object
+                      additionalProperties: true
+                  nodes:
+                    type: array
+                    description: Every reachable dependency node, deduped by id, annotated with
+                      `depth` (1 = direct dependency).
+                    items:
+                      type: object
+                      additionalProperties: true
+                  edges:
+                    type: array
+                    description: "Every :CONNECTS_TO edge traversed during the walk. Carries the
+                      full edge contract: source, via, confidence, evidence
+                      (plus any writer-specific extras like
+                      protocol/port/role)."
+                    items:
+                      type: object
+                      additionalProperties: true
+                  truncated:
+                    type: boolean
+                    description: True when the BFS hit `nodeCap` before exhausting the reachable
+                      subgraph.
+                  stats:
+                    type: object
+                    additionalProperties: true
+                    properties:
+                      nodesReturned:
+                        type: integer
+                      edgesReturned:
+                        type: integer
+                      reachedDepth:
+                        type: integer
+                      maxDepth:
+                        type: integer
+                      nodeCap:
+                        type: integer
+        "400":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        "404":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
   /graph/cross-app-dependencies:
     get:
       summary: Every Component → Component edge that crosses an Application boundary

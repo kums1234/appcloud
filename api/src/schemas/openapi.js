@@ -400,6 +400,52 @@ export const GraphImpactResponseSchema = {
   },
 }
 
+// Inverse of /graph/impact — given an Application or Component, return the
+// outbound dependency subgraph (Component→Component, Component→Infra,
+// transitively chased Infra→Infra) as a depth-aware tree.
+export const GraphDependenciesResponseSchema = {
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    root: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        id:    { type: 'string' },
+        label: { type: 'string', description: 'Application or Component' },
+        name:  { type: 'string' },
+      },
+    },
+    startComponents: {
+      type: 'array',
+      description: 'Components used as BFS seeds. For a Component root this is just the root; for an Application root it is every contained Component.',
+      items: { type: 'object', additionalProperties: true },
+    },
+    nodes: {
+      type: 'array',
+      description: 'Every reachable dependency node, deduped by id, annotated with `depth` (1 = direct dependency).',
+      items: { type: 'object', additionalProperties: true },
+    },
+    edges: {
+      type: 'array',
+      description: 'Every :CONNECTS_TO edge traversed during the walk. Carries the full edge contract: source, via, confidence, evidence (plus any writer-specific extras like protocol/port/role).',
+      items: { type: 'object', additionalProperties: true },
+    },
+    truncated: { type: 'boolean', description: 'True when the BFS hit `nodeCap` before exhausting the reachable subgraph.' },
+    stats: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        nodesReturned: { type: 'integer' },
+        edgesReturned: { type: 'integer' },
+        reachedDepth:  { type: 'integer' },
+        maxDepth:      { type: 'integer' },
+        nodeCap:       { type: 'integer' },
+      },
+    },
+  },
+}
+
 // ── Health ───────────────────────────────────────────────────────────────────
 export const HealthResponseSchema = {
   type: 'object',

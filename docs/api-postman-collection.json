@@ -575,7 +575,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": null,\n  \"key_0\": false,\n  \"key_1\": 727.580904494971,\n  \"key_2\": 7717.618327587843,\n  \"key_3\": 3937\n}",
+              "raw": "{\n  \"name\": \"string\",\n  \"type\": \"string\",\n  \"runtime\": \"string\",\n  \"key_0\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1161,6 +1161,61 @@
           }
         },
         {
+          "name": "Inverse of /graph/impact — what an Application or Component depends on",
+          "request": {
+            "name": "Inverse of /graph/impact — what an Application or Component depends on",
+            "description": {
+              "content": "Given an impacted Application or Component, returns the outbound dependency subgraph\nreachable via `:CONNECTS_TO` edges as a depth-aware tree.\n\nWalk semantics:\n- Root is auto-detected. When an Application id is supplied, every contained Component is used as a BFS seed; when a Component id is supplied, that Component is the only seed.\n- Edges followed: any `:CONNECTS_TO` outbound from a seed. This naturally covers Component→Component service calls, Component→Infra `via: component-mapping` deployments, and the transitive Infra→Infra structural chain (VM→NIC→Subnet→VNet on Azure, Compute→Subnet/Network/Disk/SA on GCP, Instance→ENI/VPC/SG/IAM-Role on AWS).\n- BFS is bounded by `maxDepth` (default 10) and `nodeCap` (default 500, max 5000). Whichever fires first sets `truncated: true` in the stats.\n- Optional `minConfidence` skips edges below the threshold, useful for filtering out auto-link suggestions when only structural certainty matters.\n\nEvery node carries its `depth` (1 = direct dependency); every edge carries the full `:CONNECTS_TO` property contract (`source`, `via`, `confidence`, `evidence`) plus writer-specific extras (protocol, port, role, observed-tcp stats…). Application owners of reached Components are joined back in for context.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "graph",
+                "dependencies"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "key": "id",
+                  "value": "string",
+                  "description": "(Required) Application or Component id (UUID)."
+                },
+                {
+                  "disabled": false,
+                  "key": "maxDepth",
+                  "value": "10"
+                },
+                {
+                  "disabled": false,
+                  "key": "nodeCap",
+                  "value": "500"
+                },
+                {
+                  "disabled": false,
+                  "key": "minConfidence",
+                  "value": "0"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
           "name": "Every Component → Component edge that crosses an Application boundary",
           "request": {
             "name": "Every Component → Component edge that crosses an Application boundary",
@@ -1311,7 +1366,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 4514\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 5820,\n  \"key_1\": false,\n  \"key_2\": false,\n  \"key_3\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
