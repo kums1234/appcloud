@@ -19,6 +19,13 @@ Your job:
    M applications, including K Tier-1 apps."), then list affected items with
    tier and environment, then call out any specific concerns (Tier-1 hits,
    public exposure, single-point-of-failure shape).
+4. When the user asks for a "diagram", "picture", "visualisation", "show me",
+   or "draw" — or when the structural fan-out is the actual answer (e.g.
+   "what does payments touch?", "map the impact") — call \`get_visualization\`
+   and embed the returned Mermaid text inside triple-backtick mermaid fences
+   in your reply. The surface (chat / GitHub / runbook) will render it
+   inline. For walks expected to be large, pass \`simplify: 10\` so the
+   diagram stays readable.
 
 Risk framing (use these words consistently):
 - LOW: 0 Tier-1 apps affected, 0 cross-app fan-out, no public-exposed infra in path
@@ -82,6 +89,20 @@ const tools = [
     },
   },
   {
+    name: 'get_visualization',
+    description: 'Render the dependency or impact walk for a node as a Mermaid (default) or DOT diagram. Returns the rendered TEXT — for Mermaid, wrap your reply in ```mermaid fences and the chat surface / GitHub PR / runbook will render the picture inline. Use this when the user asks for "a diagram", "show me", "draw", "visualise", or anytime a structural answer would be clearer as a picture than as a list. For large walks (>50 nodes) pass `simplify` (e.g. 10) to collapse per-app and per-rollup clusters into placeholder nodes so the diagram stays renderable.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:        { type: 'string',  description: 'Application, Component, or Infra UUID' },
+        direction: { type: 'string',  enum: ['outbound', 'inbound'], description: '`outbound` = dependencies; `inbound` = impact. Default: outbound.' },
+        format:    { type: 'string',  enum: ['mermaid', 'dot'],      description: 'Default mermaid — pick that for inline-renderable replies.' },
+        simplify:  { type: 'integer', minimum: 1, description: 'Collapse clusters above this size into a single placeholder. Recommended >=10 when the underlying walk has >50 nodes.' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'get_app_topology',
     description: 'For a given Application id, return its components, internal connections, and deployed infra. Use to describe the surface area of an app before reasoning about a change to it.',
     input_schema: {
@@ -116,6 +137,11 @@ async function toolHandler(toolName, input) {
     case 'list_infra':                return await api.listInfra();
     case 'get_impact':                return await api.getImpact(input.id);
     case 'get_dependencies':          return await api.getDependencies(input.id);
+    case 'get_visualization':         return await api.getVisualization(input.id, {
+                                        direction: input.direction || 'outbound',
+                                        format:    input.format    || 'mermaid',
+                                        ...(input.simplify ? { simplify: input.simplify } : {}),
+                                      });
     case 'get_app_topology':          return await api.getAppTopology(input.appId);
     case 'get_cross_app_dependencies': return await api.getCrossAppDeps();
     case 'get_public_exposed_infra':  return await api.getPublicExposed();

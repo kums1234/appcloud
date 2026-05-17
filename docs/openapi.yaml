@@ -2206,6 +2206,16 @@ paths:
           in: query
           name: minConfidence
           required: false
+        - schema:
+            type: integer
+            minimum: 1
+          in: query
+          name: simplify
+          required: false
+          description: Collapse per-Application and per-rollup-bucket clusters with more
+            than N members into a single placeholder node. Keeps Mermaid
+            renderable on GitHub (which struggles past ~150 nodes) for big
+            walks. Omitted = no simplification.
       responses:
         "200":
           description: Rendered graph text. Content-Type is text/plain.

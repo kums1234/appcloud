@@ -3,7 +3,7 @@ import { props, serialize } from '../utils/serialize.js'
 import { actorFromReq } from '../utils/audit.js'
 import { rollupForInfra } from '../utils/cloud-rollup.js'
 import { bfsWalk, WALK_DEFAULTS } from '../services/graph-walk.js'
-import { toMermaid, toDot } from '../services/graph-visualize.js'
+import { toMermaid, toDot, simplifyWalk } from '../services/graph-visualize.js'
 
 // Neo4j requires `LIMIT $x` parameters to be Integer (not Number).
 // Convert here so route-level params can stay plain JS ints.
@@ -282,6 +282,7 @@ export default async function graphRoutes(fastify) {
           maxDepth:      { type: 'integer', minimum: 1, maximum: 20,   default: WALK_DEFAULTS.maxDepth },
           nodeCap:       { type: 'integer', minimum: 1, maximum: WALK_DEFAULTS.maxNodeCap, default: WALK_DEFAULTS.nodeCap },
           minConfidence: { type: 'integer', minimum: 0, maximum: 100, default: 0 },
+          simplify:      { type: 'integer', minimum: 1, description: 'Collapse per-Application and per-rollup-bucket clusters with more than N members into a single placeholder node. Keeps Mermaid renderable on GitHub (which struggles past ~150 nodes) for big walks. Omitted = no simplification.' },
         },
       },
       response: {
@@ -296,7 +297,7 @@ export default async function graphRoutes(fastify) {
     const format    = req.query.format    ?? 'mermaid'
     if (!id) return reply.badRequest('id required')
 
-    const result = await bfsWalk({
+    const walk = await bfsWalk({
       query,
       rootId:        id,
       direction,
@@ -304,11 +305,12 @@ export default async function graphRoutes(fastify) {
       nodeCap:       Math.min(req.query.nodeCap ?? WALK_DEFAULTS.nodeCap, WALK_DEFAULTS.maxNodeCap),
       minConfidence: req.query.minConfidence  ?? 0,
     })
-    if (!result) {
+    if (!walk) {
       return reply.notFound(direction === 'outbound'
         ? 'No Application or Component with that id (Infra ids use direction=inbound)'
         : 'No Application, Component, or Infra with that id')
     }
+    const result = req.query.simplify ? simplifyWalk(walk, { collapseAt: req.query.simplify }) : walk
     const text = format === 'dot' ? toDot(result, { direction }) : toMermaid(result, { direction })
     reply.type('text/plain; charset=utf-8')
     return text

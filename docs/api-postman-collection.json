@@ -1236,6 +1236,12 @@
                   "disabled": false,
                   "key": "minConfidence",
                   "value": "0"
+                },
+                {
+                  "disabled": false,
+                  "key": "simplify",
+                  "value": "1428",
+                  "description": "Collapse per-Application and per-rollup-bucket clusters with more than N members into a single placeholder node. Keeps Mermaid renderable on GitHub (which struggles past ~150 nodes) for big walks. Omitted = no simplification."
                 }
               ],
               "variable": []
@@ -1405,7 +1411,7 @@
             "auth": null,
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": 6563\n}",
+              "raw": "{\n  \"label\": \"string\",\n  \"name\": \"string\",\n  \"key_0\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

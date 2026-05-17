@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
-import { toMermaid, toDot } from '../graph-visualize.js'
+import { toMermaid, toDot, simplifyWalk } from '../graph-visualize.js'
 
 // Unit coverage for the two renderers (Mermaid + DOT). The job is
 // "given a bfsWalk-shaped result, produce a string that a renderer
@@ -178,5 +178,138 @@ describe('toDot', () => {
     const out = toDot(sampleWalk(), { direction: 'inbound' })
     expect(out).toMatch(/^digraph appcloud_inbound \{/)
     expect(out).toMatch(/Impact walk/)
+  })
+})
+
+// ── simplifyWalk ─────────────────────────────────────────────────────────────
+
+// Builds a walk where one Application (billing-app) has K downstream
+// Components reached, and one rollup bucket has M Infra. Used to verify
+// collapse thresholds and edge dedup.
+function bigFanWalk({ k = 20, m = 8 } = {}) {
+  const seedComp = { id: 'c-root', name: 'root', type: 'service' }
+  const downstreamComps = Array.from({ length: k }, (_, i) => ({
+    id: `c-bil-${i}`, name: `bil-${i}`, label: 'Component', depth: 1,
+    ownerAppId: 'app-billing', ownerAppName: 'billing-app', ownerAppTier: 2,
+  }))
+  const fatRollupInfra = Array.from({ length: m }, (_, i) => ({
+    id: `inf-fat-${i}`, name: `fat-${i}`, label: 'Infra', provider: 'azure', depth: 1,
+    rollupKind: 'azure-resource-group', rollupKey: 'rg-prod',
+  }))
+  return {
+    root: { id: 'app-root', label: 'Application', name: 'root-app', tier: 1 },
+    seeds: [seedComp],
+    nodes: [...downstreamComps, ...fatRollupInfra],
+    edges: [
+      ...downstreamComps.map(c => ({ from: 'c-root', to: c.id, via: 'otel-http' })),
+      ...fatRollupInfra.map(i => ({ from: 'c-root', to: i.id, via: 'component-mapping' })),
+    ],
+    rollups: [{ kind: 'azure-resource-group', key: 'rg-prod', count: m }],
+    truncated: false,
+    stats: { nodesReturned: k + m, edgesReturned: k + m, reachedDepth: 1, maxDepth: 10, nodeCap: 500 },
+  }
+}
+
+describe('simplifyWalk', () => {
+  test('passes through unchanged when no cluster exceeds collapseAt', () => {
+    const walk = bigFanWalk({ k: 3, m: 3 })
+    const out = simplifyWalk(walk, { collapseAt: 10 })
+    expect(out).toBe(walk)
+  })
+
+  test('omitting collapseAt is a no-op', () => {
+    const walk = bigFanWalk()
+    expect(simplifyWalk(walk)).toBe(walk)
+  })
+
+  test('collapses an over-cap Application cluster into a placeholder Component', () => {
+    const walk = bigFanWalk({ k: 20, m: 3 })
+    const out = simplifyWalk(walk, { collapseAt: 5 })
+    // 20 c-bil-* nodes folded into one placeholder; 3 fat infra stay.
+    const placeholder = out.nodes.find(n => n._collapsed && n.ownerAppId === 'app-billing')
+    expect(placeholder).toMatchObject({
+      label:        'Component',
+      _memberCount: 20,
+      ownerAppId:   'app-billing',
+      ownerAppName: 'billing-app',
+      ownerAppTier: 2,
+    })
+    expect(placeholder.name).toMatch(/billing-app \(20 components\)/)
+    // Originals are gone.
+    expect(out.nodes.filter(n => n.id?.startsWith('c-bil-'))).toEqual([])
+    // The 3 below-threshold infra survive un-collapsed.
+    expect(out.nodes.filter(n => n.label === 'Infra').length).toBe(3)
+  })
+
+  test('collapses an over-cap rollup bucket into a placeholder Infra', () => {
+    const walk = bigFanWalk({ k: 3, m: 20 })
+    const out = simplifyWalk(walk, { collapseAt: 5 })
+    const placeholder = out.nodes.find(n => n._collapsed && n.rollupKey === 'rg-prod')
+    expect(placeholder).toMatchObject({
+      label:        'Infra',
+      _memberCount: 20,
+      rollupKind:   'azure-resource-group',
+      rollupKey:    'rg-prod',
+      provider:     'azure',
+    })
+    expect(placeholder.name).toMatch(/rg-prod \(20 resources\)/)
+    expect(out.nodes.filter(n => n.id?.startsWith('inf-fat-'))).toEqual([])
+  })
+
+  test('edges across the collapse boundary dedup to one labelled `via × N`', () => {
+    const walk = bigFanWalk({ k: 20, m: 3 })
+    const out = simplifyWalk(walk, { collapseAt: 5 })
+    // All 20 c-root → c-bil-* otel-http edges should fold into a
+    // single edge pointing at the placeholder.
+    const placeholderId = out.nodes.find(n => n._collapsed && n.ownerAppId === 'app-billing').id
+    const placeholderEdges = out.edges.filter(e => e.to === placeholderId)
+    expect(placeholderEdges.length).toBe(1)
+    expect(placeholderEdges[0]).toMatchObject({
+      from: 'c-root',
+      to:   placeholderId,
+      via:  'otel-http × 20',
+    })
+  })
+
+  test('stats are updated (simplified=true, collapseAt echoed, counts refreshed)', () => {
+    const walk = bigFanWalk({ k: 20, m: 3 })
+    const out = simplifyWalk(walk, { collapseAt: 5 })
+    expect(out.stats).toMatchObject({
+      simplified:    true,
+      collapseAt:    5,
+      nodesReturned: out.nodes.length,
+      edgesReturned: out.edges.length,
+    })
+  })
+
+  test('seeds are never collapsed — user always sees what they asked about', () => {
+    // Root app has many seeds; collapseAt is very low. Seeds survive.
+    const seeds = Array.from({ length: 20 }, (_, i) => ({ id: `c-seed-${i}`, name: `seed-${i}`, type: 'service' }))
+    const walk = {
+      root: { id: 'app-root', label: 'Application', name: 'root-app', tier: 1 },
+      seeds,
+      nodes: [],
+      edges: [],
+      rollups: [],
+      truncated: false,
+      stats: { nodesReturned: 0, edgesReturned: 0, reachedDepth: 0, maxDepth: 10, nodeCap: 500 },
+    }
+    const out = simplifyWalk(walk, { collapseAt: 2 })
+    // Seeds are still seeds in the walk; nothing collapsed because
+    // there were no non-seed Components.
+    expect(out.seeds.length).toBe(20)
+    expect(out.nodes).toEqual([])
+  })
+
+  test('renders cleanly through toMermaid after simplification', () => {
+    const walk = bigFanWalk({ k: 30, m: 8 })
+    const simplified = simplifyWalk(walk, { collapseAt: 6 })
+    const out = toMermaid(simplified, { direction: 'outbound' })
+    // Just sanity — header + the placeholder shows up + the dedup label
+    expect(out).toMatch(/^flowchart LR$/m)
+    expect(out).toMatch(/billing-app \(30 components\)/)
+    expect(out).toMatch(/rg-prod \(8 resources\)/)
+    expect(out).toMatch(/otel-http × 30/)
+    expect(out).toMatch(/component-mapping × 8/)
   })
 })

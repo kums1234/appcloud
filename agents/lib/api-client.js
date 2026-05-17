@@ -103,6 +103,14 @@ export class AppCloudClient {
   getCrossAppDeps()         { return this.request('GET', '/graph/cross-app-dependencies'); }
   getImpact(id)             { return this.request('GET', `/graph/impact?id=${encodeURIComponent(id)}`); }
   getDependencies(id)       { return this.request('GET', `/graph/dependencies?id=${encodeURIComponent(id)}`); }
+  // Mermaid/DOT visualization. Returns the raw rendered text (the
+  // server replies text/plain; the request() helper falls back to text
+  // when JSON.parse fails). opts: { direction='outbound'|'inbound',
+  // format='mermaid'|'dot', simplify=<N|undefined> }.
+  getVisualization(id, opts = {}) {
+    const qs = new URLSearchParams({ id, ...opts }).toString()
+    return this.request('GET', `/graph/visualize?${qs}`)
+  }
 
   // AI assistant chat
   aiStatus()                { return this.request('GET', '/ai/status'); }

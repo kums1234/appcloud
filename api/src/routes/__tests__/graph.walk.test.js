@@ -202,6 +202,37 @@ describe('GET /graph/visualize — route-level', () => {
     expect(res.body).toMatch(/^digraph appcloud_outbound \{/)
   })
 
+  test('simplify=N folds over-cap clusters into placeholder nodes', async () => {
+    // Build a 12-component cross-app fan-in so simplify=5 should
+    // collapse them into a placeholder named "billing (12 components)".
+    const comp = node('c-root', 'api', 'Component')
+    const remote = (i) => ({
+      properties: { id: `c-bil-${i}`, name: `bil-${i}` },
+      labels:     ['Component'],
+    })
+    const layer1 = Array.from({ length: 12 }, (_, i) => record({
+      fromId: 'c-root', to: remote(i),
+      r: rel({ source: 'otel', via: 'otel-http', confidence: 80, evidence: 'observed' }),
+      toLabels: ['Component'],
+    }))
+    const ownerRecords = Array.from({ length: 12 }, (_, i) => record({
+      id: `c-bil-${i}`, appId: 'app-billing', appName: 'billing', appTier: 2,
+    }))
+    const { fastify } = buildFastify({
+      rootRecords: [record({ root: comp, lbls: ['Component'], seeds: [comp] })],
+      layerResponses: [layer1, []],
+      ownerRecords,
+    })
+    await fastify.ready()
+    const res = await fastify.inject({ method: 'GET', url: '/graph/visualize?id=c-root&simplify=5' })
+    await fastify.close()
+    expect(res.statusCode).toBe(200)
+    // Placeholder shows up in the rendered Mermaid
+    expect(res.body).toMatch(/billing \(12 components\)/)
+    // Edge dedup label
+    expect(res.body).toMatch(/otel-http × 12/)
+  })
+
   test('direction=inbound routes through the impact walk', async () => {
     const inf = node('inf-1', 'subnet-1', 'Infra')
     const { fastify, query } = buildFastify({

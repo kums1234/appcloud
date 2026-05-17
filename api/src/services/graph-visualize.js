@@ -16,6 +16,13 @@
 //   - Rollup buckets shown as clusters when more than one Infra in the
 //     same bucket is reached (Mermaid: subgraph; DOT: cluster)
 //
+// `simplifyWalk(walk, { collapseAt })` pre-processes the walk to
+// collapse over-large clusters into single placeholder nodes — GitHub
+// Mermaid struggles past ~150 nodes, so callers pass `?simplify=10`
+// (or whatever) to fold high-cardinality app/rollup groups into a
+// "N components" placeholder. Edges across collapsed boundaries dedup
+// to one labelled `via × N`.
+//
 // Sanitisation: Mermaid identifiers can't contain dashes or dots, and
 // DOT identifiers need quoting when they do. Both renderers below
 // generate stable safe ids from the node's UUID/cloud_id.
@@ -27,6 +34,130 @@ const COMP_STROKE = '#f57c00'
 const INFRA_FILL  = '#e8f5e9'
 const INFRA_STROKE= '#388e3c'
 const ROOT_STROKE = '#c2185b'
+
+// ── Simplify (collapse over-large clusters) ──────────────────────────────────
+
+/**
+ * Pre-process a bfsWalk result so per-Application and per-rollup
+ * clusters with more than `collapseAt` members fold into a single
+ * placeholder node. Edges that crossed the cluster boundary collapse
+ * to one labelled `via × N`; edges fully inside a collapsed cluster
+ * are dropped (they live inside the placeholder by implication).
+ *
+ * Seeds, the root, and clusters at or below the threshold pass
+ * through untouched, so a "simplified" walk renders identically to a
+ * raw walk when nothing exceeds the cap.
+ *
+ * @param {object} walk - bfsWalk result
+ * @param {{ collapseAt?: number }} opts
+ * @returns {object} walk-shaped object suitable for toMermaid / toDot
+ */
+export function simplifyWalk(walk, { collapseAt = Infinity } = {}) {
+  if (!Number.isFinite(collapseAt) || collapseAt <= 0) return walk
+
+  // Find clusters that exceed collapseAt. A "cluster" is either an
+  // owning Application (for non-seed Components — seeds are always
+  // preserved so the user sees what they asked about) or a rollup
+  // bucket (for Infra). We do NOT collapse the root Application's
+  // own component group — seeds shouldn't disappear from their own
+  // diagram.
+  const seedIds = new Set(walk.seeds.map(s => s.id))
+  const appGroupSize    = new Map()   // appId -> count of NON-seed reached Components
+  const rollupGroupSize = new Map()   // rollupKey -> count of reached Infra
+  for (const n of walk.nodes) {
+    if (n.label === 'Component' && n.ownerAppId && !seedIds.has(n.id)) {
+      appGroupSize.set(n.ownerAppId, (appGroupSize.get(n.ownerAppId) || 0) + 1)
+    } else if (n.label === 'Infra' && n.rollupKey) {
+      const k = `${n.rollupKind}::${n.rollupKey}`
+      rollupGroupSize.set(k, (rollupGroupSize.get(k) || 0) + 1)
+    }
+  }
+  const collapsedApps    = new Map()  // appId -> placeholder node
+  const collapsedRollups = new Map()  // rollupKey -> placeholder node
+  for (const [appId, n] of appGroupSize) {
+    if (n <= collapseAt) continue
+    // Use one of the cluster's members for the app metadata (any will
+    // do — they all carry the same ownerApp* annotations).
+    const sample = walk.nodes.find(x => x.ownerAppId === appId && !seedIds.has(x.id))
+    const placeholderId = `__collapsed_app__${appId}`
+    collapsedApps.set(appId, {
+      id:           placeholderId,
+      name:         `${sample.ownerAppName || appId} (${n} components)`,
+      label:        'Component',
+      depth:        Math.min(...walk.nodes.filter(x => x.ownerAppId === appId && !seedIds.has(x.id)).map(x => x.depth || 1)),
+      ownerAppId:   appId,
+      ownerAppName: sample.ownerAppName,
+      ownerAppTier: sample.ownerAppTier,
+      _collapsed:   true,
+      _memberCount: n,
+    })
+  }
+  for (const [rollupKey, n] of rollupGroupSize) {
+    if (n <= collapseAt) continue
+    const sample = walk.nodes.find(x => x.label === 'Infra' && x.rollupKey && `${x.rollupKind}::${x.rollupKey}` === rollupKey)
+    const placeholderId = `__collapsed_rollup__${rollupKey}`
+    collapsedRollups.set(rollupKey, {
+      id:           placeholderId,
+      name:         `${sample.rollupKey} (${n} resources)`,
+      label:        'Infra',
+      depth:        Math.min(...walk.nodes.filter(x => x.label === 'Infra' && `${x.rollupKind}::${x.rollupKey}` === rollupKey).map(x => x.depth || 1)),
+      provider:     sample.provider,
+      rollupKind:   sample.rollupKind,
+      rollupKey:    sample.rollupKey,
+      _collapsed:   true,
+      _memberCount: n,
+    })
+  }
+  if (!collapsedApps.size && !collapsedRollups.size) return walk
+
+  // Build id → placeholder map for fast edge rewriting.
+  const remap = new Map()
+  for (const n of walk.nodes) {
+    if (n.label === 'Component' && n.ownerAppId && collapsedApps.has(n.ownerAppId) && !seedIds.has(n.id)) {
+      remap.set(n.id, collapsedApps.get(n.ownerAppId).id)
+    } else if (n.label === 'Infra' && n.rollupKey) {
+      const k = `${n.rollupKind}::${n.rollupKey}`
+      if (collapsedRollups.has(k)) remap.set(n.id, collapsedRollups.get(k).id)
+    }
+  }
+
+  const filteredNodes = walk.nodes.filter(n => !remap.has(n.id))
+  const nodes = [...filteredNodes, ...collapsedApps.values(), ...collapsedRollups.values()]
+    .sort((a, b) => (a.depth || 0) - (b.depth || 0) || (a.name || '').localeCompare(b.name || ''))
+
+  // Edge dedup with `via × N` labelling for cross-boundary collapsed
+  // edges. Self-edges inside a collapsed cluster get dropped — the
+  // count tells the reader there's internal structure.
+  const edgeAgg = new Map()  // key -> { from, to, via, count }
+  for (const e of walk.edges) {
+    const from = remap.get(e.from) || e.from
+    const to   = remap.get(e.to)   || e.to
+    if (from === to) continue  // self-loop inside a collapsed cluster
+    const k = `${from}::${to}::${e.via || ''}`
+    const prev = edgeAgg.get(k)
+    if (prev) prev.count += 1
+    else      edgeAgg.set(k, { ...e, from, to, count: 1 })
+  }
+  const edges = [...edgeAgg.values()].map(e => {
+    const out = { ...e }
+    if (e.count > 1) out.via = `${e.via || ''} × ${e.count}`
+    delete out.count
+    return out
+  })
+
+  return {
+    ...walk,
+    nodes,
+    edges,
+    stats: {
+      ...walk.stats,
+      nodesReturned: nodes.length,
+      edgesReturned: edges.length,
+      simplified:    true,
+      collapseAt,
+    },
+  }
+}
 
 const safeMermaidId = (id) => `n_${String(id).replace(/[^a-zA-Z0-9]/g, '_')}`
 const escapeMermaidLabel = (s = '') => String(s).replace(/"/g, '#quot;').replace(/[<>]/g, '')
